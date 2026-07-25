@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -b && vite build",
     "dev": "vite --host 0.0.0.0",
-    "start": "vite preview --host 0.0.0.0 --port ${PORT:-4173}",
+    "start": "sirv dist --single --host 0.0.0.0 --port ${PORT:-4173}",
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:integration": "vitest run integration --passWithNoTests",
@@ -15,6 +15,7 @@
   "dependencies": {
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "sirv-cli": "3.0.1",
     "zod": "4.4.3"
   },
   "devDependencies": {
@@ -24,7 +25,7 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.4",
     "jsdom": "29.1.1",
-    "typescript": "7.0.2",
+    "typescript": "6.0.3",
     "vite": "8.1.5",
     "vitest": "4.1.10"
   }

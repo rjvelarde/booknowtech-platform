@@ -1,6 +1,8 @@
 packages:
   - apps/*
 
+strictPeerDependencies: true
+
 allowBuilds:
   esbuild: true
 

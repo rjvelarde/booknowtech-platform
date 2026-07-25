@@ -16,6 +16,10 @@ Create three Railway services from the same GitHub repository and keep the repos
 
 Set each service's Railway config file path to the corresponding file. Do not create a production environment from this runbook.
 
+The PR 1 API uses a **Railway staging-only public HTTPS URL** so the documented smoke script can run from GitHub Actions or an engineer's approved workstation. No production domain or production traffic is attached. The staging API exposes only `/health/live`, `/health/ready`, `/api/v1/version`, and, when enabled, the non-production `/documentation/openapi.json`; every other route returns not found. Railway private networking may replace this only through a later approved infrastructure change that also provides an internal smoke runner.
+
+Vite builds the frontend into `apps/frontend/dist`. The staging service runs pinned `sirv-cli` against those generated assets, binds to Railway's `PORT` on `0.0.0.0`, and enables SPA fallback. Vite's development and preview servers are not used in staging.
+
 ## Variables
 
 Use Railway variables or secret references. Never paste values into source, build arguments, screenshots, tickets, or logs.
