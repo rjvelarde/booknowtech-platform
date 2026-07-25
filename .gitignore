@@ -1,0 +1,27 @@
+# Dependencies and generated output
+node_modules/
+dist/
+coverage/
+.vite/
+*.tsbuildinfo
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Logs and editor/OS state
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# Test and deployment state
+.railway/
+.nyc_output/
+playwright-report/
+test-results/

@@ -1,0 +1,36 @@
+{
+  "name": "booknowtech-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BookNowTech independent booking platform",
+  "engines": {
+    "node": "24.18.0",
+    "pnpm": "11.17.0"
+  },
+  "packageManager": "pnpm@11.17.0",
+  "scripts": {
+    "build": "pnpm --recursive --if-present run build",
+    "build:frontend": "pnpm --filter @booknowtech/frontend build",
+    "build:api": "pnpm --filter @booknowtech/api build",
+    "build:worker": "pnpm --filter @booknowtech/worker build",
+    "dev": "concurrently -n frontend,api,worker -c blue,green,magenta \"pnpm --filter @booknowtech/frontend dev\" \"pnpm --filter @booknowtech/api dev\" \"pnpm --filter @booknowtech/worker dev\"",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "pnpm --recursive --if-present run typecheck",
+    "test": "pnpm --recursive --if-present run test",
+    "test:unit": "pnpm --recursive --if-present run test:unit",
+    "test:integration": "pnpm --recursive --if-present run test:integration",
+    "audit": "pnpm audit --audit-level=high",
+    "verify:frontend-env": "node scripts/check-frontend-bundle.mjs",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "concurrently": "10.0.4",
+    "eslint": "10.0.1",
+    "globals": "17.7.0",
+    "prettier": "3.9.6",
+    "typescript-eslint": "8.65.0"
+  }
+}

@@ -1,0 +1,10 @@
+packages:
+  - apps/*
+
+allowBuilds:
+  esbuild: true
+
+minimumReleaseAge: 1440
+
+minimumReleaseAgeExclude:
+  - '@booknowtech/*'
