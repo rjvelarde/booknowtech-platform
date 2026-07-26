@@ -69,7 +69,56 @@ describe('Business Hub', () => {
     expect(await screen.findByRole('heading', { name: 'Harbor Demo' })).toBeInTheDocument();
     expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/auth/login');
   });
+
+  it('signs out without declaring an empty JSON body', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { data: activeSession() }))
+      .mockResolvedValueOnce(jsonResponse(204, null));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+
+    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument();
+    const logoutRequest = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    expect(logoutRequest.body).toBeUndefined();
+    expect(logoutRequest.headers).not.toHaveProperty('content-type');
+  });
+
+  it('keeps the authenticated shell visible when sign out fails', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { data: activeSession() }))
+      .mockResolvedValueOnce(jsonResponse(500, { error: { code: 'internal_error' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to sign out');
+    expect(screen.getByRole('heading', { name: 'Harbor Demo' })).toBeInTheDocument();
+  });
 });
+
+function activeSession() {
+  return {
+    user: { public_id: 'user', display_name: 'Owner' },
+    active_tenant: {
+      public_id: 'tenant',
+      display_name: 'Harbor Demo',
+      role: 'tenant_owner',
+    },
+    memberships: [
+      {
+        public_id: 'membership',
+        role: 'tenant_owner',
+        tenant: { public_id: 'tenant', display_name: 'Harbor Demo' },
+      },
+    ],
+    csrf_token: 'csrf',
+  };
+}
 
 function jsonResponse(status: number, body: unknown): Response {
   return {

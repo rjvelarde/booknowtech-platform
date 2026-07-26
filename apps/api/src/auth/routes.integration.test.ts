@@ -74,6 +74,40 @@ describe('administrative authentication routes', () => {
     expect(response.body).not.toContain('attacker-tenant');
     await app.close();
   });
+
+  it('revokes the session, audits logout, and clears the host-only cookie', async () => {
+    const store = Object.create(AdminStore.prototype) as AdminStore;
+    const context = contextFixture(new ObjectId());
+    vi.spyOn(store, 'hydrateSession').mockResolvedValue(context);
+    vi.spyOn(store, 'verifyCsrf').mockReturnValue(true);
+    const revokeSession = vi.spyOn(store, 'revokeSession').mockResolvedValue({});
+    const audit = vi.spyOn(store, 'audit').mockResolvedValue();
+    const app = await buildApplication({
+      environment: { ...testEnvironment, TENANT_ADMIN_ENABLED: true },
+      readiness: new StubReadinessProbe(),
+      adminStore: store,
+      logger: false,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout',
+      headers: {
+        origin: testEnvironment.ADMIN_ORIGIN,
+        cookie: '__Host-bnt_admin_session=session-token',
+        'x-csrf-token': 'csrf-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers['set-cookie']).toContain('__Host-bnt_admin_session=;');
+    expect(response.headers['set-cookie']).toContain('Max-Age=0; Secure; HttpOnly; SameSite=Lax');
+    expect(revokeSession).toHaveBeenCalledWith(context.session, 'logout');
+    expect(audit).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'admin_logout', outcome: 'success' }),
+    );
+    await app.close();
+  });
 });
 
 function contextFixture(userId: ObjectId): VerifiedAdminContext {

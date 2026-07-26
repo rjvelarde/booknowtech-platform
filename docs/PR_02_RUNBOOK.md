@@ -6,7 +6,7 @@ PR 2 is internal, nonproduction staging only. The Railway environment currently 
 
 - Temporary administrative origin: `https://booknowtechfrontend-production.up.railway.app`
 - Browser API base in every environment: `/api`
-- Railway private API origin: `http://booknowtechapi.railway.internal:3000`
+- Railway private API origin: `http://booknowtechapi.railway.internal:8080`
 - The frontend Caddy service owns the public hostname, serves Vite assets, and proxies `/api/*` privately.
 
 ## Variables
@@ -15,7 +15,7 @@ Frontend:
 
 ```text
 VITE_API_BASE_URL=/api
-API_PRIVATE_ORIGIN=http://booknowtechapi.railway.internal:3000
+API_PRIVATE_ORIGIN=http://booknowtechapi.railway.internal:8080
 ```
 
 API additions/changes:

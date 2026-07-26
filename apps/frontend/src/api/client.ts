@@ -58,7 +58,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     credentials: 'same-origin',
     headers: {
       accept: 'application/json',
-      'content-type': 'application/json',
+      ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
       'x-request-id': crypto.randomUUID(),
       ...init.headers,
     },

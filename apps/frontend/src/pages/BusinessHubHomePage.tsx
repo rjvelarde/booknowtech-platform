@@ -3,6 +3,7 @@ import type { AdminSessionView } from '../api/client.js';
 interface BusinessHubHomePageProps {
   session: AdminSessionView;
   busy: boolean;
+  error: string | null;
   onSwitch: () => void;
   onLogout: () => Promise<void>;
 }
@@ -10,6 +11,7 @@ interface BusinessHubHomePageProps {
 export function BusinessHubHomePage({
   session,
   busy,
+  error,
   onSwitch,
   onLogout,
 }: BusinessHubHomePageProps) {
@@ -31,6 +33,11 @@ export function BusinessHubHomePage({
         <p className="status-copy">
           Signed in as {session.user.display_name} · {tenant.role.replaceAll('_', ' ')}
         </p>
+        {error ? (
+          <p className="form-error" role="alert">
+            Unable to sign out. Please try again.
+          </p>
+        ) : null}
         {session.memberships.length > 1 ? (
           <button type="button" className="secondary-button" onClick={onSwitch}>
             Switch business
