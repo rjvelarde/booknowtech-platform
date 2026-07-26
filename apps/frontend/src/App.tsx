@@ -1,4 +1,103 @@
+import { useEffect, useState } from 'react';
+
+import {
+  type AdminSessionView,
+  ApiError,
+  hydrateSession,
+  login,
+  logout,
+  selectMembership,
+} from './api/client.js';
+import { BusinessHubHomePage } from './pages/BusinessHubHomePage.js';
+import { LoginPage } from './pages/LoginPage.js';
+import { TenantSelectionPage } from './pages/TenantSelectionPage.js';
+
+type View = 'loading' | 'placeholder' | 'login' | 'select' | 'hub' | 'denied';
+
 export function App() {
+  const [view, setView] = useState<View>('loading');
+  const [session, setSession] = useState<AdminSessionView | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void hydrateSession()
+      .then((next) => applySession(next, setSession, setView))
+      .catch((reason: unknown) => {
+        if (reason instanceof ApiError && reason.status === 404) setView('placeholder');
+        else if (reason instanceof ApiError && reason.status === 401) setView('login');
+        else setView('login');
+      });
+  }, []);
+
+  const handleLogin = async (email: string, password: string): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      applySession(await login(email, password), setSession, setView);
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.code : 'request_failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSelect = async (membershipPublicId: string): Promise<void> => {
+    if (!session) return;
+    setBusy(true);
+    try {
+      applySession(
+        await selectMembership(membershipPublicId, session.csrf_token),
+        setSession,
+        setView,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleLogout = async (): Promise<void> => {
+    if (!session) return;
+    setBusy(true);
+    try {
+      await logout(session.csrf_token);
+      setSession(null);
+      setView('login');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (view === 'loading') return <StatusCard message="Loading Business Hub…" />;
+  if (view === 'placeholder')
+    return <StatusCard message="The Business Hub is being prepared for launch." />;
+  if (view === 'login') return <LoginPage busy={busy} error={error} onLogin={handleLogin} />;
+  if (view === 'denied' || !session)
+    return <StatusCard message="Your account does not have an active business membership." />;
+  if (view === 'select')
+    return <TenantSelectionPage session={session} busy={busy} onSelect={handleSelect} />;
+  return (
+    <BusinessHubHomePage
+      session={session}
+      busy={busy}
+      onSwitch={() => setView('select')}
+      onLogout={handleLogout}
+    />
+  );
+}
+
+function applySession(
+  session: AdminSessionView,
+  setSession: (session: AdminSessionView) => void,
+  setView: (view: View) => void,
+): void {
+  setSession(session);
+  if (session.active_tenant) setView('hub');
+  else if (session.memberships.length > 0) setView('select');
+  else setView('denied');
+}
+
+function StatusCard({ message }: { message: string }) {
   return (
     <main className="landing-page">
       <section className="landing-card" aria-labelledby="product-title">
@@ -7,7 +106,7 @@ export function App() {
         </div>
         <p className="eyebrow">BookNowTech</p>
         <h1 id="product-title">Business Hub</h1>
-        <p className="status-copy">The Business Hub is being prepared for launch.</p>
+        <p className="status-copy">{message}</p>
       </section>
     </main>
   );

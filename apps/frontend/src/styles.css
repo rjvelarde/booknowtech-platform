@@ -86,3 +86,91 @@ h1 {
   outline: 3px solid #f7b32b;
   outline-offset: 3px;
 }
+
+.auth-form,
+.tenant-list {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 2rem;
+  text-align: left;
+}
+
+.auth-form label {
+  color: #253b56;
+  font-weight: 700;
+}
+
+.auth-form input {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border: 1px solid #aebed2;
+  border-radius: 0.65rem;
+  color: #14213d;
+  font: inherit;
+}
+
+button {
+  padding: 0.8rem 1rem;
+  border: 0;
+  border-radius: 0.65rem;
+  background: #1261a0;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 750;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+.form-error {
+  color: #a12622;
+}
+.tenant-list button {
+  display: flex;
+  justify-content: space-between;
+  text-align: left;
+}
+.tenant-list small {
+  text-transform: capitalize;
+}
+
+.hub-page {
+  min-height: 100vh;
+  background: #f4f7fb;
+}
+.hub-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 2rem;
+  background: #fff;
+  border-bottom: 1px solid #d9e2ef;
+}
+.hub-header .eyebrow {
+  margin: 0;
+}
+.hub-content {
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: 4rem 2rem;
+}
+.hub-content h1 {
+  font-size: clamp(2rem, 6vw, 3.5rem);
+}
+.secondary-button {
+  margin-top: 1.5rem;
+  background: #e5edf6;
+  color: #14213d;
+}
+.empty-state {
+  margin-top: 3rem;
+  padding: 2rem;
+  border: 1px solid #d9e2ef;
+  border-radius: 1rem;
+  background: #fff;
+}
+.empty-state h2 {
+  margin-top: 0;
+}

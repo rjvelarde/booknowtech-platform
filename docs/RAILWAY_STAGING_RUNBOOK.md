@@ -18,7 +18,7 @@ Set each service's Railway config file path to the corresponding file. Do not cr
 
 The PR 1 API uses a **Railway staging-only public HTTPS URL** so the documented smoke script can run from GitHub Actions or an engineer's approved workstation. No production domain or production traffic is attached. The staging API exposes only `/health/live`, `/health/ready`, `/api/v1/version`, and, when enabled, the non-production `/documentation/openapi.json`; every other route returns not found. Railway private networking may replace this only through a later approved infrastructure change that also provides an internal smoke runner.
 
-Vite builds the frontend into `apps/frontend/dist`. The staging service runs pinned `sirv-cli` against those generated assets, binds to Railway's `PORT` on `0.0.0.0`, and enables SPA fallback. Vite's development and preview servers are not used in staging.
+Vite builds the frontend into `apps/frontend/dist`. Starting in PR 2, the frontend container runs Caddy to serve those assets, enable SPA fallback, and proxy `/api/*` to the API over Railway private networking. Vite's development and preview servers are not used in staging.
 
 ## Variables
 
@@ -27,7 +27,8 @@ Use Railway variables or secret references. Never paste values into source, buil
 ### Frontend
 
 - `PORT` — supplied by Railway.
-- `VITE_API_BASE_URL` — staging API HTTPS origin; public and safe for browser use.
+- `VITE_API_BASE_URL=/api` — identical in development, staging, and production.
+- `API_PRIVATE_ORIGIN=http://booknowtechapi.railway.internal:3000` — runtime-only Caddy upstream.
 
 ### API
 
@@ -38,6 +39,8 @@ Use Railway variables or secret references. Never paste values into source, buil
 - `MONGODB_URI` — secret reference for the isolated non-production Atlas user.
 - `MONGODB_DATABASE=booknowtech_staging`
 - `BUILD_VERSION` — immutable Git commit SHA or Railway deployment identifier.
+- `ADMIN_ORIGIN=https://booknowtechfrontend-production.up.railway.app`
+- `TENANT_ADMIN_ENABLED=false` — temporary PR 2 rollout control.
 - `OPENAPI_ENABLED=true`
 
 ### Worker

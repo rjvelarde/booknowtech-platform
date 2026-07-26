@@ -3,6 +3,7 @@ builder = "RAILPACK"
 buildCommand = "corepack enable && corepack prepare pnpm@11.17.0 --activate && pnpm install --frozen-lockfile && pnpm build:api"
 
 [deploy]
+preDeployCommand = "pnpm --filter @booknowtech/api db:migrate"
 startCommand = "pnpm --filter @booknowtech/api start"
 healthcheckPath = "/health/ready"
 healthcheckTimeout = 30

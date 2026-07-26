@@ -5,7 +5,18 @@ import { AtlasReadinessProbe } from './readiness.js';
 async function start(): Promise<void> {
   const environment = loadEnvironment();
   const readiness = new AtlasReadinessProbe(environment.MONGODB_URI);
-  const app = await buildApplication({ environment, readiness });
+  const adminClient = environment.TENANT_ADMIN_ENABLED
+    ? new MongoClient(environment.MONGODB_URI)
+    : undefined;
+  if (adminClient) await adminClient.connect();
+  const app = adminClient
+    ? await buildApplication({
+        environment,
+        readiness,
+        adminStore: new AdminStore(adminClient.db(environment.MONGODB_DATABASE)),
+        closeAdmin: async () => adminClient.close(),
+      })
+    : await buildApplication({ environment, readiness });
 
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
     app.log.info({ event: 'service.stopping', signal });
@@ -35,3 +46,6 @@ void start().catch((error: unknown) => {
   );
   process.exitCode = 1;
 });
+import { MongoClient } from 'mongodb';
+
+import { AdminStore } from './admin/store.js';

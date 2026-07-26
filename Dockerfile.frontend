@@ -1,0 +1,13 @@
+FROM node:24.18.0-alpine AS build
+WORKDIR /app
+ARG VITE_API_BASE_URL=/api
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+RUN npm install --global corepack@latest \
+  && corepack enable \
+  && corepack prepare pnpm@11.17.0 --activate
+COPY . .
+RUN pnpm install --frozen-lockfile && pnpm build:frontend
+
+FROM caddy:2.10.2-alpine
+COPY apps/frontend/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/apps/frontend/dist /srv

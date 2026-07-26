@@ -14,7 +14,7 @@ Ratified for PR 1. This contract implements the stack decision assigned to PR 1 
 - API: Fastify `5.10.0`.
 - Worker: a separate Node.js TypeScript process with no job framework in PR 1.
 - Database connectivity: official MongoDB Node.js driver `7.5.0` against MongoDB Atlas.
-- Static staging server: `sirv-cli` `3.0.1` serving the Vite production build.
+- Administrative edge: Caddy `2.10.2` serves the Vite production build and proxies `/api/*` to the API over Railway private networking.
 - Tests: Vitest `4.1.10`.
 - Formatting/linting: Prettier `3.9.6`, ESLint `10.0.1`, and `typescript-eslint` `8.65.0` with typed rules.
 - CI: GitHub Actions.
@@ -69,7 +69,7 @@ Each process receives termination signals directly and must shut down cleanly. P
 
 ### Frontend staging serving
 
-Vite performs the production build only and writes browser assets to `apps/frontend/dist`. Railway runs pinned `sirv-cli` `3.0.1` against that directory; it does not run the Vite development or preview server. Railway supplies `PORT`, and the static server binds to `0.0.0.0`. Its `--single` option provides SPA fallback to `index.html` for future client-side routes; PR 1 itself contains only the landing page.
+Vite performs the production build only and writes browser assets to `apps/frontend/dist`. Railway runs Caddy in the frontend container; it serves those assets with SPA fallback and proxies `/api/*` to the API's verified private Railway origin. Railway supplies `PORT`. The Vite development and preview servers are not used in staging.
 
 ## Endpoint ownership
 

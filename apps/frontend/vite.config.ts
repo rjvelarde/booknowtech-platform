@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
   const publicEnvironment = loadEnv(mode, '../..', 'VITE_');
   loadPublicEnvironment(
     mode === 'test' && !publicEnvironment.VITE_API_BASE_URL
-      ? { VITE_API_BASE_URL: 'http://localhost:3000' }
+      ? { VITE_API_BASE_URL: '/api' }
       : publicEnvironment,
   );
 
@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       port: 4173,
+      proxy: { '/api': 'http://localhost:3000' },
     },
     preview: {
       port: 4173,

@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 const outputDirectory = new URL('../apps/frontend/dist/', import.meta.url);
 const prohibitedValues = [
   'MONGODB_URI',
+  'API_PRIVATE_ORIGIN',
+  'booknowtechapi.railway.internal',
   'server-secret-must-not-ship',
   'mongodb+srv://',
   'authorization',
