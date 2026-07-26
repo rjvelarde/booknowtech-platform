@@ -28,7 +28,7 @@ Use Railway variables or secret references. Never paste values into source, buil
 
 - `PORT` — supplied by Railway.
 - `VITE_API_BASE_URL=/api` — identical in development, staging, and production.
-- `API_PRIVATE_ORIGIN=http://booknowtechapi.railway.internal:3000` — runtime-only Caddy upstream.
+- `API_PRIVATE_ORIGIN=http://booknowtechapi.railway.internal:8080` — runtime-only Caddy upstream, verified from the running API service.
 
 ### API
 

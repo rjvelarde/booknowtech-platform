@@ -19,6 +19,7 @@ export function App() {
   const [session, setSession] = useState<AdminSessionView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
 
   useEffect(() => {
     void hydrateSession()
@@ -59,10 +60,13 @@ export function App() {
   const handleLogout = async (): Promise<void> => {
     if (!session) return;
     setBusy(true);
+    setLogoutError(null);
     try {
       await logout(session.csrf_token);
       setSession(null);
       setView('login');
+    } catch (reason) {
+      setLogoutError(reason instanceof ApiError ? reason.code : 'request_failed');
     } finally {
       setBusy(false);
     }
@@ -80,6 +84,7 @@ export function App() {
     <BusinessHubHomePage
       session={session}
       busy={busy}
+      error={logoutError}
       onSwitch={() => setView('select')}
       onLogout={handleLogout}
     />
