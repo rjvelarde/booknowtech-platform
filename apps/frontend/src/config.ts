@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 const publicEnvironmentSchema = z.object({
-  VITE_API_BASE_URL: z.url(),
+  VITE_API_BASE_URL: z.literal('/api'),
 });
 
 export type PublicEnvironment = z.infer<typeof publicEnvironmentSchema>;

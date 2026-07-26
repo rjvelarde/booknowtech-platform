@@ -1,6 +1,8 @@
 import swagger from '@fastify/swagger';
 import Fastify, { type FastifyInstance, LogController } from 'fastify';
 
+import type { AdminStore } from './admin/store.js';
+import { registerAdminRoutes } from './auth/routes.js';
 import type { Environment } from './config.js';
 import { resolveCorrelationId } from './correlation.js';
 import { createLoggerOptions } from './logger.js';
@@ -10,6 +12,8 @@ interface BuildApplicationOptions {
   environment: Environment;
   readiness: ReadinessProbe;
   logger?: boolean;
+  adminStore?: AdminStore;
+  closeAdmin?: () => Promise<void>;
 }
 
 const dataEnvelopeSchema = {
@@ -24,6 +28,8 @@ export async function buildApplication({
   environment,
   readiness,
   logger = true,
+  adminStore,
+  closeAdmin,
 }: BuildApplicationOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger ? createLoggerOptions(environment) : false,
@@ -57,6 +63,16 @@ export async function buildApplication({
   });
 
   app.setErrorHandler((error, request, reply) => {
+    if (typeof error === 'object' && error !== null && 'validation' in error && error.validation) {
+      void reply.status(400).send({
+        error: {
+          code: 'validation_failed',
+          message: 'The request is invalid.',
+          request_id: request.id,
+        },
+      });
+      return;
+    }
     request.log.error({ err: error, event: 'http.request.failed', request_id: request.id });
     void reply.status(500).send({
       error: {
@@ -114,8 +130,14 @@ export async function buildApplication({
     () => ({ data: { version: environment.BUILD_VERSION } }),
   );
 
+  if (environment.TENANT_ADMIN_ENABLED) {
+    if (!adminStore) throw new Error('Administrative persistence is required when enabled');
+    registerAdminRoutes(app, environment, adminStore);
+  }
+
   app.addHook('onClose', async () => {
     await readiness.close();
+    await closeAdmin?.();
   });
 
   return app;

@@ -6,10 +6,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx --env-file-if-exists=../../.env watch src/server.ts",
+    "db:migrate": "tsx --env-file-if-exists=../../.env src/database/migrate-command.ts",
+    "db:seed:development": "tsx --env-file-if-exists=../../.env src/database/seed-development.ts",
     "start": "node --env-file-if-exists=../../.env dist/server.js",
     "test": "vitest run",
     "test:unit": "vitest run --exclude '**/*.integration.test.ts'",
-    "test:integration": "vitest run app.integration.test.ts",
+    "test:integration": "vitest run src/app.integration.test.ts src/auth/routes.integration.test.ts src/database/migrate.integration.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

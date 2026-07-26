@@ -10,6 +10,8 @@ const valid = {
   MONGODB_URI: 'mongodb://user:password@localhost:27017',
   MONGODB_DATABASE: 'booknowtech_test',
   BUILD_VERSION: 'commit-abc123',
+  ADMIN_ORIGIN: 'https://admin.example.test',
+  TENANT_ADMIN_ENABLED: 'false',
   OPENAPI_ENABLED: 'true',
 };
 

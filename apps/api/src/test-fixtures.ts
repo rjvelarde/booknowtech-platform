@@ -9,6 +9,8 @@ export const testEnvironment: Environment = {
   MONGODB_URI: 'mongodb://127.0.0.1:27017',
   MONGODB_DATABASE: 'booknowtech_test',
   BUILD_VERSION: 'test-build',
+  ADMIN_ORIGIN: 'https://admin.example.test',
+  TENANT_ADMIN_ENABLED: false,
   OPENAPI_ENABLED: true,
 };
 

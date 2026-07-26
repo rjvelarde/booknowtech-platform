@@ -1,16 +1,80 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App.js';
 
-describe('Business Hub landing page', () => {
-  it('renders the read-only product identity without fake controls', () => {
+describe('Business Hub', () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('preserves the launch placeholder while the rollout flag is disabled', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(404, { error: { code: 'not_found' } })),
+    );
     render(<App />);
 
-    expect(screen.getByText('BookNowTech')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Business Hub' })).toBeInTheDocument();
+    expect(
+      await screen.findByText('The Business Hub is being prepared for launch.'),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
-    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('shows login after an unauthenticated session response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(401, { error: { code: 'authentication_required' } })),
+    );
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Email')).toHaveAttribute('autocomplete', 'username');
+  });
+
+  it('renders the selected tenant after login', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(401, { error: { code: 'authentication_required' } }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          data: {
+            user: { public_id: 'user', display_name: 'Owner' },
+            active_tenant: {
+              public_id: 'tenant',
+              display_name: 'Harbor Demo',
+              role: 'tenant_owner',
+            },
+            memberships: [
+              {
+                public_id: 'membership',
+                role: 'tenant_owner',
+                tenant: { public_id: 'tenant', display_name: 'Harbor Demo' },
+              },
+            ],
+            csrf_token: 'csrf',
+          },
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+    fireEvent.change(await screen.findByLabelText('Email'), {
+      target: { value: 'owner@example.test' },
+    });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(await screen.findByRole('heading', { name: 'Harbor Demo' })).toBeInTheDocument();
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/auth/login');
   });
 });
+
+function jsonResponse(status: number, body: unknown): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(body),
+  } as Response;
+}

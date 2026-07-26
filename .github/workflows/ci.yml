@@ -17,6 +17,16 @@ jobs:
     name: Quality and tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      mongodb:
+        image: mongo:8.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -50,15 +60,20 @@ jobs:
 
       - name: Integration tests
         run: pnpm test:integration
+        env:
+          MONGODB_TEST_URI: mongodb://127.0.0.1:27017
 
       - name: Build frontend
         run: pnpm build:frontend
         env:
           MONGODB_URI: server-secret-must-not-ship
-          VITE_API_BASE_URL: https://api.staging.invalid
+          VITE_API_BASE_URL: /api
 
       - name: Verify server configuration is absent from frontend output
         run: pnpm verify:frontend-env
+
+      - name: Build same-origin frontend container
+        run: docker build --file Dockerfile.frontend --build-arg VITE_API_BASE_URL=/api .
 
       - name: Build API
         run: pnpm build:api

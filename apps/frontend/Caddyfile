@@ -1,0 +1,16 @@
+{
+  auto_https off
+}
+
+:{$PORT:8080} {
+  handle /api/* {
+    reverse_proxy {$API_PRIVATE_ORIGIN}
+  }
+
+  handle {
+    root * /srv
+    encode gzip zstd
+    try_files {path} /index.html
+    file_server
+  }
+}

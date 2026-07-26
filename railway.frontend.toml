@@ -1,9 +1,8 @@
 [build]
-builder = "RAILPACK"
-buildCommand = "corepack enable && corepack prepare pnpm@11.17.0 --activate && pnpm install --frozen-lockfile && pnpm build:frontend"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.frontend"
 
 [deploy]
-startCommand = "pnpm --filter @booknowtech/frontend start"
 healthcheckPath = "/"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"

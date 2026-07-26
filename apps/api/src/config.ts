@@ -12,6 +12,8 @@ const environmentSchema = z.object({
     .min(1)
     .max(128)
     .regex(/^[a-zA-Z0-9._/-]+$/u),
+  ADMIN_ORIGIN: z.url(),
+  TENANT_ADMIN_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true'),
   OPENAPI_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true'),
 });
 
