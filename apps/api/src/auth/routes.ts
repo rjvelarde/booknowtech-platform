@@ -69,7 +69,7 @@ export function registerAdminRoutes(
   );
 
   app.get('/api/v1/auth/session', async (request, reply) => {
-    const context = await authenticate(request, store);
+    const context = await authenticateAdminRequest(request, store);
     if (!context) return reply.status(401).send(authError('authentication_required', request.id));
     const csrfToken = await store.rotateCsrf(context.session);
     return reply.send(sessionEnvelope(context, csrfToken, request.id));
@@ -88,7 +88,7 @@ export function registerAdminRoutes(
       },
     },
     async (request, reply) => {
-      const context = await authenticateMutation(request, reply, environment, store);
+      const context = await authenticateAdminMutation(request, reply, environment, store);
       if (!context) return;
       const credential = await store.switchMembership(
         context,
@@ -120,7 +120,7 @@ export function registerAdminRoutes(
   );
 
   app.post('/api/v1/auth/logout', async (request, reply) => {
-    const context = await authenticateMutation(request, reply, environment, store);
+    const context = await authenticateAdminMutation(request, reply, environment, store);
     if (!context) return;
     await store.revokeSession(context.session, 'logout');
     clearSessionCookie(reply);
@@ -135,7 +135,7 @@ export function registerAdminRoutes(
   });
 
   app.get('/api/v1/admin/tenant', async (request, reply) => {
-    const context = await authenticate(request, store);
+    const context = await authenticateAdminRequest(request, store);
     if (!context) return reply.status(401).send(authError('authentication_required', request.id));
     if (!context.tenant || !context.membership) {
       return reply.status(403).send(authError('tenant_selection_required', request.id));
@@ -154,7 +154,7 @@ export function registerAdminRoutes(
   });
 }
 
-async function authenticate(
+export async function authenticateAdminRequest(
   request: FastifyRequest,
   store: AdminStore,
 ): Promise<VerifiedAdminContext | null> {
@@ -162,7 +162,7 @@ async function authenticate(
   return token ? store.hydrateSession(token) : null;
 }
 
-async function authenticateMutation(
+export async function authenticateAdminMutation(
   request: FastifyRequest,
   reply: FastifyReply,
   environment: Environment,
@@ -172,7 +172,7 @@ async function authenticateMutation(
     await reply.status(403).send(authError('origin_rejected', request.id));
     return null;
   }
-  const context = await authenticate(request, store);
+  const context = await authenticateAdminRequest(request, store);
   if (!context) {
     await reply.status(401).send(authError('authentication_required', request.id));
     return null;

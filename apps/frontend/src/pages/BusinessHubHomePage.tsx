@@ -1,4 +1,5 @@
 import type { AdminSessionView } from '../api/client.js';
+import type { ReactNode } from 'react';
 
 interface BusinessHubHomePageProps {
   session: AdminSessionView;
@@ -6,6 +7,8 @@ interface BusinessHubHomePageProps {
   error: string | null;
   onSwitch: () => void;
   onLogout: () => Promise<void>;
+  onNavigate: (path: string) => void;
+  children?: ReactNode;
 }
 
 export function BusinessHubHomePage({
@@ -14,6 +17,8 @@ export function BusinessHubHomePage({
   error,
   onSwitch,
   onLogout,
+  onNavigate,
+  children,
 }: BusinessHubHomePageProps) {
   const tenant = session.active_tenant!;
   return (
@@ -43,12 +48,29 @@ export function BusinessHubHomePage({
             Switch business
           </button>
         ) : null}
-        <div className="empty-state">
-          <h2>Your Business Hub is ready</h2>
-          <p>
-            Operational tools will be added through the approved roadmap, one reliable milestone at
-            a time.
-          </p>
+        <nav className="hub-nav" aria-label="Business Hub">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => onNavigate('/business')}
+          >
+            Business profile
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => onNavigate('/services')}
+          >
+            Services
+          </button>
+        </nav>
+        <div className="workspace">
+          {children ?? (
+            <div className="empty-state">
+              <h2>Your Business Hub is ready</h2>
+              <p>Manage your business profile and service catalog.</p>
+            </div>
+          )}
         </div>
       </section>
     </main>

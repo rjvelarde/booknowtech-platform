@@ -13,6 +13,44 @@ export interface AdminSessionView {
   csrf_token: string;
 }
 
+export interface BusinessProfileView {
+  public_id: string;
+  slug: string;
+  display_name: string;
+  legal_name: string | null;
+  contact: { email: string | null; phone: string | null; website: string | null };
+  default_timezone: string;
+  locale: string;
+  currency: string;
+  version: number;
+  updated_at: string;
+}
+
+export interface ServiceView {
+  public_id: string;
+  internal_code: string | null;
+  name: string;
+  description: string | null;
+  delivery_mode: 'provider_location' | 'customer_location' | 'virtual';
+  duration_minutes: number;
+  base_price_minor: number;
+  booking_fee_minor: number;
+  currency: string;
+  status: 'active' | 'inactive';
+  version: number;
+}
+
+export type ServiceInput = Pick<
+  ServiceView,
+  | 'internal_code'
+  | 'name'
+  | 'description'
+  | 'delivery_mode'
+  | 'duration_minutes'
+  | 'base_price_minor'
+  | 'booking_fee_minor'
+>;
+
 export class ApiError extends Error {
   public constructor(
     public readonly status: number,
@@ -50,6 +88,59 @@ export async function selectMembership(
 
 export async function logout(csrfToken: string): Promise<void> {
   await request('/v1/auth/logout', { method: 'POST', headers: { 'x-csrf-token': csrfToken } });
+}
+
+export function getBusinessProfile(): Promise<BusinessProfileView> {
+  return request('/v1/admin/business-profile');
+}
+
+export function updateBusinessProfile(
+  input: Partial<Omit<BusinessProfileView, 'public_id' | 'slug' | 'updated_at'>> & {
+    expected_version: number;
+  },
+  csrfToken: string,
+): Promise<BusinessProfileView> {
+  return request('/v1/admin/business-profile', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+
+export function listServices(): Promise<ServiceView[]> {
+  return request('/v1/admin/services');
+}
+
+export function createService(input: ServiceInput, csrfToken: string): Promise<ServiceView> {
+  return request('/v1/admin/services', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+
+export function updateService(
+  publicId: string,
+  input: Partial<ServiceInput> & { expected_version: number },
+  csrfToken: string,
+): Promise<ServiceView> {
+  return request(`/v1/admin/services/${publicId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+
+export function setServiceActive(
+  service: ServiceView,
+  active: boolean,
+  csrfToken: string,
+): Promise<ServiceView & { changed: boolean }> {
+  return request(`/v1/admin/services/${service.public_id}/${active ? 'activate' : 'deactivate'}`, {
+    method: 'POST',
+    body: JSON.stringify({ expected_version: service.version }),
+    headers: { 'x-csrf-token': csrfToken },
+  });
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {

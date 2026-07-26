@@ -9,7 +9,41 @@ export interface TenantDocument {
   public_id: string;
   slug: string;
   display_name: string;
+  legal_name: string | null;
+  contact: {
+    email_normalized: string | null;
+    phone_e164: string | null;
+    website_url: string | null;
+  };
+  default_timezone: string;
+  locale: string;
+  currency: string;
+  version: number;
+  updated_by: ObjectId | null;
   status: 'active' | 'suspended';
+  created_at: Date;
+  updated_at: Date;
+}
+
+export const DELIVERY_MODES = ['provider_location', 'customer_location', 'virtual'] as const;
+export type DeliveryMode = (typeof DELIVERY_MODES)[number];
+
+export interface ServiceDocument {
+  _id: ObjectId;
+  public_id: string;
+  tenant_id: ObjectId;
+  internal_code: string | null;
+  name: string;
+  description: string | null;
+  delivery_mode: DeliveryMode;
+  duration_minutes: number;
+  base_price_minor: number;
+  booking_fee_minor: number;
+  currency: string;
+  status: 'active' | 'inactive';
+  version: number;
+  created_by: ObjectId;
+  updated_by: ObjectId;
   created_at: Date;
   updated_at: Date;
 }
@@ -86,6 +120,7 @@ export class AdminStore {
   private readonly roles: Collection<RoleDocument>;
   private readonly sessions: Collection<AdminSessionDocument>;
   private readonly auditLogs: Collection<AuditLogDocument>;
+  private readonly services: Collection<ServiceDocument>;
 
   public constructor(db: Db) {
     this.tenants = db.collection<TenantDocument>('tenants');
@@ -93,6 +128,7 @@ export class AdminStore {
     this.roles = db.collection<RoleDocument>('roles');
     this.sessions = db.collection<AdminSessionDocument>('admin_sessions');
     this.auditLogs = db.collection<AuditLogDocument>('audit_logs');
+    this.services = db.collection<ServiceDocument>('services');
   }
 
   public findUserByEmail(email: string): Promise<UserDocument | null> {
@@ -189,6 +225,139 @@ export class AdminStore {
       metadata: input.metadata ?? {},
       created_at: new Date(),
     });
+  }
+
+  public getBusinessProfile(tenantId: ObjectId): Promise<TenantDocument | null> {
+    return this.tenants.findOne({ _id: tenantId, status: 'active' });
+  }
+
+  public async updateBusinessProfile(input: {
+    tenantId: ObjectId;
+    userId: ObjectId;
+    expectedVersion: number;
+    changes: Partial<
+      Pick<
+        TenantDocument,
+        'display_name' | 'legal_name' | 'contact' | 'default_timezone' | 'locale' | 'currency'
+      >
+    >;
+  }): Promise<'updated' | 'version_conflict' | 'currency_locked' | 'not_found'> {
+    const tenant = await this.tenants.findOne({ _id: input.tenantId, status: 'active' });
+    if (!tenant) return 'not_found';
+    if (input.changes.currency && input.changes.currency !== tenant.currency) {
+      if ((await this.services.countDocuments({ tenant_id: input.tenantId }, { limit: 1 })) > 0) {
+        return 'currency_locked';
+      }
+    }
+    const result = await this.tenants.updateOne(
+      { _id: input.tenantId, status: 'active', version: input.expectedVersion },
+      {
+        $set: { ...input.changes, updated_by: input.userId, updated_at: new Date() },
+        $inc: { version: 1 },
+      },
+    );
+    return result.modifiedCount === 1 ? 'updated' : 'version_conflict';
+  }
+
+  public listServices(tenantId: ObjectId): Promise<ServiceDocument[]> {
+    return this.services.find({ tenant_id: tenantId }).sort({ name: 1, public_id: 1 }).toArray();
+  }
+
+  public getService(tenantId: ObjectId, publicId: string): Promise<ServiceDocument | null> {
+    return this.services.findOne({ tenant_id: tenantId, public_id: publicId });
+  }
+
+  public async createService(
+    tenant: TenantDocument,
+    userId: ObjectId,
+    input: Omit<
+      ServiceDocument,
+      | '_id'
+      | 'public_id'
+      | 'tenant_id'
+      | 'currency'
+      | 'version'
+      | 'created_by'
+      | 'updated_by'
+      | 'created_at'
+      | 'updated_at'
+    >,
+  ): Promise<ServiceDocument> {
+    const now = new Date();
+    const document: ServiceDocument = {
+      _id: new ObjectId(),
+      public_id: randomUUID(),
+      tenant_id: tenant._id,
+      currency: tenant.currency,
+      version: 1,
+      created_by: userId,
+      updated_by: userId,
+      created_at: now,
+      updated_at: now,
+      ...input,
+    };
+    await this.services.insertOne(document);
+    return document;
+  }
+
+  public async updateService(input: {
+    tenantId: ObjectId;
+    publicId: string;
+    userId: ObjectId;
+    expectedVersion: number;
+    changes: Partial<
+      Pick<
+        ServiceDocument,
+        | 'internal_code'
+        | 'name'
+        | 'description'
+        | 'delivery_mode'
+        | 'duration_minutes'
+        | 'base_price_minor'
+        | 'booking_fee_minor'
+      >
+    >;
+  }): Promise<'updated' | 'version_conflict' | 'not_found'> {
+    const result = await this.services.updateOne(
+      {
+        tenant_id: input.tenantId,
+        public_id: input.publicId,
+        version: input.expectedVersion,
+      },
+      {
+        $set: { ...input.changes, updated_by: input.userId, updated_at: new Date() },
+        $inc: { version: 1 },
+      },
+    );
+    if (result.modifiedCount === 1) return 'updated';
+    return (await this.getService(input.tenantId, input.publicId))
+      ? 'version_conflict'
+      : 'not_found';
+  }
+
+  public async transitionService(input: {
+    tenantId: ObjectId;
+    publicId: string;
+    userId: ObjectId;
+    expectedVersion: number;
+    status: 'active' | 'inactive';
+  }): Promise<'updated' | 'unchanged' | 'version_conflict' | 'not_found'> {
+    const current = await this.getService(input.tenantId, input.publicId);
+    if (!current) return 'not_found';
+    if (current.status === input.status) return 'unchanged';
+    const result = await this.services.updateOne(
+      {
+        _id: current._id,
+        tenant_id: input.tenantId,
+        version: input.expectedVersion,
+        status: current.status,
+      },
+      {
+        $set: { status: input.status, updated_by: input.userId, updated_at: new Date() },
+        $inc: { version: 1 },
+      },
+    );
+    return result.modifiedCount === 1 ? 'updated' : 'version_conflict';
   }
 
   private async loadMemberships(

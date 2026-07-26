@@ -4,8 +4,30 @@ const validators: Record<string, Document> = {
   tenants: {
     $jsonSchema: {
       bsonType: 'object',
-      required: ['public_id', 'slug', 'display_name', 'status', 'created_at', 'updated_at'],
-      properties: { status: { enum: ['active', 'suspended'] } },
+      required: [
+        'public_id',
+        'slug',
+        'display_name',
+        'legal_name',
+        'contact',
+        'default_timezone',
+        'locale',
+        'currency',
+        'version',
+        'updated_by',
+        'status',
+        'created_at',
+        'updated_at',
+      ],
+      properties: {
+        contact: {
+          bsonType: 'object',
+          required: ['email_normalized', 'phone_e164', 'website_url'],
+        },
+        currency: { bsonType: 'string', pattern: '^[A-Z]{3}$' },
+        version: { bsonType: ['int', 'long'], minimum: 1 },
+        status: { enum: ['active', 'suspended'] },
+      },
     },
   },
   users: {
@@ -58,12 +80,69 @@ const validators: Record<string, Document> = {
       properties: { outcome: { enum: ['success', 'failure'] } },
     },
   },
+  services: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: [
+        'public_id',
+        'tenant_id',
+        'internal_code',
+        'name',
+        'description',
+        'delivery_mode',
+        'duration_minutes',
+        'base_price_minor',
+        'booking_fee_minor',
+        'currency',
+        'status',
+        'version',
+        'created_by',
+        'updated_by',
+        'created_at',
+        'updated_at',
+      ],
+      properties: {
+        tenant_id: { bsonType: 'objectId' },
+        internal_code: {
+          bsonType: ['string', 'null'],
+          maxLength: 64,
+          pattern: '^[A-Z0-9._-]+$',
+        },
+        delivery_mode: {
+          enum: ['provider_location', 'customer_location', 'virtual'],
+        },
+        duration_minutes: { bsonType: ['int', 'long'], minimum: 5, maximum: 1440 },
+        base_price_minor: { bsonType: ['int', 'long'], minimum: 0 },
+        booking_fee_minor: { bsonType: ['int', 'long'], minimum: 0 },
+        currency: { bsonType: 'string', pattern: '^[A-Z]{3}$' },
+        status: { enum: ['active', 'inactive'] },
+        version: { bsonType: ['int', 'long'], minimum: 1 },
+      },
+    },
+  },
 };
 
 export async function migrateDatabase(db: Db): Promise<void> {
   const existing = new Set(
     (await db.listCollections({}, { nameOnly: true }).toArray()).map(({ name }) => name),
   );
+  if (existing.has('tenants')) {
+    await db.collection('tenants').updateMany({}, [
+      {
+        $set: {
+          legal_name: { $ifNull: ['$legal_name', null] },
+          contact: {
+            $ifNull: ['$contact', { email_normalized: null, phone_e164: null, website_url: null }],
+          },
+          default_timezone: { $ifNull: ['$default_timezone', 'UTC'] },
+          locale: { $ifNull: ['$locale', 'en-US'] },
+          currency: { $ifNull: ['$currency', 'USD'] },
+          version: { $ifNull: ['$version', 1] },
+          updated_by: { $ifNull: ['$updated_by', null] },
+        },
+      },
+    ]);
+  }
   for (const [name, validator] of Object.entries(validators)) {
     if (existing.has(name)) {
       await db.command({ collMod: name, validator, validationLevel: 'strict' });
@@ -116,5 +195,20 @@ export async function migrateDatabase(db: Db): Promise<void> {
     { key: { tenant_id: 1, created_at: -1 }, name: 'audit_logs_tenant_created' },
     { key: { event: 1, created_at: -1 }, name: 'audit_logs_event_created' },
     { key: { request_id: 1 }, name: 'audit_logs_request_id' },
+  ]);
+  await db.collection('services').createIndexes([
+    {
+      key: { tenant_id: 1, public_id: 1 },
+      name: 'services_tenant_public_id_unique',
+      unique: true,
+    },
+    {
+      key: { tenant_id: 1, internal_code: 1 },
+      name: 'services_tenant_internal_code_unique',
+      unique: true,
+      partialFilterExpression: { internal_code: { $type: 'string' } },
+    },
+    { key: { tenant_id: 1, status: 1, name: 1, public_id: 1 }, name: 'services_catalog_list' },
+    { key: { tenant_id: 1, updated_at: -1, public_id: 1 }, name: 'services_updated' },
   ]);
 }

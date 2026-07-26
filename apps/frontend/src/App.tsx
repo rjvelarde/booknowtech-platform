@@ -10,6 +10,8 @@ import {
 } from './api/client.js';
 import { BusinessHubHomePage } from './pages/BusinessHubHomePage.js';
 import { LoginPage } from './pages/LoginPage.js';
+import { BusinessProfilePage } from './pages/BusinessProfilePage.js';
+import { ServicesPage } from './pages/ServicesPage.js';
 import { TenantSelectionPage } from './pages/TenantSelectionPage.js';
 
 type View = 'loading' | 'placeholder' | 'login' | 'select' | 'hub' | 'denied';
@@ -20,6 +22,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [path, setPath] = useState(window.location.pathname);
 
   useEffect(() => {
     void hydrateSession()
@@ -29,6 +32,12 @@ export function App() {
         else if (reason instanceof ApiError && reason.status === 401) setView('login');
         else setView('login');
       });
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => setPath(window.location.pathname);
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
   const handleLogin = async (email: string, password: string): Promise<void> => {
@@ -87,7 +96,24 @@ export function App() {
       error={logoutError}
       onSwitch={() => setView('select')}
       onLogout={handleLogout}
-    />
+      onNavigate={(next) => {
+        window.history.pushState({}, '', next);
+        setPath(next);
+      }}
+    >
+      {path === '/business' ? (
+        <BusinessProfilePage csrfToken={session.csrf_token} canManage={canManage(session)} />
+      ) : null}
+      {path === '/services' || path.startsWith('/services/') ? (
+        <ServicesPage csrfToken={session.csrf_token} canManage={canManage(session)} />
+      ) : null}
+    </BusinessHubHomePage>
+  );
+}
+
+function canManage(session: AdminSessionView): boolean {
+  return (
+    session.active_tenant?.role === 'tenant_owner' || session.active_tenant?.role === 'tenant_admin'
   );
 }
 

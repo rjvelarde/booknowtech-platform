@@ -8,6 +8,7 @@ describe('Business Hub', () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    window.history.replaceState({}, '', '/');
   });
 
   it('preserves the launch placeholder while the rollout flag is disabled', async () => {
@@ -98,6 +99,42 @@ describe('Business Hub', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Unable to sign out');
     expect(screen.getByRole('heading', { name: 'Harbor Demo' })).toBeInTheDocument();
+  });
+
+  it('shows the tenant service catalog and hides management controls from providers', async () => {
+    const providerSession = {
+      ...activeSession(),
+      active_tenant: { ...activeSession().active_tenant, role: 'provider' },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { data: providerSession }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          data: [
+            {
+              public_id: 'service',
+              internal_code: 'BRAZILIAN-WAX',
+              name: 'Brazilian Wax',
+              description: null,
+              delivery_mode: 'provider_location',
+              duration_minutes: 30,
+              base_price_minor: 5500,
+              booking_fee_minor: 125,
+              currency: 'USD',
+              status: 'active',
+              version: 1,
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Services' }));
+
+    expect(await screen.findByRole('heading', { name: 'Brazilian Wax' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add service' })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/admin/services');
   });
 });
 
