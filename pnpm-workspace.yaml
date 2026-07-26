@@ -1,0 +1,12 @@
+packages:
+  - apps/*
+
+strictPeerDependencies: true
+
+allowBuilds:
+  esbuild: true
+
+minimumReleaseAge: 1440
+
+minimumReleaseAgeExclude:
+  - '@booknowtech/*'
