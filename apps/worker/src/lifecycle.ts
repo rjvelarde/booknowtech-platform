@@ -12,6 +12,9 @@ export function createWorkerLifecycle(
   logger: LifecycleLogger,
   processTarget: NodeJS.Process = process,
 ): WorkerLifecycle {
+  const keepAlive = setInterval(() => {
+    // Keep the process active until a shutdown signal is received.
+  }, 60_000);
   let resolveShutdown: ((signal: NodeJS.Signals) => void) | undefined;
   const shutdown = new Promise<NodeJS.Signals>((resolve) => {
     resolveShutdown = resolve;
@@ -38,6 +41,7 @@ export function createWorkerLifecycle(
   return {
     waitForShutdown: async () => shutdown,
     dispose: () => {
+      clearInterval(keepAlive);
       processTarget.off('SIGTERM', onSigterm);
       processTarget.off('SIGINT', onSigint);
       processTarget.off('uncaughtException', onUncaughtException);
