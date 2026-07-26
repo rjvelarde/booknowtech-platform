@@ -50,4 +50,36 @@ suite('administrative foundation migration', () => {
       }),
     ).rejects.toThrow();
   });
+
+  it('creates tenant-scoped catalog indexes and rejects invalid delivery modes', async () => {
+    await migrateDatabase(db);
+    const indexes = await db.collection('services').indexes();
+    expect(indexes.map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        'services_tenant_public_id_unique',
+        'services_tenant_internal_code_unique',
+        'services_catalog_list',
+      ]),
+    );
+    await expect(
+      db.collection('services').insertOne({
+        public_id: randomUUID(),
+        tenant_id: new ObjectId(),
+        internal_code: 'INVALID',
+        name: 'Invalid',
+        description: null,
+        delivery_mode: 'physical',
+        duration_minutes: 30,
+        base_price_minor: 1000,
+        booking_fee_minor: 100,
+        currency: 'USD',
+        status: 'active',
+        version: 1,
+        created_by: new ObjectId(),
+        updated_by: new ObjectId(),
+        created_at: new Date(),
+        updated_at: new Date(),
+      }),
+    ).rejects.toThrow();
+  });
 });

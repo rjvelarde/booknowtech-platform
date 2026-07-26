@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance, LogController } from 'fastify';
 
 import type { AdminStore } from './admin/store.js';
 import { registerAdminRoutes } from './auth/routes.js';
+import { registerCatalogRoutes } from './catalog/routes.js';
 import type { Environment } from './config.js';
 import { resolveCorrelationId } from './correlation.js';
 import { createLoggerOptions } from './logger.js';
@@ -133,6 +134,7 @@ export async function buildApplication({
   if (environment.TENANT_ADMIN_ENABLED) {
     if (!adminStore) throw new Error('Administrative persistence is required when enabled');
     registerAdminRoutes(app, environment, adminStore);
+    registerCatalogRoutes(app, environment, adminStore);
   }
 
   app.addHook('onClose', async () => {
