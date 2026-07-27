@@ -219,6 +219,23 @@ describe('Business Hub', () => {
     expect(screen.queryByRole('button', { name: 'Deactivate' })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/admin/providers');
   });
+
+  it('opens the new provider form without treating new as a provider public ID', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { data: activeSession() }))
+      .mockResolvedValueOnce(jsonResponse(200, { data: { items: [], next_cursor: null } }))
+      .mockResolvedValueOnce(jsonResponse(200, { data: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Providers' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add provider' }));
+
+    expect(screen.getByRole('heading', { name: 'Add provider' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Display name')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/v1/admin/services');
+  });
 });
 
 function activeSession() {

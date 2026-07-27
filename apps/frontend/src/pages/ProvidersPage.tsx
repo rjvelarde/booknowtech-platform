@@ -26,8 +26,9 @@ export function ProvidersPage({
   onNavigate: (path: string) => void;
 }) {
   const match = /^\/providers\/([^/]+)(\/edit)?$/.exec(path);
-  const publicId = match?.[1];
-  const editing = path === '/providers/new' || Boolean(match?.[2]);
+  const creating = path === '/providers/new';
+  const publicId = creating ? undefined : match?.[1];
+  const editing = creating || Boolean(match?.[2]);
   if (path === '/providers')
     return <ProviderList canManage={canManage} csrfToken={csrfToken} onNavigate={onNavigate} />;
   return (
