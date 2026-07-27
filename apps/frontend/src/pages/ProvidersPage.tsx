@@ -93,13 +93,9 @@ function ProviderList({
         {providers.map((provider) => (
           <article className="service-card" key={provider.public_id}>
             <div className="provider-summary">
-              {provider.photo_url ? (
-                <img className="provider-photo" src={provider.photo_url} alt="" />
-              ) : (
-                <span className="provider-photo provider-initials" aria-hidden="true">
-                  {initials(provider.display_name)}
-                </span>
-              )}
+              <span className="provider-photo provider-initials" aria-hidden="true">
+                {initials(provider.display_name)}
+              </span>
               <div>
                 <small>{provider.internal_code ?? 'No internal code'}</small>
                 <h2>{provider.display_name}</h2>
@@ -356,8 +352,8 @@ function ProviderForm({
           first_name: nullable(values.get('first_name')),
           last_name: nullable(values.get('last_name')),
           email: nullable(values.get('email')),
-          phone: nullable(values.get('phone')),
-          photo_url: nullable(values.get('photo_url')),
+          phone: normalizeUsPhone(values.get('phone')),
+          photo_url: provider?.photo_url ?? null,
           bio: nullable(values.get('bio')),
           customer_selectable: values.get('customer_selectable') === 'on',
           accepting_new_clients: values.get('accepting_new_clients') === 'on',
@@ -383,17 +379,12 @@ function ProviderForm({
       <Field label="Last name" name="last_name" value={provider?.last_name ?? ''} />
       <Field label="Email" name="email" value={provider?.email ?? ''} type="email" />
       <Field
-        label="Phone (E.164)"
+        label="Phone"
         name="phone"
-        value={provider?.phone ?? ''}
-        pattern="\+[1-9][0-9]{1,14}"
-      />
-      <Field
-        label="Photo URL (HTTPS)"
-        name="photo_url"
-        value={provider?.photo_url ?? ''}
-        type="url"
-        pattern="https://.*"
+        value={displayUsPhone(provider?.phone)}
+        type="tel"
+        placeholder="(555) 555-0123"
+        inputMode="tel"
       />
       <label>
         <span>Biography</span>
@@ -441,6 +432,8 @@ function Field(props: {
   pattern?: string;
   min?: string;
   max?: string;
+  placeholder?: string;
+  inputMode?: 'tel';
 }) {
   return (
     <label>
@@ -453,6 +446,8 @@ function Field(props: {
         pattern={props.pattern}
         min={props.min}
         max={props.max}
+        placeholder={props.placeholder}
+        inputMode={props.inputMode}
         maxLength={props.type === 'url' ? 2048 : undefined}
       />
     </label>
@@ -472,4 +467,19 @@ function initials(name: string) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join('');
+}
+function normalizeUsPhone(value: FormDataEntryValue | null): string | null {
+  const entered = nullable(value);
+  if (!entered) return null;
+  const digits = entered.replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return entered;
+}
+function displayUsPhone(value: string | null | undefined): string {
+  const digits = value?.replace(/\D/g, '') ?? '';
+  const national = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+  return national.length === 10
+    ? `(${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}`
+    : (value ?? '');
 }

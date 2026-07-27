@@ -236,6 +236,57 @@ describe('Business Hub', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/v1/admin/services');
   });
+
+  it('updates display order and normalizes a friendly US phone number', async () => {
+    window.history.replaceState({}, '', '/providers/operator/edit');
+    const provider = {
+      public_id: 'operator',
+      internal_code: 'OPERATOR',
+      display_name: 'Operator',
+      first_name: null,
+      last_name: null,
+      email: null,
+      phone: null,
+      photo_url: null,
+      bio: null,
+      status: 'active',
+      customer_selectable: true,
+      accepting_new_clients: true,
+      display_order: 0,
+      version: 1,
+      service_assignments: [],
+    };
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === '/api/v1/auth/session')
+        return Promise.resolve(jsonResponse(200, { data: activeSession() }));
+      if (url === '/api/v1/admin/providers/operator' && init?.method === 'PATCH')
+        return Promise.resolve(
+          jsonResponse(200, {
+            data: { ...provider, display_order: 30, phone: '+15555550123', version: 2 },
+          }),
+        );
+      if (url === '/api/v1/admin/providers/operator')
+        return Promise.resolve(jsonResponse(200, { data: provider }));
+      if (url === '/api/v1/admin/services') return Promise.resolve(jsonResponse(200, { data: [] }));
+      return Promise.resolve(jsonResponse(404, { error: { code: 'not_found' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+    fireEvent.change(await screen.findByLabelText('Display order'), { target: { value: '30' } });
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '(555) 555-0123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save provider' }));
+
+    await screen.findByRole('heading', { name: 'Operator' });
+    const patchCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH');
+    const requestBody = patchCall?.[1]?.body;
+    expect(typeof requestBody).toBe('string');
+    const body = JSON.parse(typeof requestBody === 'string' ? requestBody : '{}') as Record<
+      string,
+      unknown
+    >;
+    expect(body).toMatchObject({ expected_version: 1, display_order: 30, phone: '+15555550123' });
+    expect(screen.queryByLabelText('Photo URL (HTTPS)')).not.toBeInTheDocument();
+  });
 });
 
 function activeSession() {
