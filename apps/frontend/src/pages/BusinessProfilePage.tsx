@@ -59,19 +59,35 @@ export function BusinessProfilePage({
             .catch(() => setError(true));
         }}
       >
-        <Field label="Display name" name="display_name" value={profile.display_name} required />
-        <Field label="Legal name" name="legal_name" value={profile.legal_name ?? ''} />
-        <Field label="Email" name="email" value={profile.contact.email ?? ''} type="email" />
-        <Field label="Phone" name="phone" value={profile.contact.phone ?? ''} />
-        <Field label="Website" name="website" value={profile.contact.website ?? ''} type="url" />
+        <Field
+          label="Display name"
+          name="display_name"
+          defaultValue={profile.display_name}
+          required
+        />
+        <Field label="Legal name" name="legal_name" defaultValue={profile.legal_name ?? ''} />
+        <Field label="Email" name="email" defaultValue={profile.contact.email ?? ''} type="email" />
+        <Field label="Phone" name="phone" defaultValue={profile.contact.phone ?? ''} />
+        <Field
+          label="Website"
+          name="website"
+          defaultValue={profile.contact.website ?? ''}
+          type="url"
+        />
         <Field
           label="Time zone"
           name="default_timezone"
-          value={profile.default_timezone}
+          defaultValue={profile.default_timezone}
           required
         />
-        <Field label="Locale" name="locale" value={profile.locale} required />
-        <Field label="Currency" name="currency" value={profile.currency} required maxLength={3} />
+        <Field label="Locale" name="locale" defaultValue={profile.locale} required />
+        <Field
+          label="Currency"
+          name="currency"
+          defaultValue={profile.currency}
+          required
+          maxLength={3}
+        />
         <p className="form-note">Currency cannot be changed after the first service is created.</p>
         {canManage ? <button type="submit">Save profile</button> : <p>View-only access</p>}
         {saved ? <p role="status">Business profile saved.</p> : null}

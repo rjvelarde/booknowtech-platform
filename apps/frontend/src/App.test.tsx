@@ -136,6 +136,46 @@ describe('Business Hub', () => {
     expect(screen.queryByRole('button', { name: 'Add service' })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/admin/services');
   });
+
+  it('edits and submits business profile fields', async () => {
+    const profile = {
+      public_id: 'tenant',
+      slug: 'brazilian-wax-demo',
+      display_name: 'Brazilian Wax Demo',
+      legal_name: null,
+      contact: { email: null, phone: null, website: null },
+      default_timezone: 'America/New_York',
+      locale: 'en-US',
+      currency: 'USD',
+      version: 1,
+      updated_at: '2026-07-27T12:00:00.000Z',
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { data: activeSession() }))
+      .mockResolvedValueOnce(jsonResponse(200, { data: profile }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          data: { ...profile, legal_name: 'Brazilian Wax Demo LLC', version: 2 },
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Business profile' }));
+    const legalName = await screen.findByLabelText('Legal name');
+
+    fireEvent.change(legalName, { target: { value: 'Brazilian Wax Demo LLC' } });
+    expect(legalName).toHaveValue('Brazilian Wax Demo LLC');
+    fireEvent.click(screen.getByRole('button', { name: 'Save profile' }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Business profile saved');
+    const request = fetchMock.mock.calls[2]?.[1] as RequestInit;
+    expect(typeof request.body).toBe('string');
+    expect(JSON.parse(request.body as string)).toMatchObject({
+      expected_version: 1,
+      legal_name: 'Brazilian Wax Demo LLC',
+    });
+  });
 });
 
 function activeSession() {
