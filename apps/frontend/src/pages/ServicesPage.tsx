@@ -9,7 +9,15 @@ import {
   updateService,
 } from '../api/client.js';
 
-export function ServicesPage({ csrfToken, canManage }: { csrfToken: string; canManage: boolean }) {
+export function ServicesPage({
+  csrfToken,
+  canManage,
+  onNavigate,
+}: {
+  csrfToken: string;
+  canManage: boolean;
+  onNavigate: (path: string) => void;
+}) {
   const [services, setServices] = useState<ServiceView[]>([]);
   const [editing, setEditing] = useState<ServiceView | null>(null);
   const [creating, setCreating] = useState(false);
@@ -80,6 +88,13 @@ export function ServicesPage({ csrfToken, canManage }: { csrfToken: string; canM
             </div>
             {canManage ? (
               <div className="card-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => onNavigate(`/services/${service.public_id}`)}
+                >
+                  Providers
+                </button>
                 <button
                   type="button"
                   className="secondary-button"

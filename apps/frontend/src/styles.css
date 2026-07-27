@@ -252,6 +252,66 @@ button:disabled {
   color: #5b6470;
   background: #e8edf3;
 }
+.provider-summary,
+.assignment-controls,
+.detail-grid {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.provider-photo {
+  width: 4rem;
+  height: 4rem;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.provider-initials {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: #176cab;
+  font-weight: 800;
+}
+.filter-label,
+.assignment-controls label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  font-weight: 700;
+}
+.filter-label select,
+.assignment-controls select {
+  padding: 0.6rem;
+  border: 1px solid #aebed2;
+  border-radius: 0.5rem;
+  font: inherit;
+}
+.detail-grid {
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.detail-grid div {
+  min-width: 10rem;
+  padding: 1rem;
+  border: 1px solid #d9e2ef;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+.detail-grid dt {
+  font-weight: 800;
+}
+.detail-grid dd {
+  margin: 0.3rem 0 0;
+}
+.checkbox-label {
+  display: flex !important;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+.checkbox-label input {
+  width: auto;
+}
 @media (max-width: 40rem) {
   .service-card,
   .page-heading {

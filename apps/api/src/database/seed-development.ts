@@ -118,6 +118,77 @@ async function main(): Promise<void> {
           { upsert: true },
         );
       }
+      if (tenant.slug === 'harbor-demo') {
+        const providerIds = new Map<string, ObjectId>();
+        for (const [internalCode, displayName, displayOrder] of [
+          ['LISA', 'Lisa', 10],
+          ['SANDRA', 'Sandra', 20],
+        ] as const) {
+          const provider = await db.collection('providers').findOneAndUpdate(
+            { tenant_id: tenantResult._id, internal_code: internalCode },
+            {
+              $set: {
+                display_name: displayName,
+                first_name: displayName,
+                last_name: null,
+                email_normalized: null,
+                phone_e164: null,
+                photo_url: null,
+                bio: null,
+                status: 'active',
+                customer_selectable: true,
+                accepting_new_clients: true,
+                display_order: displayOrder,
+                linked_user_id: null,
+                updated_by: userResult._id,
+                updated_at: now,
+              },
+              $setOnInsert: {
+                _id: new ObjectId(),
+                public_id: randomUUID(),
+                version: 1,
+                created_by: userResult._id,
+                created_at: now,
+              },
+            },
+            { upsert: true, returnDocument: 'after' },
+          );
+          if (!provider) throw new Error('Unable to create seed provider');
+          providerIds.set(internalCode, provider._id);
+        }
+        const assignments = [
+          ['LISA', 'BRAZILIAN-WAX'],
+          ['SANDRA', 'BRAZILIAN-WAX'],
+          ['LISA', 'BRAZILIAN-FIRST'],
+          ['LISA', 'FULL-FACE'],
+          ['SANDRA', 'FULL-FACE'],
+          ['SANDRA', 'CHEST-STOMACH'],
+        ] as const;
+        for (const [providerCode, serviceCode] of assignments) {
+          const service = await db.collection('services').findOne({
+            tenant_id: tenantResult._id,
+            internal_code: serviceCode,
+          });
+          const providerId = providerIds.get(providerCode);
+          if (!service || !providerId) throw new Error('Unable to resolve seed assignment');
+          await db.collection('provider_service_assignments').updateOne(
+            { tenant_id: tenantResult._id, provider_id: providerId, service_id: service._id },
+            {
+              $setOnInsert: {
+                _id: new ObjectId(),
+                public_id: randomUUID(),
+                status: 'active',
+                version: 1,
+                created_by: userResult._id,
+                updated_by: userResult._id,
+                created_at: now,
+                updated_at: now,
+              },
+            },
+            { upsert: true },
+          );
+        }
+      }
     }
     process.stdout.write(`Seeded internal administrative user ${email}.\n`);
   } finally {
