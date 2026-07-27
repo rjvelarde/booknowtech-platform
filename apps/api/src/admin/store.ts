@@ -48,6 +48,50 @@ export interface ServiceDocument {
   updated_at: Date;
 }
 
+export interface ProviderDocument {
+  _id: ObjectId;
+  public_id: string;
+  tenant_id: ObjectId;
+  internal_code: string | null;
+  display_name: string;
+  first_name: string | null;
+  last_name: string | null;
+  email_normalized: string | null;
+  phone_e164: string | null;
+  photo_url: string | null;
+  bio: string | null;
+  status: 'active' | 'inactive';
+  customer_selectable: boolean;
+  accepting_new_clients: boolean;
+  display_order: number;
+  linked_user_id: ObjectId | null;
+  version: number;
+  created_at: Date;
+  updated_at: Date;
+  created_by: ObjectId;
+  updated_by: ObjectId;
+}
+
+export interface ProviderServiceAssignmentDocument {
+  _id: ObjectId;
+  public_id: string;
+  tenant_id: ObjectId;
+  provider_id: ObjectId;
+  service_id: ObjectId;
+  status: 'active' | 'inactive';
+  version: number;
+  created_at: Date;
+  updated_at: Date;
+  created_by: ObjectId;
+  updated_by: ObjectId;
+}
+
+export interface ProviderCursor {
+  displayOrder: number;
+  displayName: string;
+  publicId: string;
+}
+
 export interface UserDocument {
   _id: ObjectId;
   public_id: string;
@@ -121,6 +165,8 @@ export class AdminStore {
   private readonly sessions: Collection<AdminSessionDocument>;
   private readonly auditLogs: Collection<AuditLogDocument>;
   private readonly services: Collection<ServiceDocument>;
+  private readonly providers: Collection<ProviderDocument>;
+  private readonly providerServiceAssignments: Collection<ProviderServiceAssignmentDocument>;
 
   public constructor(db: Db) {
     this.tenants = db.collection<TenantDocument>('tenants');
@@ -129,6 +175,10 @@ export class AdminStore {
     this.sessions = db.collection<AdminSessionDocument>('admin_sessions');
     this.auditLogs = db.collection<AuditLogDocument>('audit_logs');
     this.services = db.collection<ServiceDocument>('services');
+    this.providers = db.collection<ProviderDocument>('providers');
+    this.providerServiceAssignments = db.collection<ProviderServiceAssignmentDocument>(
+      'provider_service_assignments',
+    );
   }
 
   public findUserByEmail(email: string): Promise<UserDocument | null> {
@@ -267,6 +317,10 @@ export class AdminStore {
     return this.services.findOne({ tenant_id: tenantId, public_id: publicId });
   }
 
+  public getServiceById(tenantId: ObjectId, id: ObjectId): Promise<ServiceDocument | null> {
+    return this.services.findOne({ tenant_id: tenantId, _id: id });
+  }
+
   public async createService(
     tenant: TenantDocument,
     userId: ObjectId,
@@ -354,6 +408,253 @@ export class AdminStore {
       },
       {
         $set: { status: input.status, updated_by: input.userId, updated_at: new Date() },
+        $inc: { version: 1 },
+      },
+    );
+    return result.modifiedCount === 1 ? 'updated' : 'version_conflict';
+  }
+
+  public listProviders(input: {
+    tenantId: ObjectId;
+    status?: 'active' | 'inactive';
+    after?: ProviderCursor;
+    limit: number;
+  }): Promise<ProviderDocument[]> {
+    const continuation = input.after
+      ? {
+          $or: [
+            { display_order: { $gt: input.after.displayOrder } },
+            {
+              display_order: input.after.displayOrder,
+              display_name: { $gt: input.after.displayName },
+            },
+            {
+              display_order: input.after.displayOrder,
+              display_name: input.after.displayName,
+              public_id: { $gt: input.after.publicId },
+            },
+          ],
+        }
+      : {};
+    return this.providers
+      .find({
+        tenant_id: input.tenantId,
+        ...(input.status ? { status: input.status } : {}),
+        ...continuation,
+      })
+      .sort({ display_order: 1, display_name: 1, public_id: 1 })
+      .limit(input.limit)
+      .toArray();
+  }
+
+  public getProvider(tenantId: ObjectId, publicId: string): Promise<ProviderDocument | null> {
+    return this.providers.findOne({ tenant_id: tenantId, public_id: publicId });
+  }
+
+  public getProviderById(tenantId: ObjectId, id: ObjectId): Promise<ProviderDocument | null> {
+    return this.providers.findOne({ tenant_id: tenantId, _id: id });
+  }
+
+  public async createProvider(
+    tenantId: ObjectId,
+    userId: ObjectId,
+    input: Omit<
+      ProviderDocument,
+      | '_id'
+      | 'public_id'
+      | 'tenant_id'
+      | 'status'
+      | 'linked_user_id'
+      | 'version'
+      | 'created_at'
+      | 'updated_at'
+      | 'created_by'
+      | 'updated_by'
+    >,
+  ): Promise<ProviderDocument> {
+    const now = new Date();
+    const provider: ProviderDocument = {
+      _id: new ObjectId(),
+      public_id: randomUUID(),
+      tenant_id: tenantId,
+      status: 'active',
+      linked_user_id: null,
+      version: 1,
+      created_at: now,
+      updated_at: now,
+      created_by: userId,
+      updated_by: userId,
+      ...input,
+    };
+    await this.providers.insertOne(provider);
+    return provider;
+  }
+
+  public async updateProvider(input: {
+    tenantId: ObjectId;
+    publicId: string;
+    userId: ObjectId;
+    expectedVersion: number;
+    changes: Partial<
+      Pick<
+        ProviderDocument,
+        | 'internal_code'
+        | 'display_name'
+        | 'first_name'
+        | 'last_name'
+        | 'email_normalized'
+        | 'phone_e164'
+        | 'photo_url'
+        | 'bio'
+        | 'customer_selectable'
+        | 'accepting_new_clients'
+        | 'display_order'
+      >
+    >;
+  }): Promise<'updated' | 'version_conflict' | 'not_found'> {
+    const result = await this.providers.updateOne(
+      { tenant_id: input.tenantId, public_id: input.publicId, version: input.expectedVersion },
+      {
+        $set: { ...input.changes, updated_at: new Date(), updated_by: input.userId },
+        $inc: { version: 1 },
+      },
+    );
+    if (result.modifiedCount === 1) return 'updated';
+    return (await this.getProvider(input.tenantId, input.publicId))
+      ? 'version_conflict'
+      : 'not_found';
+  }
+
+  public async transitionProvider(input: {
+    tenantId: ObjectId;
+    publicId: string;
+    userId: ObjectId;
+    expectedVersion: number;
+    status: 'active' | 'inactive';
+  }): Promise<'updated' | 'unchanged' | 'version_conflict' | 'not_found'> {
+    const current = await this.getProvider(input.tenantId, input.publicId);
+    if (!current) return 'not_found';
+    if (current.status === input.status) return 'unchanged';
+    const result = await this.providers.updateOne(
+      {
+        _id: current._id,
+        tenant_id: input.tenantId,
+        version: input.expectedVersion,
+        status: current.status,
+      },
+      {
+        $set: { status: input.status, updated_at: new Date(), updated_by: input.userId },
+        $inc: { version: 1 },
+      },
+    );
+    return result.modifiedCount === 1 ? 'updated' : 'version_conflict';
+  }
+
+  public listAssignmentsForProvider(
+    tenantId: ObjectId,
+    providerId: ObjectId,
+  ): Promise<ProviderServiceAssignmentDocument[]> {
+    return this.providerServiceAssignments
+      .find({ tenant_id: tenantId, provider_id: providerId })
+      .sort({ created_at: 1, public_id: 1 })
+      .toArray();
+  }
+
+  public listAssignmentsForService(
+    tenantId: ObjectId,
+    serviceId: ObjectId,
+  ): Promise<ProviderServiceAssignmentDocument[]> {
+    return this.providerServiceAssignments
+      .find({ tenant_id: tenantId, service_id: serviceId })
+      .sort({ created_at: 1, public_id: 1 })
+      .toArray();
+  }
+
+  public getAssignment(
+    tenantId: ObjectId,
+    providerId: ObjectId,
+    publicId: string,
+  ): Promise<ProviderServiceAssignmentDocument | null> {
+    return this.providerServiceAssignments.findOne({
+      tenant_id: tenantId,
+      provider_id: providerId,
+      public_id: publicId,
+    });
+  }
+
+  public async createAssignment(input: {
+    tenantId: ObjectId;
+    providerId: ObjectId;
+    serviceId: ObjectId;
+    userId: ObjectId;
+  }): Promise<{
+    result: 'created' | 'unchanged' | 'inactive';
+    assignment: ProviderServiceAssignmentDocument;
+  }> {
+    const existing = await this.providerServiceAssignments.findOne({
+      tenant_id: input.tenantId,
+      provider_id: input.providerId,
+      service_id: input.serviceId,
+    });
+    if (existing)
+      return {
+        result: existing.status === 'active' ? 'unchanged' : 'inactive',
+        assignment: existing,
+      };
+    const now = new Date();
+    const assignment: ProviderServiceAssignmentDocument = {
+      _id: new ObjectId(),
+      public_id: randomUUID(),
+      tenant_id: input.tenantId,
+      provider_id: input.providerId,
+      service_id: input.serviceId,
+      status: 'active',
+      version: 1,
+      created_at: now,
+      updated_at: now,
+      created_by: input.userId,
+      updated_by: input.userId,
+    };
+    try {
+      await this.providerServiceAssignments.insertOne(assignment);
+      return { result: 'created', assignment };
+    } catch (error) {
+      if (!(typeof error === 'object' && error !== null && 'code' in error && error.code === 11000))
+        throw error;
+      const concurrent = await this.providerServiceAssignments.findOne({
+        tenant_id: input.tenantId,
+        provider_id: input.providerId,
+        service_id: input.serviceId,
+      });
+      if (!concurrent) throw error;
+      return {
+        result: concurrent.status === 'active' ? 'unchanged' : 'inactive',
+        assignment: concurrent,
+      };
+    }
+  }
+
+  public async transitionAssignment(input: {
+    tenantId: ObjectId;
+    providerId: ObjectId;
+    publicId: string;
+    userId: ObjectId;
+    expectedVersion: number;
+    status: 'active' | 'inactive';
+  }): Promise<'updated' | 'unchanged' | 'version_conflict' | 'not_found'> {
+    const current = await this.getAssignment(input.tenantId, input.providerId, input.publicId);
+    if (!current) return 'not_found';
+    if (current.status === input.status) return 'unchanged';
+    const result = await this.providerServiceAssignments.updateOne(
+      {
+        _id: current._id,
+        tenant_id: input.tenantId,
+        provider_id: input.providerId,
+        version: input.expectedVersion,
+        status: current.status,
+      },
+      {
+        $set: { status: input.status, updated_at: new Date(), updated_by: input.userId },
         $inc: { version: 1 },
       },
     );

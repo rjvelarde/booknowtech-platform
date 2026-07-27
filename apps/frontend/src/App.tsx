@@ -12,6 +12,8 @@ import { BusinessHubHomePage } from './pages/BusinessHubHomePage.js';
 import { LoginPage } from './pages/LoginPage.js';
 import { BusinessProfilePage } from './pages/BusinessProfilePage.js';
 import { ServicesPage } from './pages/ServicesPage.js';
+import { ProvidersPage } from './pages/ProvidersPage.js';
+import { ServiceProviderAssignmentsPage } from './pages/ServiceProviderAssignmentsPage.js';
 import { TenantSelectionPage } from './pages/TenantSelectionPage.js';
 
 type View = 'loading' | 'placeholder' | 'login' | 'select' | 'hub' | 'denied';
@@ -104,11 +106,34 @@ export function App() {
       {path === '/business' ? (
         <BusinessProfilePage csrfToken={session.csrf_token} canManage={canManage(session)} />
       ) : null}
-      {path === '/services' || path.startsWith('/services/') ? (
-        <ServicesPage csrfToken={session.csrf_token} canManage={canManage(session)} />
+      {path === '/services' ? (
+        <ServicesPage
+          csrfToken={session.csrf_token}
+          canManage={canManage(session)}
+          onNavigate={(next) => navigate(next, setPath)}
+        />
+      ) : null}
+      {path.startsWith('/services/') ? (
+        <ServiceProviderAssignmentsPage
+          publicId={path.split('/')[2]!}
+          onNavigate={(next) => navigate(next, setPath)}
+        />
+      ) : null}
+      {path === '/providers' || path.startsWith('/providers/') ? (
+        <ProvidersPage
+          path={path}
+          csrfToken={session.csrf_token}
+          canManage={canManage(session)}
+          onNavigate={(next) => navigate(next, setPath)}
+        />
       ) : null}
     </BusinessHubHomePage>
   );
+}
+
+function navigate(path: string, setPath: (path: string) => void): void {
+  window.history.pushState({}, '', path);
+  setPath(path);
 }
 
 function canManage(session: AdminSessionView): boolean {

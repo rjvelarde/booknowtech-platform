@@ -40,6 +40,51 @@ export interface ServiceView {
   version: number;
 }
 
+export interface ProviderView {
+  public_id: string;
+  internal_code: string | null;
+  display_name: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  phone: string | null;
+  photo_url: string | null;
+  bio: string | null;
+  status: 'active' | 'inactive';
+  customer_selectable: boolean;
+  accepting_new_clients: boolean;
+  display_order: number;
+  version: number;
+  service_assignments?: AssignmentView[];
+}
+
+export interface AssignmentView {
+  public_id: string;
+  status: 'active' | 'inactive';
+  version: number;
+  provider: Pick<
+    ProviderView,
+    'public_id' | 'display_name' | 'status' | 'customer_selectable' | 'accepting_new_clients'
+  >;
+  service: Pick<ServiceView, 'public_id' | 'name' | 'status'>;
+  operationally_eligible: boolean;
+}
+
+export type ProviderInput = Pick<
+  ProviderView,
+  | 'internal_code'
+  | 'display_name'
+  | 'first_name'
+  | 'last_name'
+  | 'email'
+  | 'phone'
+  | 'photo_url'
+  | 'bio'
+  | 'customer_selectable'
+  | 'accepting_new_clients'
+  | 'display_order'
+>;
+
 export type ServiceInput = Pick<
   ServiceView,
   | 'internal_code'
@@ -109,6 +154,91 @@ export function updateBusinessProfile(
 
 export function listServices(): Promise<ServiceView[]> {
   return request('/v1/admin/services');
+}
+
+export function getService(publicId: string): Promise<ServiceView> {
+  return request(`/v1/admin/services/${publicId}`);
+}
+
+export function listProviders(
+  status?: 'active' | 'inactive',
+  cursor?: string,
+): Promise<{ items: ProviderView[]; next_cursor: string | null }> {
+  const query = new URLSearchParams();
+  if (status) query.set('status', status);
+  if (cursor) query.set('cursor', cursor);
+  return request(`/v1/admin/providers${query.size ? `?${query.toString()}` : ''}`);
+}
+
+export function getProvider(publicId: string): Promise<ProviderView> {
+  return request(`/v1/admin/providers/${publicId}`);
+}
+
+export function createProvider(input: ProviderInput, csrfToken: string): Promise<ProviderView> {
+  return request('/v1/admin/providers', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+
+export function updateProvider(
+  publicId: string,
+  input: Partial<ProviderInput> & { expected_version: number },
+  csrfToken: string,
+): Promise<ProviderView> {
+  return request(`/v1/admin/providers/${publicId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+
+export function setProviderActive(
+  provider: ProviderView,
+  active: boolean,
+  csrfToken: string,
+): Promise<ProviderView & { changed: boolean }> {
+  return request(
+    `/v1/admin/providers/${provider.public_id}/${active ? 'activate' : 'deactivate'}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ expected_version: provider.version }),
+      headers: { 'x-csrf-token': csrfToken },
+    },
+  );
+}
+
+export function createProviderAssignment(
+  providerId: string,
+  serviceId: string,
+  csrfToken: string,
+): Promise<AssignmentView & { changed: boolean }> {
+  return request(`/v1/admin/providers/${providerId}/service-assignments`, {
+    method: 'POST',
+    body: JSON.stringify({ service_public_id: serviceId }),
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+
+export function setAssignmentActive(
+  providerId: string,
+  assignment: AssignmentView,
+  active: boolean,
+  csrfToken: string,
+): Promise<AssignmentView & { changed: boolean }> {
+  return request(
+    `/v1/admin/providers/${providerId}/service-assignments/${assignment.public_id}/${active ? 'activate' : 'deactivate'}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ expected_version: assignment.version }),
+      headers: { 'x-csrf-token': csrfToken },
+    },
+  );
+}
+
+export function listServiceProviderAssignments(serviceId: string): Promise<AssignmentView[]> {
+  return request(`/v1/admin/services/${serviceId}/provider-assignments`);
 }
 
 export function createService(input: ServiceInput, csrfToken: string): Promise<ServiceView> {

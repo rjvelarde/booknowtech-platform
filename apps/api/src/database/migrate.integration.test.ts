@@ -82,4 +82,81 @@ suite('administrative foundation migration', () => {
       }),
     ).rejects.toThrow();
   });
+
+  it('creates tenant-scoped provider and assignment indexes', async () => {
+    await migrateDatabase(db);
+    expect((await db.collection('providers').indexes()).map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        'providers_tenant_public_id_unique',
+        'providers_tenant_internal_code_unique',
+        'providers_directory_list',
+      ]),
+    );
+    expect(
+      (await db.collection('provider_service_assignments').indexes()).map(({ name }) => name),
+    ).toEqual(
+      expect.arrayContaining([
+        'provider_service_tenant_provider_service_unique',
+        'provider_service_tenant_public_id_unique',
+        'provider_service_by_provider',
+        'provider_service_by_service',
+      ]),
+    );
+  });
+
+  it('enforces provider code uniqueness within a tenant and permits cross-tenant reuse', async () => {
+    await migrateDatabase(db);
+    const actor = new ObjectId();
+    const tenantA = new ObjectId();
+    const tenantB = new ObjectId();
+    const provider = (tenantId: ObjectId) => ({
+      public_id: randomUUID(),
+      tenant_id: tenantId,
+      internal_code: 'LISA',
+      display_name: 'Lisa',
+      first_name: 'Lisa',
+      last_name: null,
+      email_normalized: null,
+      phone_e164: null,
+      photo_url: null,
+      bio: null,
+      status: 'active',
+      customer_selectable: true,
+      accepting_new_clients: true,
+      display_order: 10,
+      linked_user_id: null,
+      version: 1,
+      created_at: new Date(),
+      updated_at: new Date(),
+      created_by: actor,
+      updated_by: actor,
+    });
+    await db.collection('providers').insertOne(provider(tenantA));
+    await expect(db.collection('providers').insertOne(provider(tenantA))).rejects.toThrow();
+    await expect(db.collection('providers').insertOne(provider(tenantB))).resolves.toBeDefined();
+  });
+
+  it('enforces one persistent assignment per tenant, provider, and service', async () => {
+    await migrateDatabase(db);
+    const actor = new ObjectId();
+    const tenantId = new ObjectId();
+    const providerId = new ObjectId();
+    const serviceId = new ObjectId();
+    const assignment = () => ({
+      public_id: randomUUID(),
+      tenant_id: tenantId,
+      provider_id: providerId,
+      service_id: serviceId,
+      status: 'active',
+      version: 1,
+      created_at: new Date(),
+      updated_at: new Date(),
+      created_by: actor,
+      updated_by: actor,
+    });
+    await db.collection('provider_service_assignments').insertOne(assignment());
+    await expect(
+      db.collection('provider_service_assignments').insertOne(assignment()),
+    ).rejects.toThrow();
+  });
 });

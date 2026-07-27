@@ -176,6 +176,49 @@ describe('Business Hub', () => {
       legal_name: 'Brazilian Wax Demo LLC',
     });
   });
+
+  it('shows providers to staff while reserving provider management for owners and admins', async () => {
+    const providerSession = {
+      ...activeSession(),
+      active_tenant: { ...activeSession().active_tenant, role: 'front_desk' },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { data: providerSession }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          data: {
+            items: [
+              {
+                public_id: 'lisa',
+                internal_code: 'LISA',
+                display_name: 'Lisa',
+                first_name: 'Lisa',
+                last_name: null,
+                email: null,
+                phone: null,
+                photo_url: null,
+                bio: null,
+                status: 'active',
+                customer_selectable: true,
+                accepting_new_clients: true,
+                display_order: 10,
+                version: 1,
+              },
+            ],
+            next_cursor: null,
+          },
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Providers' }));
+
+    expect(await screen.findByRole('heading', { name: 'Lisa' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add provider' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deactivate' })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/admin/providers');
+  });
 });
 
 function activeSession() {

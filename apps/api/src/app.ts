@@ -7,6 +7,7 @@ import { registerCatalogRoutes } from './catalog/routes.js';
 import type { Environment } from './config.js';
 import { resolveCorrelationId } from './correlation.js';
 import { createLoggerOptions } from './logger.js';
+import { registerProviderRoutes } from './provider/routes.js';
 import type { ReadinessProbe } from './readiness.js';
 
 interface BuildApplicationOptions {
@@ -135,6 +136,7 @@ export async function buildApplication({
     if (!adminStore) throw new Error('Administrative persistence is required when enabled');
     registerAdminRoutes(app, environment, adminStore);
     registerCatalogRoutes(app, environment, adminStore);
+    registerProviderRoutes(app, environment, adminStore);
   }
 
   app.addHook('onClose', async () => {
