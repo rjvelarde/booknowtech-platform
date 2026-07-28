@@ -148,6 +148,8 @@ suite('administrative foundation migration', () => {
       provider_id: providerId,
       service_id: serviceId,
       status: 'active',
+      buffer_before_minutes: 0,
+      buffer_after_minutes: 0,
       version: 1,
       created_at: new Date(),
       updated_at: new Date(),
