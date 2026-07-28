@@ -70,6 +70,13 @@ export function BusinessHubHomePage({
           >
             Providers
           </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => onNavigate('/availability/closures')}
+          >
+            Closures
+          </button>
         </nav>
         <div className="workspace">
           {children ?? (

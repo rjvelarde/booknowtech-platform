@@ -174,15 +174,115 @@ async function main(): Promise<void> {
           await db.collection('provider_service_assignments').updateOne(
             { tenant_id: tenantResult._id, provider_id: providerId, service_id: service._id },
             {
+              $set: {
+                buffer_before_minutes:
+                  providerCode === 'LISA' && serviceCode === 'BRAZILIAN-WAX' ? 5 : 0,
+                buffer_after_minutes: serviceCode === 'BRAZILIAN-WAX' ? 10 : 0,
+                updated_by: userResult._id,
+                updated_at: now,
+              },
               $setOnInsert: {
                 _id: new ObjectId(),
                 public_id: randomUUID(),
                 status: 'active',
                 version: 1,
                 created_by: userResult._id,
-                updated_by: userResult._id,
                 created_at: now,
+              },
+            },
+            { upsert: true },
+          );
+        }
+        for (const [providerCode, weeklyHours, breaks] of [
+          [
+            'LISA',
+            [1, 2, 3, 4, 5].map((day_of_week) => ({
+              day_of_week,
+              start_minute: 540,
+              end_minute: 1020,
+            })),
+            [1, 2, 3, 4, 5].map((day_of_week) => ({
+              day_of_week,
+              start_minute: 720,
+              end_minute: 750,
+            })),
+          ],
+          [
+            'SANDRA',
+            [2, 3, 4, 5, 6].map((day_of_week) => ({
+              day_of_week,
+              start_minute: 600,
+              end_minute: 1080,
+            })),
+            [2, 3, 4, 5, 6].map((day_of_week) => ({
+              day_of_week,
+              start_minute: 780,
+              end_minute: 810,
+            })),
+          ],
+        ] as const) {
+          const providerId = providerIds.get(providerCode)!;
+          await db.collection('provider_availability_schedules').updateOne(
+            { tenant_id: tenantResult._id, provider_id: providerId },
+            {
+              $set: {
+                timezone: 'America/New_York',
+                weekly_hours: weeklyHours,
+                breaks,
                 updated_at: now,
+                updated_by: userResult._id,
+              },
+              $setOnInsert: {
+                _id: new ObjectId(),
+                public_id: randomUUID(),
+                version: 1,
+                created_at: now,
+                created_by: userResult._id,
+              },
+            },
+            { upsert: true },
+          );
+        }
+        const lisaId = providerIds.get('LISA')!;
+        for (const exception of [
+          {
+            seed_key: 'NEW-YEAR-2027',
+            scope: 'tenant',
+            provider_id: null,
+            kind: 'holiday',
+            name: "New Year's Day",
+            starts_on: '2027-01-01',
+            ends_before: '2027-01-02',
+          },
+          {
+            seed_key: 'LISA-2027-01-15',
+            scope: 'provider',
+            provider_id: lisaId,
+            kind: 'time_off',
+            name: 'Time off',
+            starts_on: '2027-01-15',
+            ends_before: '2027-01-16',
+          },
+        ] as const) {
+          await db.collection('availability_exceptions').updateOne(
+            { tenant_id: tenantResult._id, seed_key: exception.seed_key },
+            {
+              $set: {
+                ...exception,
+                all_day: true,
+                timezone: 'America/New_York',
+                starts_at: null,
+                ends_at: null,
+                status: 'active',
+                updated_at: now,
+                updated_by: userResult._id,
+              },
+              $setOnInsert: {
+                _id: new ObjectId(),
+                public_id: randomUUID(),
+                version: 1,
+                created_at: now,
+                created_by: userResult._id,
               },
             },
             { upsert: true },

@@ -178,6 +178,8 @@ const validators: Record<string, Document> = {
         'provider_id',
         'service_id',
         'status',
+        'buffer_before_minutes',
+        'buffer_after_minutes',
         'version',
         'created_at',
         'updated_at',
@@ -190,11 +192,101 @@ const validators: Record<string, Document> = {
         provider_id: { bsonType: 'objectId' },
         service_id: { bsonType: 'objectId' },
         status: { enum: ['active', 'inactive'] },
+        buffer_before_minutes: { bsonType: ['int', 'long'], minimum: 0, maximum: 1440 },
+        buffer_after_minutes: { bsonType: ['int', 'long'], minimum: 0, maximum: 1440 },
         version: { bsonType: ['int', 'long'], minimum: 1 },
         created_at: { bsonType: 'date' },
         updated_at: { bsonType: 'date' },
         created_by: { bsonType: 'objectId' },
         updated_by: { bsonType: 'objectId' },
+      },
+    },
+  },
+  provider_availability_schedules: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: [
+        'public_id',
+        'tenant_id',
+        'provider_id',
+        'timezone',
+        'weekly_hours',
+        'breaks',
+        'version',
+        'created_at',
+        'updated_at',
+        'created_by',
+        'updated_by',
+      ],
+      properties: {
+        tenant_id: { bsonType: 'objectId' },
+        provider_id: { bsonType: 'objectId' },
+        timezone: { bsonType: 'string', minLength: 1, maxLength: 100 },
+        weekly_hours: {
+          bsonType: 'array',
+          items: {
+            bsonType: 'object',
+            required: ['day_of_week', 'start_minute', 'end_minute'],
+            properties: {
+              day_of_week: { bsonType: ['int', 'long'], minimum: 1, maximum: 7 },
+              start_minute: { bsonType: ['int', 'long'], minimum: 0, maximum: 1439 },
+              end_minute: { bsonType: ['int', 'long'], minimum: 1, maximum: 1440 },
+            },
+          },
+        },
+        breaks: {
+          bsonType: 'array',
+          items: {
+            bsonType: 'object',
+            required: ['day_of_week', 'start_minute', 'end_minute'],
+            properties: {
+              day_of_week: { bsonType: ['int', 'long'], minimum: 1, maximum: 7 },
+              start_minute: { bsonType: ['int', 'long'], minimum: 0, maximum: 1439 },
+              end_minute: { bsonType: ['int', 'long'], minimum: 1, maximum: 1440 },
+            },
+          },
+        },
+        version: { bsonType: ['int', 'long'], minimum: 1 },
+      },
+    },
+  },
+  availability_exceptions: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: [
+        'public_id',
+        'tenant_id',
+        'scope',
+        'provider_id',
+        'kind',
+        'name',
+        'all_day',
+        'timezone',
+        'starts_on',
+        'ends_before',
+        'starts_at',
+        'ends_at',
+        'status',
+        'version',
+        'created_at',
+        'updated_at',
+        'created_by',
+        'updated_by',
+      ],
+      properties: {
+        tenant_id: { bsonType: 'objectId' },
+        provider_id: { bsonType: ['objectId', 'null'] },
+        scope: { enum: ['tenant', 'provider'] },
+        kind: { enum: ['holiday', 'closure', 'time_off'] },
+        name: { bsonType: ['string', 'null'], maxLength: 160 },
+        all_day: { bsonType: 'bool' },
+        timezone: { bsonType: 'string' },
+        starts_on: { bsonType: ['string', 'null'] },
+        ends_before: { bsonType: ['string', 'null'] },
+        starts_at: { bsonType: ['date', 'null'] },
+        ends_at: { bsonType: ['date', 'null'] },
+        status: { enum: ['active', 'inactive'] },
+        version: { bsonType: ['int', 'long'], minimum: 1 },
       },
     },
   },
@@ -220,6 +312,24 @@ export async function migrateDatabase(db: Db): Promise<void> {
         },
       },
     ]);
+  }
+  if (existing.has('provider_service_assignments')) {
+    await db.collection('provider_service_assignments').updateMany(
+      {
+        $or: [
+          { buffer_before_minutes: { $exists: false } },
+          { buffer_after_minutes: { $exists: false } },
+        ],
+      },
+      [
+        {
+          $set: {
+            buffer_before_minutes: { $ifNull: ['$buffer_before_minutes', 0] },
+            buffer_after_minutes: { $ifNull: ['$buffer_after_minutes', 0] },
+          },
+        },
+      ],
+    );
   }
   for (const [name, validator] of Object.entries(validators)) {
     if (existing.has(name)) {
@@ -329,6 +439,33 @@ export async function migrateDatabase(db: Db): Promise<void> {
     {
       key: { tenant_id: 1, updated_at: -1, public_id: 1 },
       name: 'provider_service_updated',
+    },
+  ]);
+  await db.collection('provider_availability_schedules').createIndexes([
+    {
+      key: { tenant_id: 1, provider_id: 1 },
+      name: 'availability_schedule_tenant_provider_unique',
+      unique: true,
+    },
+    {
+      key: { tenant_id: 1, public_id: 1 },
+      name: 'availability_schedule_tenant_public_id_unique',
+      unique: true,
+    },
+  ]);
+  await db.collection('availability_exceptions').createIndexes([
+    {
+      key: { tenant_id: 1, public_id: 1 },
+      name: 'availability_exception_tenant_public_id_unique',
+      unique: true,
+    },
+    {
+      key: { tenant_id: 1, scope: 1, provider_id: 1, status: 1, starts_at: 1, ends_at: 1 },
+      name: 'availability_exception_timed_lookup',
+    },
+    {
+      key: { tenant_id: 1, scope: 1, provider_id: 1, status: 1, starts_on: 1, ends_before: 1 },
+      name: 'availability_exception_date_lookup',
     },
   ]);
 }
