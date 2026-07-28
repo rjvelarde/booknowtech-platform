@@ -79,6 +79,49 @@ export interface ProviderServiceAssignmentDocument {
   provider_id: ObjectId;
   service_id: ObjectId;
   status: 'active' | 'inactive';
+  buffer_before_minutes: number;
+  buffer_after_minutes: number;
+  version: number;
+  created_at: Date;
+  updated_at: Date;
+  created_by: ObjectId;
+  updated_by: ObjectId;
+}
+
+export interface AvailabilityInterval {
+  day_of_week: number;
+  start_minute: number;
+  end_minute: number;
+}
+export interface ProviderAvailabilityScheduleDocument {
+  _id: ObjectId;
+  public_id: string;
+  tenant_id: ObjectId;
+  provider_id: ObjectId;
+  timezone: string;
+  weekly_hours: AvailabilityInterval[];
+  breaks: AvailabilityInterval[];
+  version: number;
+  created_at: Date;
+  updated_at: Date;
+  created_by: ObjectId;
+  updated_by: ObjectId;
+}
+export interface AvailabilityExceptionDocument {
+  _id: ObjectId;
+  public_id: string;
+  tenant_id: ObjectId;
+  scope: 'tenant' | 'provider';
+  provider_id: ObjectId | null;
+  kind: 'holiday' | 'closure' | 'time_off';
+  name: string | null;
+  all_day: boolean;
+  timezone: string;
+  starts_on: string | null;
+  ends_before: string | null;
+  starts_at: Date | null;
+  ends_at: Date | null;
+  status: 'active' | 'inactive';
   version: number;
   created_at: Date;
   updated_at: Date;
@@ -167,6 +210,8 @@ export class AdminStore {
   private readonly services: Collection<ServiceDocument>;
   private readonly providers: Collection<ProviderDocument>;
   private readonly providerServiceAssignments: Collection<ProviderServiceAssignmentDocument>;
+  private readonly availabilitySchedules: Collection<ProviderAvailabilityScheduleDocument>;
+  private readonly availabilityExceptions: Collection<AvailabilityExceptionDocument>;
 
   public constructor(db: Db) {
     this.tenants = db.collection<TenantDocument>('tenants');
@@ -179,6 +224,8 @@ export class AdminStore {
     this.providerServiceAssignments = db.collection<ProviderServiceAssignmentDocument>(
       'provider_service_assignments',
     );
+    this.availabilitySchedules = db.collection('provider_availability_schedules');
+    this.availabilityExceptions = db.collection('availability_exceptions');
   }
 
   public findUserByEmail(email: string): Promise<UserDocument | null> {
@@ -609,6 +656,8 @@ export class AdminStore {
       provider_id: input.providerId,
       service_id: input.serviceId,
       status: 'active',
+      buffer_before_minutes: 0,
+      buffer_after_minutes: 0,
       version: 1,
       created_at: now,
       updated_at: now,
@@ -659,6 +708,174 @@ export class AdminStore {
       },
     );
     return result.modifiedCount === 1 ? 'updated' : 'version_conflict';
+  }
+
+  public getAvailabilitySchedule(tenantId: ObjectId, providerId: ObjectId) {
+    return this.availabilitySchedules.findOne({ tenant_id: tenantId, provider_id: providerId });
+  }
+
+  public async createAvailabilitySchedule(input: {
+    tenantId: ObjectId;
+    providerId: ObjectId;
+    userId: ObjectId;
+    timezone: string;
+    weeklyHours: AvailabilityInterval[];
+    breaks: AvailabilityInterval[];
+  }) {
+    const now = new Date();
+    const document: ProviderAvailabilityScheduleDocument = {
+      _id: new ObjectId(),
+      public_id: randomUUID(),
+      tenant_id: input.tenantId,
+      provider_id: input.providerId,
+      timezone: input.timezone,
+      weekly_hours: input.weeklyHours,
+      breaks: input.breaks,
+      version: 1,
+      created_at: now,
+      updated_at: now,
+      created_by: input.userId,
+      updated_by: input.userId,
+    };
+    await this.availabilitySchedules.insertOne(document);
+    return document;
+  }
+
+  public async updateAvailabilitySchedule(input: {
+    tenantId: ObjectId;
+    providerId: ObjectId;
+    userId: ObjectId;
+    expectedVersion: number;
+    timezone: string;
+    weeklyHours: AvailabilityInterval[];
+    breaks: AvailabilityInterval[];
+  }) {
+    const result = await this.availabilitySchedules.updateOne(
+      { tenant_id: input.tenantId, provider_id: input.providerId, version: input.expectedVersion },
+      {
+        $set: {
+          timezone: input.timezone,
+          weekly_hours: input.weeklyHours,
+          breaks: input.breaks,
+          updated_at: new Date(),
+          updated_by: input.userId,
+        },
+        $inc: { version: 1 },
+      },
+    );
+    if (result.modifiedCount === 1) return 'updated' as const;
+    return (await this.getAvailabilitySchedule(input.tenantId, input.providerId))
+      ? ('version_conflict' as const)
+      : ('not_found' as const);
+  }
+
+  public listAvailabilityExceptions(tenantId: ObjectId, providerId?: ObjectId) {
+    return this.availabilityExceptions
+      .find({
+        tenant_id: tenantId,
+        ...(providerId
+          ? { $or: [{ scope: 'tenant' }, { scope: 'provider', provider_id: providerId }] }
+          : {}),
+      })
+      .sort({ starts_on: 1, starts_at: 1, public_id: 1 })
+      .toArray();
+  }
+  public getAvailabilityException(tenantId: ObjectId, publicId: string) {
+    return this.availabilityExceptions.findOne({ tenant_id: tenantId, public_id: publicId });
+  }
+  public async createAvailabilityException(
+    input: Omit<
+      AvailabilityExceptionDocument,
+      '_id' | 'public_id' | 'version' | 'created_at' | 'updated_at' | 'created_by' | 'updated_by'
+    > & { userId: ObjectId },
+  ) {
+    const now = new Date();
+    const document: AvailabilityExceptionDocument = {
+      ...input,
+      _id: new ObjectId(),
+      public_id: randomUUID(),
+      version: 1,
+      created_at: now,
+      updated_at: now,
+      created_by: input.userId,
+      updated_by: input.userId,
+    };
+    delete (document as AvailabilityExceptionDocument & { userId?: ObjectId }).userId;
+    await this.availabilityExceptions.insertOne(document);
+    return document;
+  }
+  public async updateAvailabilityException(input: {
+    tenantId: ObjectId;
+    publicId: string;
+    userId: ObjectId;
+    expectedVersion: number;
+    changes: Partial<
+      Pick<
+        AvailabilityExceptionDocument,
+        'name' | 'all_day' | 'timezone' | 'starts_on' | 'ends_before' | 'starts_at' | 'ends_at'
+      >
+    >;
+  }) {
+    const result = await this.availabilityExceptions.updateOne(
+      { tenant_id: input.tenantId, public_id: input.publicId, version: input.expectedVersion },
+      {
+        $set: { ...input.changes, updated_at: new Date(), updated_by: input.userId },
+        $inc: { version: 1 },
+      },
+    );
+    if (result.modifiedCount === 1) return 'updated' as const;
+    return (await this.getAvailabilityException(input.tenantId, input.publicId))
+      ? ('version_conflict' as const)
+      : ('not_found' as const);
+  }
+  public async transitionAvailabilityException(input: {
+    tenantId: ObjectId;
+    publicId: string;
+    userId: ObjectId;
+    expectedVersion: number;
+    status: 'active' | 'inactive';
+  }) {
+    const current = await this.getAvailabilityException(input.tenantId, input.publicId);
+    if (!current) return 'not_found' as const;
+    if (current.status === input.status) return 'unchanged' as const;
+    const result = await this.availabilityExceptions.updateOne(
+      { _id: current._id, tenant_id: input.tenantId, version: input.expectedVersion },
+      {
+        $set: { status: input.status, updated_at: new Date(), updated_by: input.userId },
+        $inc: { version: 1 },
+      },
+    );
+    return result.modifiedCount === 1 ? ('updated' as const) : ('version_conflict' as const);
+  }
+  public async updateAssignmentBuffers(input: {
+    tenantId: ObjectId;
+    providerId: ObjectId;
+    publicId: string;
+    userId: ObjectId;
+    expectedVersion: number;
+    before: number;
+    after: number;
+  }) {
+    const current = await this.getAssignment(input.tenantId, input.providerId, input.publicId);
+    if (!current) return 'not_found' as const;
+    if (
+      current.buffer_before_minutes === input.before &&
+      current.buffer_after_minutes === input.after
+    )
+      return 'unchanged' as const;
+    const result = await this.providerServiceAssignments.updateOne(
+      { _id: current._id, tenant_id: input.tenantId, version: input.expectedVersion },
+      {
+        $set: {
+          buffer_before_minutes: input.before,
+          buffer_after_minutes: input.after,
+          updated_at: new Date(),
+          updated_by: input.userId,
+        },
+        $inc: { version: 1 },
+      },
+    );
+    return result.modifiedCount === 1 ? ('updated' as const) : ('version_conflict' as const);
   }
 
   private async loadMemberships(

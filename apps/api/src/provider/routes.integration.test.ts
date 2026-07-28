@@ -284,6 +284,8 @@ function assignmentFixture(
     provider_id: providerId,
     service_id: serviceId,
     status,
+    buffer_before_minutes: 0,
+    buffer_after_minutes: 0,
     version: 2,
     created_at: now,
     updated_at: now,

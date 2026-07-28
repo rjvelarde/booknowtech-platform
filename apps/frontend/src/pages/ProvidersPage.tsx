@@ -219,6 +219,13 @@ function ProviderDetail({
             Edit provider
           </button>
         ) : null}
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => onNavigate(`/providers/${provider.public_id}/availability`)}
+        >
+          Availability
+        </button>
       </div>
       <p>{provider.bio ?? 'No biography provided.'}</p>
       <dl className="detail-grid">

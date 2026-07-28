@@ -15,6 +15,8 @@ import { ServicesPage } from './pages/ServicesPage.js';
 import { ProvidersPage } from './pages/ProvidersPage.js';
 import { ServiceProviderAssignmentsPage } from './pages/ServiceProviderAssignmentsPage.js';
 import { TenantSelectionPage } from './pages/TenantSelectionPage.js';
+import { AvailabilityPage } from './pages/AvailabilityPage.js';
+import { ClosuresPage } from './pages/ClosuresPage.js';
 
 type View = 'loading' | 'placeholder' | 'login' | 'select' | 'hub' | 'denied';
 
@@ -119,7 +121,19 @@ export function App() {
           onNavigate={(next) => navigate(next, setPath)}
         />
       ) : null}
-      {path === '/providers' || path.startsWith('/providers/') ? (
+      {path.match(/^\/providers\/[^/]+\/availability$/) ? (
+        <AvailabilityPage
+          providerId={path.split('/')[2]!}
+          csrfToken={session.csrf_token}
+          canManage={canManage(session)}
+          onNavigate={(next) => navigate(next, setPath)}
+        />
+      ) : null}
+      {path === '/availability/closures' ? (
+        <ClosuresPage csrfToken={session.csrf_token} canManage={canManage(session)} />
+      ) : null}
+      {(path === '/providers' || path.startsWith('/providers/')) &&
+      !path.endsWith('/availability') ? (
         <ProvidersPage
           path={path}
           csrfToken={session.csrf_token}

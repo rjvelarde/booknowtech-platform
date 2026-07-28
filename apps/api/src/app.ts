@@ -8,6 +8,7 @@ import type { Environment } from './config.js';
 import { resolveCorrelationId } from './correlation.js';
 import { createLoggerOptions } from './logger.js';
 import { registerProviderRoutes } from './provider/routes.js';
+import { registerAvailabilityRoutes } from './availability/routes.js';
 import type { ReadinessProbe } from './readiness.js';
 
 interface BuildApplicationOptions {
@@ -137,6 +138,7 @@ export async function buildApplication({
     registerAdminRoutes(app, environment, adminStore);
     registerCatalogRoutes(app, environment, adminStore);
     registerProviderRoutes(app, environment, adminStore);
+    registerAvailabilityRoutes(app, environment, adminStore);
   }
 
   app.addHook('onClose', async () => {

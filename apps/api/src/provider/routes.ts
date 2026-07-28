@@ -464,6 +464,8 @@ function assignmentView(
     public_id: assignment.public_id,
     status: assignment.status,
     version: assignment.version,
+    buffer_before_minutes: assignment.buffer_before_minutes,
+    buffer_after_minutes: assignment.buffer_after_minutes,
     provider: {
       public_id: provider.public_id,
       display_name: provider.display_name,

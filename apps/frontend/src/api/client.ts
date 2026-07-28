@@ -62,12 +62,41 @@ export interface AssignmentView {
   public_id: string;
   status: 'active' | 'inactive';
   version: number;
+  buffer_before_minutes: number;
+  buffer_after_minutes: number;
   provider: Pick<
     ProviderView,
     'public_id' | 'display_name' | 'status' | 'customer_selectable' | 'accepting_new_clients'
   >;
   service: Pick<ServiceView, 'public_id' | 'name' | 'status'>;
   operationally_eligible: boolean;
+}
+export interface AvailabilityInterval {
+  day_of_week: number;
+  start_minute: number;
+  end_minute: number;
+}
+export interface AvailabilityScheduleView {
+  public_id: string;
+  timezone: string;
+  weekly_hours: AvailabilityInterval[];
+  breaks: AvailabilityInterval[];
+  version: number;
+  updated_at: string;
+}
+export interface AvailabilityExceptionView {
+  public_id: string;
+  scope: 'tenant' | 'provider';
+  kind: 'holiday' | 'closure' | 'time_off';
+  name: string | null;
+  all_day: boolean;
+  timezone: string;
+  starts_on: string | null;
+  ends_before: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  status: 'active' | 'inactive';
+  version: number;
 }
 
 export type ProviderInput = Pick<
@@ -239,6 +268,99 @@ export function setAssignmentActive(
 
 export function listServiceProviderAssignments(serviceId: string): Promise<AssignmentView[]> {
   return request(`/v1/admin/services/${serviceId}/provider-assignments`);
+}
+export function getAvailabilitySchedule(providerId: string): Promise<AvailabilityScheduleView> {
+  return request(`/v1/admin/providers/${providerId}/availability-schedule`);
+}
+export function saveAvailabilitySchedule(
+  providerId: string,
+  input: {
+    timezone: string;
+    weekly_hours: AvailabilityInterval[];
+    breaks: AvailabilityInterval[];
+    expected_version?: number;
+  },
+  csrfToken: string,
+): Promise<AvailabilityScheduleView> {
+  return request(`/v1/admin/providers/${providerId}/availability-schedule`, {
+    method: input.expected_version ? 'PATCH' : 'POST',
+    body: JSON.stringify(input),
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+export function listAvailabilityExceptions(
+  providerId?: string,
+): Promise<AvailabilityExceptionView[]> {
+  return request(
+    `/v1/admin/availability-exceptions${providerId ? `?provider_public_id=${encodeURIComponent(providerId)}` : ''}`,
+  );
+}
+export function createAvailabilityException(
+  input: Record<string, unknown>,
+  csrfToken: string,
+): Promise<AvailabilityExceptionView> {
+  return request('/v1/admin/availability-exceptions', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+export function setAvailabilityExceptionActive(
+  item: AvailabilityExceptionView,
+  active: boolean,
+  csrfToken: string,
+): Promise<AvailabilityExceptionView & { changed: boolean }> {
+  return request(
+    `/v1/admin/availability-exceptions/${item.public_id}/${active ? 'activate' : 'deactivate'}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ expected_version: item.version }),
+      headers: { 'x-csrf-token': csrfToken },
+    },
+  );
+}
+export function updateAssignmentBuffers(
+  providerId: string,
+  item: AssignmentView,
+  before: number,
+  after: number,
+  csrfToken: string,
+): Promise<{
+  public_id: string;
+  buffer_before_minutes: number;
+  buffer_after_minutes: number;
+  version: number;
+  changed: boolean;
+}> {
+  return request(
+    `/v1/admin/providers/${providerId}/service-assignments/${item.public_id}/buffers`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        expected_version: item.version,
+        buffer_before_minutes: before,
+        buffer_after_minutes: after,
+      }),
+      headers: { 'x-csrf-token': csrfToken },
+    },
+  );
+}
+export function previewAvailability(
+  providerId: string,
+  serviceId: string,
+  startDate: string,
+  endDate: string,
+): Promise<{
+  eligible: boolean;
+  timezone: string;
+  days: Array<{ local_date: string; windows: Array<Record<string, string>> }>;
+}> {
+  const q = new URLSearchParams({
+    service_public_id: serviceId,
+    start_date: startDate,
+    end_date: endDate,
+  });
+  return request(`/v1/admin/providers/${providerId}/availability-preview?${q.toString()}`);
 }
 
 export function createService(input: ServiceInput, csrfToken: string): Promise<ServiceView> {
