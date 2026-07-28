@@ -10,6 +10,7 @@ import { authenticateAdminMutation, authenticateAdminRequest } from '../auth/rou
 import type { Environment } from '../config.js';
 
 const managers = new Set(['tenant_owner', 'tenant_admin']);
+const timezoneFormatters = new Map<string, Intl.DateTimeFormat>();
 const intervalSchema = {
   type: 'object',
   additionalProperties: false,
@@ -659,8 +660,9 @@ function localToUtcSafe(date: string, minute: number, zone: string): Date | unde
   return undefined;
 }
 function parts(date: Date, zone: string) {
-  const values = Object.fromEntries(
-    new Intl.DateTimeFormat('en-CA', {
+  let formatter = timezoneFormatters.get(zone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-CA', {
       timeZone: zone,
       year: 'numeric',
       month: '2-digit',
@@ -668,10 +670,10 @@ function parts(date: Date, zone: string) {
       hour: '2-digit',
       minute: '2-digit',
       hourCycle: 'h23',
-    })
-      .formatToParts(date)
-      .map((x) => [x.type, x.value]),
-  );
+    });
+    timezoneFormatters.set(zone, formatter);
+  }
+  const values = Object.fromEntries(formatter.formatToParts(date).map((x) => [x.type, x.value]));
   return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}`;
 }
 function localIso(date: Date, zone: string) {
