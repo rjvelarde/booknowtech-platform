@@ -207,6 +207,7 @@ function ProviderDetail({
       </p>
     );
   const assigned = new Set(provider.service_assignments?.map((item) => item.service.public_id));
+  const unassignedServices = services.filter((service) => !assigned.has(service.public_id));
   return (
     <section aria-labelledby="provider-title">
       <div className="page-heading">
@@ -269,35 +270,37 @@ function ProviderDetail({
       ) : null}
       <h2>Service assignments</h2>
       {canManage ? (
-        <div className="assignment-controls">
-          <label>
-            Service{' '}
-            <select value={selected} onChange={(event) => setSelected(event.target.value)}>
-              <option value="">Select a service</option>
-              {services
-                .filter((service) => !assigned.has(service.public_id))
-                .map((service) => (
+        unassignedServices.length ? (
+          <div className="assignment-controls">
+            <label>
+              Service{' '}
+              <select value={selected} onChange={(event) => setSelected(event.target.value)}>
+                <option value="">Select a service</option>
+                {unassignedServices.map((service) => (
                   <option key={service.public_id} value={service.public_id}>
                     {service.name}
                   </option>
                 ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            disabled={!selected}
-            onClick={() =>
-              void createProviderAssignment(provider.public_id, selected, csrfToken)
-                .then(() => {
-                  setSelected('');
-                  return reload();
-                })
-                .catch(() => setError(true))
-            }
-          >
-            Assign service
-          </button>
-        </div>
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={!selected}
+              onClick={() =>
+                void createProviderAssignment(provider.public_id, selected, csrfToken)
+                  .then(() => {
+                    setSelected('');
+                    return reload();
+                  })
+                  .catch(() => setError(true))
+              }
+            >
+              Assign service
+            </button>
+          </div>
+        ) : (
+          <p role="status">All services are already assigned to this provider.</p>
+        )
       ) : null}
       {error ? <p role="alert">Unable to complete the provider request.</p> : null}
       <div className="service-list">

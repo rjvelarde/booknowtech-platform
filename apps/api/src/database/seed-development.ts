@@ -63,6 +63,7 @@ async function main(): Promise<void> {
             legal_name: null,
             contact: { email_normalized: null, phone_e164: null, website_url: null },
             default_timezone: 'America/New_York',
+            default_slot_cadence_minutes: tenant.slug === 'harbor-demo' ? 15 : 30,
             locale: 'en-US',
             currency: 'USD',
             status: 'active',
@@ -102,6 +103,12 @@ async function main(): Promise<void> {
               duration_minutes: duration,
               base_price_minor: price,
               booking_fee_minor: fee,
+              slot_cadence_minutes:
+                internalCode === 'CHEST-STOMACH'
+                  ? 20
+                  : internalCode === 'CONSULT-VIRTUAL-30'
+                    ? 15
+                    : null,
               currency: 'USD',
               status,
               updated_by: userResult._id,

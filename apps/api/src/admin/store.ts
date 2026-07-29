@@ -16,6 +16,7 @@ export interface TenantDocument {
     website_url: string | null;
   };
   default_timezone: string;
+  default_slot_cadence_minutes: number;
   locale: string;
   currency: string;
   version: number;
@@ -39,6 +40,7 @@ export interface ServiceDocument {
   duration_minutes: number;
   base_price_minor: number;
   booking_fee_minor: number;
+  slot_cadence_minutes: number | null;
   currency: string;
   status: 'active' | 'inactive';
   version: number;
@@ -335,7 +337,13 @@ export class AdminStore {
     changes: Partial<
       Pick<
         TenantDocument,
-        'display_name' | 'legal_name' | 'contact' | 'default_timezone' | 'locale' | 'currency'
+        | 'display_name'
+        | 'legal_name'
+        | 'contact'
+        | 'default_timezone'
+        | 'default_slot_cadence_minutes'
+        | 'locale'
+        | 'currency'
       >
     >;
   }): Promise<'updated' | 'version_conflict' | 'currency_locked' | 'not_found'> {
@@ -416,6 +424,7 @@ export class AdminStore {
         | 'duration_minutes'
         | 'base_price_minor'
         | 'booking_fee_minor'
+        | 'slot_cadence_minutes'
       >
     >;
   }): Promise<'updated' | 'version_conflict' | 'not_found'> {

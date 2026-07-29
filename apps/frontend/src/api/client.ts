@@ -20,6 +20,7 @@ export interface BusinessProfileView {
   legal_name: string | null;
   contact: { email: string | null; phone: string | null; website: string | null };
   default_timezone: string;
+  default_slot_cadence_minutes: number;
   locale: string;
   currency: string;
   version: number;
@@ -35,6 +36,7 @@ export interface ServiceView {
   duration_minutes: number;
   base_price_minor: number;
   booking_fee_minor: number;
+  slot_cadence_minutes: number | null;
   currency: string;
   status: 'active' | 'inactive';
   version: number;
@@ -123,7 +125,33 @@ export type ServiceInput = Pick<
   | 'duration_minutes'
   | 'base_price_minor'
   | 'booking_fee_minor'
+  | 'slot_cadence_minutes'
 >;
+
+export interface SchedulingSlotView {
+  starts_at: string;
+  service_ends_at: string;
+  blocked_starts_at: string;
+  blocked_ends_at: string;
+  local_start: string;
+  local_service_end: string;
+  local_blocked_start: string;
+  local_blocked_end: string;
+}
+
+export interface SchedulingSlotsView {
+  eligible: boolean;
+  reason?: string;
+  timezone: string;
+  booking_policy_enforced: false;
+  service: { public_id: string; duration_minutes: number; slot_cadence_minutes: number };
+  assignment: {
+    public_id: string;
+    buffer_before_minutes: number;
+    buffer_after_minutes: number;
+  };
+  slots: SchedulingSlotView[];
+}
 
 export class ApiError extends Error {
   public constructor(
@@ -363,6 +391,22 @@ export function previewAvailability(
   return request(`/v1/admin/providers/${providerId}/availability-preview?${q.toString()}`);
 }
 
+export function previewSchedulingSlots(
+  providerId: string,
+  serviceId: string,
+  startDate: string,
+  endDate: string,
+  cursor?: string,
+): Promise<{ data: SchedulingSlotsView; next_cursor: string | null }> {
+  const q = new URLSearchParams({
+    service_public_id: serviceId,
+    start_date: startDate,
+    end_date: endDate,
+  });
+  if (cursor) q.set('cursor', cursor);
+  return requestWithMeta(`/v1/admin/providers/${providerId}/scheduling-slots?${q.toString()}`);
+}
+
 export function createService(input: ServiceInput, csrfToken: string): Promise<ServiceView> {
   return request('/v1/admin/services', {
     method: 'POST',
@@ -413,4 +457,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (response.status === 204) return undefined as T;
   const body = (await response.json()) as { data: T };
   return body.data;
+}
+
+async function requestWithMeta<T>(path: string): Promise<{ data: T; next_cursor: string | null }> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    credentials: 'same-origin',
+    headers: {
+      accept: 'application/json',
+      'x-request-id': crypto.randomUUID(),
+    },
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: { code?: string } } | null;
+    throw new ApiError(response.status, body?.error?.code ?? 'request_failed');
+  }
+  const body = (await response.json()) as {
+    data: T;
+    meta: { next_cursor?: string | null };
+  };
+  return { data: body.data, next_cursor: body.meta.next_cursor ?? null };
 }

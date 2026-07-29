@@ -47,6 +47,7 @@ export function BusinessProfilePage({
                 website: nullable(values.get('website')),
               },
               default_timezone: formString(values, 'default_timezone'),
+              default_slot_cadence_minutes: Number(values.get('default_slot_cadence_minutes')),
               locale: formString(values, 'locale'),
               currency: formString(values, 'currency').toUpperCase(),
             },
@@ -65,6 +66,19 @@ export function BusinessProfilePage({
           defaultValue={profile.display_name}
           required
         />
+        <label>
+          <span>Default appointment start interval</span>
+          <select
+            name="default_slot_cadence_minutes"
+            defaultValue={profile.default_slot_cadence_minutes}
+          >
+            {[5, 10, 15, 20, 30, 60].map((minutes) => (
+              <option key={minutes} value={minutes}>
+                Every {minutes} minutes
+              </option>
+            ))}
+          </select>
+        </label>
         <Field label="Legal name" name="legal_name" defaultValue={profile.legal_name ?? ''} />
         <Field label="Email" name="email" defaultValue={profile.contact.email ?? ''} type="email" />
         <Field label="Phone" name="phone" defaultValue={profile.contact.phone ?? ''} />

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   type ServiceInput,
@@ -135,6 +135,13 @@ function ServiceForm({
   onSave: (input: ServiceInput) => Promise<void>;
   onCancel: () => void;
 }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    headingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    headingRef.current?.focus({ preventScroll: true });
+  }, [service]);
+
   return (
     <form
       className="catalog-form service-editor"
@@ -149,10 +156,13 @@ function ServiceForm({
           duration_minutes: Number(values.get('duration_minutes')),
           base_price_minor: Math.round(Number(values.get('base_price')) * 100),
           booking_fee_minor: Math.round(Number(values.get('booking_fee')) * 100),
+          slot_cadence_minutes: nullableNumber(values.get('slot_cadence_minutes')),
         });
       }}
     >
-      <h2>{service ? 'Edit service' : 'Add service'}</h2>
+      <h2 ref={headingRef} tabIndex={-1}>
+        {service ? `Edit ${service.name}` : 'Add service'}
+      </h2>
       <label>
         <span>Internal code</span>
         <input
@@ -190,6 +200,17 @@ function ServiceForm({
         />
       </label>
       <label>
+        <span>Appointment start interval</span>
+        <select name="slot_cadence_minutes" defaultValue={service?.slot_cadence_minutes ?? ''}>
+          <option value="">Use business default</option>
+          {[5, 10, 15, 20, 30, 60].map((minutes) => (
+            <option key={minutes} value={minutes}>
+              Every {minutes} minutes
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
         <span>Service price</span>
         <input
           name="base_price"
@@ -224,6 +245,9 @@ function ServiceForm({
 function nullable(value: FormDataEntryValue | null): string | null {
   const text = typeof value === 'string' ? value.trim() : '';
   return text || null;
+}
+function nullableNumber(value: FormDataEntryValue | null): number | null {
+  return typeof value === 'string' && value ? Number(value) : null;
 }
 function formString(values: FormData, name: string): string {
   const value = values.get(name);
