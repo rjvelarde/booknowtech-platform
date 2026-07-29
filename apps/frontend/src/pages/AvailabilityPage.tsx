@@ -10,7 +10,7 @@ import {
   getAvailabilitySchedule,
   getProvider,
   listAvailabilityExceptions,
-  previewAvailability,
+  previewSchedulingSlots,
   saveAvailabilitySchedule,
   setAvailabilityExceptionActive,
   updateAssignmentBuffers,
@@ -90,8 +90,16 @@ export function AvailabilityPage({
           Back to provider
         </button>
       </div>
-      {message ? <p role="status">{message}</p> : null}
-      {error ? <p role="alert">{error}</p> : null}
+      {message ? (
+        <p className="save-feedback success" role="status">
+          <span aria-hidden="true">✓</span> {message}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="save-feedback error" role="alert">
+          <span aria-hidden="true">!</span> {error}
+        </p>
+      ) : null}
       <fieldset disabled={!canManage}>
         <legend>Weekly schedule</legend>
         <label>
@@ -347,11 +355,17 @@ function Preview({ provider }: { provider: ProviderView }) {
   const today = new Date().toISOString().slice(0, 10);
   const [start, setStart] = useState(today),
     [end, setEnd] = useState(today),
-    [result, setResult] = useState<unknown>(null);
+    [result, setResult] = useState<
+      Awaited<ReturnType<typeof previewSchedulingSlots>>['data'] | null
+    >(null),
+    [nextCursor, setNextCursor] = useState<string | null>(null);
   if (!assignment) return null;
   return (
     <section>
-      <h2>Availability preview</h2>
+      <h2>Appointment start preview</h2>
+      <p className="form-note">
+        This preview shows theoretical starts only. It does not create or reserve appointments.
+      </p>
       <div className="form-grid">
         <label>
           Start
@@ -363,20 +377,71 @@ function Preview({ provider }: { provider: ProviderView }) {
         </label>
         <button
           onClick={() =>
-            void previewAvailability(
+            void previewSchedulingSlots(
               provider.public_id,
               assignment.service.public_id,
               start,
               end,
-            ).then(setResult)
+            ).then((page) => {
+              setResult(page.data);
+              setNextCursor(page.next_cursor);
+            })
           }
         >
-          Preview {assignment.service.name}
+          Generate starts for {assignment.service.name}
         </button>
       </div>
-      {result ? <pre className="preview-output">{JSON.stringify(result, null, 2)}</pre> : null}
+      {result && !result.eligible ? (
+        <p role="status">No starts are available: {result.reason?.replaceAll('_', ' ')}.</p>
+      ) : null}
+      {result?.eligible ? (
+        <div className="service-list" aria-live="polite">
+          <p role="status">
+            {result.slots.length} theoretical start{result.slots.length === 1 ? '' : 's'} generated.
+          </p>
+          {result.slots.map((slot) => (
+            <article className="service-card" key={slot.starts_at}>
+              <div>
+                <strong>{formatLocal(slot.local_start)}</strong>
+                <p>Service ends {formatLocal(slot.local_service_end)}</p>
+                <details>
+                  <summary>Blocked-time details</summary>
+                  <p>
+                    Provider blocked from {formatLocal(slot.local_blocked_start)} through{' '}
+                    {formatLocal(slot.local_blocked_end)}.
+                  </p>
+                </details>
+              </div>
+            </article>
+          ))}
+          {result.slots.length === 0 ? <p>No starts fit this date range.</p> : null}
+          {nextCursor ? (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() =>
+                void previewSchedulingSlots(
+                  provider.public_id,
+                  assignment.service.public_id,
+                  start,
+                  end,
+                  nextCursor,
+                ).then((page) => {
+                  setResult({ ...page.data, slots: [...result.slots, ...page.data.slots] });
+                  setNextCursor(page.next_cursor);
+                })
+              }
+            >
+              Load more start times
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
+}
+function formatLocal(value: string) {
+  return value.replace('T', ' ').replace(/:00([+-])/, '$1');
 }
 function time(value: number) {
   return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;

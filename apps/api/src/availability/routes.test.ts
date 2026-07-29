@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { dateRange, previewDay, validateSchedule } from './routes.js';
+import { dateRange, generateSlots, previewDay, validateSchedule } from './routes.js';
 
 describe('availability rules', () => {
   it('rejects overlaps and breaks outside working time', () => {
@@ -77,5 +77,61 @@ describe('availability rules', () => {
       0,
     );
     expect(spring.windows[0]?.starts_at).toBe('2027-03-14T07:00:00.000Z');
+  });
+
+  it('aligns starts to the fixed local clock grid and includes both intervals', () => {
+    const slots = generateSlots(
+      [{ starts_at: '2027-01-11T14:02:00.000Z', ends_at: '2027-01-11T15:30:00.000Z' }],
+      'America/New_York',
+      15,
+      30,
+      5,
+      10,
+    );
+    expect(slots.map((slot) => slot.local_start)).toEqual([
+      '2027-01-11T09:15:00-05:00',
+      '2027-01-11T09:30:00-05:00',
+      '2027-01-11T09:45:00-05:00',
+    ]);
+    expect(slots[0]).toMatchObject({
+      blocked_starts_at: '2027-01-11T14:10:00.000Z',
+      service_ends_at: '2027-01-11T14:45:00.000Z',
+      blocked_ends_at: '2027-01-11T14:55:00.000Z',
+    });
+  });
+
+  it('allows an exact blocked-window fit and rejects partial fits', () => {
+    expect(
+      generateSlots(
+        [{ starts_at: '2027-01-11T13:55:00.000Z', ends_at: '2027-01-11T14:40:00.000Z' }],
+        'UTC',
+        15,
+        30,
+        5,
+        10,
+      ),
+    ).toHaveLength(1);
+    expect(
+      generateSlots(
+        [{ starts_at: '2027-01-11T13:55:00.000Z', ends_at: '2027-01-11T14:39:00.000Z' }],
+        'UTC',
+        15,
+        30,
+        5,
+        10,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('returns both distinct fall-back starts on a repeated local clock time', () => {
+    const slots = generateSlots(
+      [{ starts_at: '2026-11-01T05:00:00.000Z', ends_at: '2026-11-01T07:00:00.000Z' }],
+      'America/New_York',
+      30,
+      15,
+      0,
+      0,
+    );
+    expect(slots.filter((slot) => slot.local_start.startsWith('2026-11-01T01:30'))).toHaveLength(2);
   });
 });

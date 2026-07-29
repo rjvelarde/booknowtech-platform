@@ -11,6 +11,7 @@ const validators: Record<string, Document> = {
         'legal_name',
         'contact',
         'default_timezone',
+        'default_slot_cadence_minutes',
         'locale',
         'currency',
         'version',
@@ -25,6 +26,7 @@ const validators: Record<string, Document> = {
           required: ['email_normalized', 'phone_e164', 'website_url'],
         },
         currency: { bsonType: 'string', pattern: '^[A-Z]{3}$' },
+        default_slot_cadence_minutes: { enum: [5, 10, 15, 20, 30, 60] },
         version: { bsonType: ['int', 'long'], minimum: 1 },
         status: { enum: ['active', 'suspended'] },
       },
@@ -93,6 +95,7 @@ const validators: Record<string, Document> = {
         'duration_minutes',
         'base_price_minor',
         'booking_fee_minor',
+        'slot_cadence_minutes',
         'currency',
         'status',
         'version',
@@ -114,6 +117,10 @@ const validators: Record<string, Document> = {
         duration_minutes: { bsonType: ['int', 'long'], minimum: 5, maximum: 1440 },
         base_price_minor: { bsonType: ['int', 'long'], minimum: 0 },
         booking_fee_minor: { bsonType: ['int', 'long'], minimum: 0 },
+        slot_cadence_minutes: {
+          bsonType: ['int', 'long', 'null'],
+          enum: [5, 10, 15, 20, 30, 60, null],
+        },
         currency: { bsonType: 'string', pattern: '^[A-Z]{3}$' },
         status: { enum: ['active', 'inactive'] },
         version: { bsonType: ['int', 'long'], minimum: 1 },
@@ -305,6 +312,7 @@ export async function migrateDatabase(db: Db): Promise<void> {
             $ifNull: ['$contact', { email_normalized: null, phone_e164: null, website_url: null }],
           },
           default_timezone: { $ifNull: ['$default_timezone', 'UTC'] },
+          default_slot_cadence_minutes: { $ifNull: ['$default_slot_cadence_minutes', 15] },
           locale: { $ifNull: ['$locale', 'en-US'] },
           currency: { $ifNull: ['$currency', 'USD'] },
           version: { $ifNull: ['$version', 1] },
@@ -312,6 +320,13 @@ export async function migrateDatabase(db: Db): Promise<void> {
         },
       },
     ]);
+  }
+  if (existing.has('services')) {
+    await db
+      .collection('services')
+      .updateMany({ slot_cadence_minutes: { $exists: false } }, [
+        { $set: { slot_cadence_minutes: null } },
+      ]);
   }
   if (existing.has('provider_service_assignments')) {
     await db.collection('provider_service_assignments').updateMany(

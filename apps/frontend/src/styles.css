@@ -321,6 +321,21 @@ button:disabled {
 .checkbox-label input {
   width: auto;
 }
+.save-feedback {
+  padding: 0.85rem 1rem;
+  border: 2px solid currentcolor;
+  border-radius: 0.65rem;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+.save-feedback.success {
+  color: #116530;
+  background: #e8f7ed;
+}
+.save-feedback.error {
+  color: #9f1d20;
+  background: #fff0f0;
+}
 @media (max-width: 40rem) {
   .service-card,
   .page-heading {

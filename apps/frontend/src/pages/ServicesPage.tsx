@@ -149,6 +149,7 @@ function ServiceForm({
           duration_minutes: Number(values.get('duration_minutes')),
           base_price_minor: Math.round(Number(values.get('base_price')) * 100),
           booking_fee_minor: Math.round(Number(values.get('booking_fee')) * 100),
+          slot_cadence_minutes: nullableNumber(values.get('slot_cadence_minutes')),
         });
       }}
     >
@@ -190,6 +191,17 @@ function ServiceForm({
         />
       </label>
       <label>
+        <span>Appointment start interval</span>
+        <select name="slot_cadence_minutes" defaultValue={service?.slot_cadence_minutes ?? ''}>
+          <option value="">Use business default</option>
+          {[5, 10, 15, 20, 30, 60].map((minutes) => (
+            <option key={minutes} value={minutes}>
+              Every {minutes} minutes
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
         <span>Service price</span>
         <input
           name="base_price"
@@ -224,6 +236,9 @@ function ServiceForm({
 function nullable(value: FormDataEntryValue | null): string | null {
   const text = typeof value === 'string' ? value.trim() : '';
   return text || null;
+}
+function nullableNumber(value: FormDataEntryValue | null): number | null {
+  return typeof value === 'string' && value ? Number(value) : null;
 }
 function formString(values: FormData, name: string): string {
   const value = values.get(name);

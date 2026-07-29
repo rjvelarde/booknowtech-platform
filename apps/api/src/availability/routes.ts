@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {
   AdminStore,
@@ -39,6 +40,13 @@ interface ExceptionBody {
   starts_at?: string | null;
   ends_at?: string | null;
   expected_version?: number;
+}
+interface SlotQuery {
+  service_public_id: string;
+  start_date: string;
+  end_date: string;
+  limit?: string;
+  cursor?: string;
 }
 
 export function registerAvailabilityRoutes(
@@ -394,6 +402,222 @@ export function registerAvailabilityRoutes(
       );
     },
   );
+  app.get<{ Params: { providerPublicId: string }; Querystring: SlotQuery }>(
+    '/api/v1/admin/providers/:providerPublicId/scheduling-slots',
+    {
+      schema: {
+        operationId: 'previewProviderSchedulingSlots',
+        tags: ['availability'],
+        querystring: {
+          type: 'object',
+          required: ['service_public_id', 'start_date', 'end_date'],
+          properties: {
+            service_public_id: { type: 'string', minLength: 1 },
+            start_date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+            end_date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+            limit: { anyOf: [{ type: 'integer' }, { type: 'string' }] },
+            cursor: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const started = performance.now();
+      const context = await requireTenant(request, reply, store);
+      if (!context) return;
+      const dates = dateRange(request.query.start_date, request.query.end_date);
+      if (!dates) return error(reply, 400, 'invalid_date_range', request.id);
+      const limit = request.query.limit === undefined ? 200 : Number(request.query.limit);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 500)
+        return error(reply, 400, 'invalid_limit', request.id);
+
+      const provider = await store.getProvider(
+        context.tenant!._id,
+        request.params.providerPublicId,
+      );
+      const service = await store.getService(context.tenant!._id, request.query.service_public_id);
+      if (!provider || !service)
+        return error(reply, 404, 'scheduling_subject_not_found', request.id);
+      const assignment = (
+        await store.listAssignmentsForProvider(context.tenant!._id, provider._id)
+      ).find((item) => item.service_id.equals(service._id));
+      if (!assignment) return error(reply, 404, 'scheduling_subject_not_found', request.id);
+      const schedule = await store.getAvailabilitySchedule(context.tenant!._id, provider._id);
+      const reason =
+        provider.status !== 'active'
+          ? 'provider_inactive'
+          : service.status !== 'active'
+            ? 'service_inactive'
+            : assignment.status !== 'active'
+              ? 'assignment_inactive'
+              : !schedule
+                ? 'schedule_missing'
+                : schedule.weekly_hours.length === 0
+                  ? 'schedule_empty'
+                  : undefined;
+      const cadence = service.slot_cadence_minutes ?? context.tenant!.default_slot_cadence_minutes;
+      const subject = {
+        provider: {
+          public_id: provider.public_id,
+          status: provider.status,
+          customer_selectable: provider.customer_selectable,
+          accepting_new_clients: provider.accepting_new_clients,
+        },
+        service: {
+          public_id: service.public_id,
+          duration_minutes: service.duration_minutes,
+          slot_cadence_minutes: cadence,
+        },
+        assignment: {
+          public_id: assignment.public_id,
+          buffer_before_minutes: assignment.buffer_before_minutes,
+          buffer_after_minutes: assignment.buffer_after_minutes,
+        },
+        timezone: schedule?.timezone ?? context.tenant!.default_timezone,
+        booking_policy_enforced: false,
+      };
+      if (reason)
+        return reply.header('Cache-Control', 'private, no-store').send({
+          data: { eligible: false, reason, ...subject, slots: [] },
+          meta: { request_id: request.id, next_cursor: null },
+        });
+
+      const exceptions = (
+        await store.listAvailabilityExceptions(context.tenant!._id, provider._id)
+      ).filter((item) => item.status === 'active');
+      const fingerprint = slotFingerprint({
+        tenant: String(context.tenant!._id),
+        provider: provider.public_id,
+        providerVersion: provider.version,
+        service: service.public_id,
+        serviceVersion: service.version,
+        assignment: assignment.public_id,
+        assignmentVersion: assignment.version,
+        scheduleVersion: schedule!.version,
+        exceptions: exceptions.map((item) => `${item.public_id}:${item.version}`).sort(),
+        startDate: request.query.start_date,
+        endDate: request.query.end_date,
+        cadence,
+      });
+      const after = decodeCursor(request.query.cursor, fingerprint);
+      if (request.query.cursor && after === undefined)
+        return error(reply, 400, 'invalid_cursor', request.id);
+      const generated: ReturnType<typeof generateSlots> = [];
+      for (const date of dates) {
+        generated.push(
+          ...generateSlots(
+            previewDay(
+              date,
+              schedule!,
+              exceptions,
+              service.duration_minutes,
+              assignment.buffer_before_minutes,
+              assignment.buffer_after_minutes,
+            ).windows,
+            schedule!.timezone,
+            cadence,
+            service.duration_minutes,
+            assignment.buffer_before_minutes,
+            assignment.buffer_after_minutes,
+            after,
+            limit + 1 - generated.length,
+          ),
+        );
+        if (generated.length > limit) break;
+      }
+      const slots = generated.slice(0, limit);
+      const hasMore = generated.length > limit;
+      const nextCursor = hasMore ? encodeCursor(fingerprint, slots.at(-1)!.starts_at) : null;
+      request.log.info({
+        event: 'scheduling.slots_generated',
+        duration_ms: Math.round((performance.now() - started) * 100) / 100,
+        slot_count: slots.length,
+        date_count: dates.length,
+        has_more: hasMore,
+      });
+      return reply.header('Cache-Control', 'private, no-store').send({
+        data: { eligible: true, ...subject, slots },
+        meta: { request_id: request.id, next_cursor: nextCursor },
+      });
+    },
+  );
+}
+
+export interface AvailabilityWindowView {
+  starts_at: string;
+  ends_at: string;
+}
+
+export function generateSlots(
+  windows: AvailabilityWindowView[],
+  timezone: string,
+  cadence: number,
+  duration: number,
+  before: number,
+  after: number,
+  afterStart = '',
+  maximum = Number.POSITIVE_INFINITY,
+) {
+  const slots = [];
+  const seen = new Set<string>();
+  for (const window of windows) {
+    const windowStart = Date.parse(window.starts_at);
+    const windowEnd = Date.parse(window.ends_at);
+    const earliest = windowStart + before * 60000;
+    const latest = windowEnd - (duration + after) * 60000;
+    for (let value = earliest; value <= latest; value += 60000) {
+      const start = new Date(value);
+      const local = parts(start, timezone);
+      const localMinute = Number(local.slice(-2));
+      if (localMinute % cadence !== 0) continue;
+      const startsAt = start.toISOString();
+      if (afterStart && startsAt <= afterStart) continue;
+      if (seen.has(startsAt)) continue;
+      seen.add(startsAt);
+      const serviceEnd = new Date(value + duration * 60000);
+      const blockedStart = new Date(value - before * 60000);
+      const blockedEnd = new Date(serviceEnd.valueOf() + after * 60000);
+      slots.push({
+        starts_at: startsAt,
+        service_ends_at: serviceEnd.toISOString(),
+        blocked_starts_at: blockedStart.toISOString(),
+        blocked_ends_at: blockedEnd.toISOString(),
+        local_start: localIso(start, timezone),
+        local_service_end: localIso(serviceEnd, timezone),
+        local_blocked_start: localIso(blockedStart, timezone),
+        local_blocked_end: localIso(blockedEnd, timezone),
+      });
+      if (slots.length >= maximum) return slots;
+    }
+  }
+  return slots.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+}
+
+function slotFingerprint(value: object) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('base64url');
+}
+function encodeCursor(fingerprint: string, after: string) {
+  return Buffer.from(JSON.stringify({ v: 1, fingerprint, after })).toString('base64url');
+}
+function decodeCursor(cursor: string | undefined, fingerprint: string): string | undefined {
+  if (!cursor) return '';
+  try {
+    const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
+      v?: unknown;
+      fingerprint?: unknown;
+      after?: unknown;
+    };
+    if (
+      value.v !== 1 ||
+      value.fingerprint !== fingerprint ||
+      typeof value.after !== 'string' ||
+      Number.isNaN(Date.parse(value.after))
+    )
+      return undefined;
+    return value.after;
+  } catch {
+    return undefined;
+  }
 }
 
 function scheduleSchema(update: boolean) {

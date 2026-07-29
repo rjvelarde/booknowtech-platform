@@ -61,24 +61,33 @@ suite('administrative foundation migration', () => {
         'services_catalog_list',
       ]),
     );
+    const service = {
+      public_id: randomUUID(),
+      tenant_id: new ObjectId(),
+      internal_code: 'INVALID',
+      name: 'Invalid',
+      description: null,
+      delivery_mode: 'physical',
+      duration_minutes: 30,
+      base_price_minor: 1000,
+      booking_fee_minor: 100,
+      slot_cadence_minutes: null,
+      currency: 'USD',
+      status: 'active',
+      version: 1,
+      created_by: new ObjectId(),
+      updated_by: new ObjectId(),
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+    await expect(db.collection('services').insertOne(service)).rejects.toThrow();
     await expect(
       db.collection('services').insertOne({
+        ...service,
         public_id: randomUUID(),
-        tenant_id: new ObjectId(),
-        internal_code: 'INVALID',
-        name: 'Invalid',
-        description: null,
-        delivery_mode: 'physical',
-        duration_minutes: 30,
-        base_price_minor: 1000,
-        booking_fee_minor: 100,
-        currency: 'USD',
-        status: 'active',
-        version: 1,
-        created_by: new ObjectId(),
-        updated_by: new ObjectId(),
-        created_at: new Date(),
-        updated_at: new Date(),
+        internal_code: 'INVALID-CADENCE',
+        delivery_mode: 'provider_location',
+        slot_cadence_minutes: 7,
       }),
     ).rejects.toThrow();
   });

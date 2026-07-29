@@ -11,6 +11,7 @@ import type { Environment } from '../config.js';
 
 const managers = new Set(['tenant_owner', 'tenant_admin']);
 const internalCodePattern = '^[A-Za-z0-9._-]+$';
+const slotCadences = [5, 10, 15, 20, 30, 60] as const;
 
 interface ProfilePatchBody {
   expected_version: number;
@@ -18,6 +19,7 @@ interface ProfilePatchBody {
   legal_name?: string | null;
   contact?: { email?: string | null; phone?: string | null; website?: string | null };
   default_timezone?: string;
+  default_slot_cadence_minutes?: number;
   locale?: string;
   currency?: string;
 }
@@ -30,6 +32,7 @@ interface ServiceBody {
   duration_minutes: number;
   base_price_minor: number;
   booking_fee_minor: number;
+  slot_cadence_minutes?: number | null;
 }
 
 interface ServicePatchBody extends Partial<ServiceBody> {
@@ -54,6 +57,9 @@ const serviceProperties = {
   duration_minutes: { type: 'integer', minimum: 5, maximum: 1440 },
   base_price_minor: { type: 'integer', minimum: 0, maximum: 999999999 },
   booking_fee_minor: { type: 'integer', minimum: 0, maximum: 999999999 },
+  slot_cadence_minutes: {
+    anyOf: [{ type: 'integer', enum: [...slotCadences] }, { type: 'null' }],
+  },
 } as const;
 
 export function registerCatalogRoutes(
@@ -96,6 +102,7 @@ export function registerCatalogRoutes(
               },
             },
             default_timezone: { type: 'string', minLength: 1, maxLength: 100 },
+            default_slot_cadence_minutes: { type: 'integer', enum: [...slotCadences] },
             locale: { type: 'string', minLength: 2, maxLength: 35 },
             currency: { type: 'string', pattern: '^[A-Z]{3}$' },
           },
@@ -125,6 +132,7 @@ export function registerCatalogRoutes(
         changes,
       });
       if (result !== 'updated') return sendMutationFailure(reply, result, request.id);
+      const updatedProfile = (await store.getBusinessProfile(context.tenant!._id))!;
       await store.audit({
         event: 'business_profile_updated',
         outcome: 'success',
@@ -133,11 +141,11 @@ export function registerCatalogRoutes(
         requestId: request.id,
         metadata: {
           fields: [...Object.keys(body), ...(contact ? ['contact'] : [])].sort().join(','),
+          prior_version: String(expectedVersion),
+          new_version: String(updatedProfile.version),
         },
       });
-      return reply.send(
-        envelope(profileView((await store.getBusinessProfile(context.tenant!._id))!), request.id),
-      );
+      return reply.send(envelope(profileView(updatedProfile), request.id));
     },
   );
 
@@ -180,6 +188,7 @@ export function registerCatalogRoutes(
           ...request.body,
           internal_code: normalizeInternalCode(request.body.internal_code),
           description: normalizeNullable(request.body.description),
+          slot_cadence_minutes: request.body.slot_cadence_minutes ?? null,
           status: 'active',
         });
         await store.audit({
@@ -246,22 +255,24 @@ export function registerCatalogRoutes(
           },
         });
         if (result !== 'updated') return sendMutationFailure(reply, result, request.id);
+        const updatedService = (await store.getService(
+          context.tenant!._id,
+          request.params.servicePublicId,
+        ))!;
         await store.audit({
           event: 'service_updated',
           outcome: 'success',
           actorUserId: context.user._id,
           tenantId: context.tenant!._id,
           requestId: request.id,
-          metadata: { service_public_id: request.params.servicePublicId },
+          metadata: {
+            service_public_id: request.params.servicePublicId,
+            fields: Object.keys(body).sort().join(','),
+            prior_version: String(expectedVersion),
+            new_version: String(updatedService.version),
+          },
         });
-        return reply.send(
-          envelope(
-            serviceView(
-              (await store.getService(context.tenant!._id, request.params.servicePublicId))!,
-            ),
-            request.id,
-          ),
-        );
+        return reply.send(envelope(serviceView(updatedService), request.id));
       } catch (error) {
         if (isDuplicateKey(error))
           return sendError(reply, 409, 'internal_code_conflict', request.id);
@@ -366,6 +377,7 @@ function profileView(profile: NonNullable<Awaited<ReturnType<AdminStore['getBusi
       website: profile.contact.website_url,
     },
     default_timezone: profile.default_timezone,
+    default_slot_cadence_minutes: profile.default_slot_cadence_minutes,
     locale: profile.locale,
     currency: profile.currency,
     version: profile.version,
@@ -383,6 +395,7 @@ function serviceView(service: ServiceDocument) {
     duration_minutes: service.duration_minutes,
     base_price_minor: service.base_price_minor,
     booking_fee_minor: service.booking_fee_minor,
+    slot_cadence_minutes: service.slot_cadence_minutes,
     currency: service.currency,
     status: service.status,
     version: service.version,

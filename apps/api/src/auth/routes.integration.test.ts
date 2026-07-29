@@ -132,6 +132,7 @@ function contextFixture(userId: ObjectId): VerifiedAdminContext {
     legal_name: null,
     contact: { email_normalized: null, phone_e164: null, website_url: null },
     default_timezone: 'UTC',
+    default_slot_cadence_minutes: 15,
     locale: 'en-US',
     currency: 'USD',
     version: 1,
