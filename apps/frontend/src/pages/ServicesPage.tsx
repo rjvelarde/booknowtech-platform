@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   type ServiceInput,
@@ -135,6 +135,13 @@ function ServiceForm({
   onSave: (input: ServiceInput) => Promise<void>;
   onCancel: () => void;
 }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    headingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    headingRef.current?.focus({ preventScroll: true });
+  }, [service]);
+
   return (
     <form
       className="catalog-form service-editor"
@@ -153,7 +160,9 @@ function ServiceForm({
         });
       }}
     >
-      <h2>{service ? 'Edit service' : 'Add service'}</h2>
+      <h2 ref={headingRef} tabIndex={-1}>
+        {service ? `Edit ${service.name}` : 'Add service'}
+      </h2>
       <label>
         <span>Internal code</span>
         <input
