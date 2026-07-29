@@ -170,4 +170,55 @@ suite('administrative foundation migration', () => {
       db.collection('provider_service_assignments').insertOne(assignment()),
     ).rejects.toThrow();
   });
+
+  it('creates customer search indexes and permits the same contact in separate tenants', async () => {
+    await migrateDatabase(db);
+    expect((await db.collection('customers').indexes()).map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        'customers_tenant_public_id_unique',
+        'customers_directory',
+        'customers_email_lookup',
+        'customers_phone_lookup',
+        'customers_first_name_search',
+        'customers_full_name_search',
+        'customers_updated',
+      ]),
+    );
+    const actor = new ObjectId();
+    const customer = (tenantId: ObjectId) => ({
+      public_id: randomUUID(),
+      tenant_id: tenantId,
+      first_name: 'Maya',
+      last_name: 'Johnson',
+      preferred_name: null,
+      first_name_normalized: 'maya',
+      last_name_normalized: 'johnson',
+      full_name_normalized: 'maya johnson',
+      email_normalized: 'maya@example.test',
+      mobile_phone_e164: '+14045550101',
+      mobile_phone_digits: '14045550101',
+      addresses: [],
+      communication_preferences: {
+        preferred_channel: 'email',
+        marketing_email: 'unknown',
+        marketing_sms: 'unknown',
+      },
+      source: 'manual',
+      external_references: [],
+      status: 'active',
+      deactivated_at: null,
+      version: 1,
+      created_at: new Date(),
+      updated_at: new Date(),
+      created_by: actor,
+      updated_by: actor,
+    });
+    await db.collection('customers').insertOne(customer(new ObjectId()));
+    await expect(
+      db.collection('customers').insertOne(customer(new ObjectId())),
+    ).resolves.toBeDefined();
+    await expect(
+      db.collection('customers').insertOne({ ...customer(new ObjectId()), source: 'unknown' }),
+    ).rejects.toThrow();
+  });
 });

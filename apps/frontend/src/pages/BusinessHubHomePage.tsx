@@ -77,6 +77,15 @@ export function BusinessHubHomePage({
           >
             Closures
           </button>
+          {tenant.role !== 'provider' ? (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => onNavigate('/customers')}
+            >
+              Customers
+            </button>
+          ) : null}
         </nav>
         <div className="workspace">
           {children ?? (
