@@ -153,13 +153,125 @@ export interface SchedulingSlotsView {
   slots: SchedulingSlotView[];
 }
 
+export interface CustomerAddress {
+  public_id?: string;
+  label: 'home' | 'work' | 'other';
+  line_1: string;
+  line_2: string | null;
+  city: string;
+  region: string;
+  postal_code: string;
+  country_code: string;
+  is_primary: boolean;
+}
+
+export interface CustomerView {
+  public_id: string;
+  display_name: string;
+  first_name: string;
+  last_name: string | null;
+  preferred_name: string | null;
+  email: string | null;
+  mobile_phone: string | null;
+  addresses?: CustomerAddress[];
+  communication_preferences?: {
+    preferred_channel: 'email' | 'sms' | 'phone' | 'none' | null;
+    marketing_email: 'unknown' | 'opted_in' | 'opted_out';
+    marketing_sms: 'unknown' | 'opted_in' | 'opted_out';
+  };
+  source?: string;
+  status: 'active' | 'inactive';
+  version: number;
+  updated_at: string;
+}
+
+export interface CustomerInput {
+  first_name: string;
+  last_name: string | null;
+  preferred_name: string | null;
+  email: string | null;
+  mobile_phone: string | null;
+  addresses: CustomerAddress[];
+  communication_preferences: {
+    preferred_channel: 'email' | 'sms' | 'phone' | 'none' | null;
+    marketing_email: 'unknown' | 'opted_in' | 'opted_out';
+    marketing_sms: 'unknown' | 'opted_in' | 'opted_out';
+  };
+}
+
+export interface DuplicateCandidate {
+  public_id: string;
+  display_name: string;
+  email: string | null;
+  mobile_phone: string | null;
+  status: 'active' | 'inactive';
+  reasons: string[];
+}
+
 export class ApiError extends Error {
   public constructor(
     public readonly status: number,
     public readonly code: string,
+    public readonly details?: Record<string, unknown>,
   ) {
     super(code);
   }
+}
+
+export function listCustomers(
+  input: {
+    status?: 'active' | 'inactive' | 'all';
+    q?: string;
+    cursor?: string;
+  } = {},
+): Promise<{ items: CustomerView[]; next_cursor: string | null }> {
+  const query = new URLSearchParams();
+  if (input.status) query.set('status', input.status);
+  if (input.q) query.set('q', input.q);
+  if (input.cursor) query.set('cursor', input.cursor);
+  return request(`/v1/admin/customers${query.size ? `?${query.toString()}` : ''}`);
+}
+
+export function getCustomer(publicId: string): Promise<CustomerView> {
+  return request(`/v1/admin/customers/${publicId}`);
+}
+
+export function createCustomer(
+  input: CustomerInput & { acknowledge_possible_duplicate?: boolean },
+  csrfToken: string,
+): Promise<CustomerView> {
+  return request('/v1/admin/customers', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+
+export function updateCustomer(
+  publicId: string,
+  input: CustomerInput & { expected_version: number },
+  csrfToken: string,
+): Promise<CustomerView & { changed: boolean }> {
+  return request(`/v1/admin/customers/${publicId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+
+export function setCustomerActive(
+  customer: CustomerView,
+  active: boolean,
+  csrfToken: string,
+): Promise<CustomerView & { changed: boolean }> {
+  return request(
+    `/v1/admin/customers/${customer.public_id}/${active ? 'activate' : 'deactivate'}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ expected_version: customer.version }),
+      headers: { 'x-csrf-token': csrfToken },
+    },
+  );
 }
 
 const baseUrl = loadPublicEnvironment(
@@ -451,8 +563,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     },
   });
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: { code?: string } } | null;
-    throw new ApiError(response.status, body?.error?.code ?? 'request_failed');
+    const body = (await response.json().catch(() => null)) as {
+      error?: { code?: string; [key: string]: unknown };
+    } | null;
+    throw new ApiError(response.status, body?.error?.code ?? 'request_failed', body?.error);
   }
   if (response.status === 204) return undefined as T;
   const body = (await response.json()) as { data: T };

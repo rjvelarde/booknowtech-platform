@@ -235,6 +235,72 @@ button:disabled {
   gap: 1rem;
   margin-top: 1.5rem;
 }
+.catalog-list {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+.catalog-card,
+.section-heading,
+.inline-form,
+.detail-tabs,
+.profile-grid,
+.address-fields {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.catalog-card,
+.address-fields {
+  justify-content: space-between;
+  padding: 1.25rem;
+  border: 1px solid #d9e2ef;
+  border-radius: 1rem;
+  background: #fff;
+}
+.section-heading {
+  justify-content: space-between;
+}
+.inline-form,
+.detail-tabs,
+.profile-grid {
+  flex-wrap: wrap;
+  margin: 1.5rem 0;
+}
+.profile-grid div {
+  min-width: 10rem;
+  padding: 1rem;
+  border: 1px solid #d9e2ef;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+.profile-grid dt {
+  font-weight: 700;
+}
+.profile-grid dd {
+  margin: 0.35rem 0 0;
+}
+.detail-tabs button:disabled {
+  color: #64748b;
+  cursor: not-allowed;
+}
+.form-warning {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 2px solid #c47b00;
+  border-radius: 0.75rem;
+  background: #fff8e8;
+}
+.catalog-form fieldset {
+  display: grid;
+  gap: 1rem;
+  border: 0;
+  padding: 0;
+}
+.address-fields {
+  align-items: end;
+  flex-wrap: wrap;
+}
 .service-card {
   display: flex;
   justify-content: space-between;

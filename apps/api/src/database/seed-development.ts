@@ -125,6 +125,103 @@ async function main(): Promise<void> {
           { upsert: true },
         );
       }
+      const customerSeeds =
+        tenant.slug === 'harbor-demo'
+          ? ([
+              [
+                'wax-maya-johnson',
+                'Maya',
+                'Johnson',
+                'Maya',
+                'maya.johnson@example.test',
+                '+14045550101',
+                'active',
+              ],
+              [
+                'wax-elena-ruiz',
+                'Elena',
+                'Ruiz',
+                null,
+                'elena.ruiz@example.test',
+                '+14045550102',
+                'active',
+              ],
+              ['wax-jordan-lee', 'Jordan', 'Lee', null, null, '+14045550103', 'inactive'],
+            ] as const)
+          : ([
+              [
+                'braid-aaliyah-brooks',
+                'Aaliyah',
+                'Brooks',
+                'Liyah',
+                'aaliyah.brooks@example.test',
+                '+14045550201',
+                'active',
+              ],
+              [
+                'braid-nia-carter',
+                'Nia',
+                'Carter',
+                null,
+                'nia.carter@example.test',
+                '+14045550202',
+                'active',
+              ],
+              ['braid-sam-williams', 'Sam', 'Williams', null, null, null, 'active'],
+            ] as const);
+      for (const [
+        externalId,
+        firstName,
+        lastName,
+        preferredName,
+        customerEmail,
+        phone,
+        status,
+      ] of customerSeeds) {
+        const existing = await db.collection('customers').findOne({
+          tenant_id: tenantResult._id,
+          external_references: {
+            $elemMatch: { system: 'booknowtech_seed', external_id: externalId },
+          },
+        });
+        await db.collection('customers').updateOne(
+          { tenant_id: tenantResult._id, public_id: existing?.public_id ?? randomUUID() },
+          {
+            $set: {
+              first_name: firstName,
+              last_name: lastName,
+              preferred_name: preferredName,
+              first_name_normalized: firstName.toLowerCase(),
+              last_name_normalized: lastName.toLowerCase(),
+              full_name_normalized: `${firstName} ${lastName}`.toLowerCase(),
+              email_normalized: customerEmail,
+              mobile_phone_e164: phone,
+              mobile_phone_digits: phone?.replace(/\D/g, '') ?? null,
+              addresses: [],
+              communication_preferences: {
+                preferred_channel: customerEmail ? 'email' : phone ? 'sms' : 'none',
+                marketing_email: 'unknown',
+                marketing_sms: 'unknown',
+              },
+              source: 'seed',
+              external_references: [
+                { system: 'booknowtech_seed', external_id: externalId, recorded_at: now },
+              ],
+              status,
+              deactivated_at: status === 'inactive' ? now : null,
+              updated_at: now,
+              updated_by: userResult._id,
+            },
+            $setOnInsert: {
+              _id: new ObjectId(),
+              version: 1,
+              created_at: now,
+              created_by: userResult._id,
+            },
+          },
+          { upsert: true },
+        );
+      }
       if (tenant.slug === 'harbor-demo') {
         const providerIds = new Map<string, ObjectId>();
         for (const [internalCode, displayName, displayOrder] of [

@@ -131,6 +131,54 @@ export interface AvailabilityExceptionDocument {
   updated_by: ObjectId;
 }
 
+export interface CustomerAddressDocument {
+  public_id: string;
+  label: 'home' | 'work' | 'other';
+  line_1: string;
+  line_2: string | null;
+  city: string;
+  region: string;
+  postal_code: string;
+  country_code: string;
+  is_primary: boolean;
+}
+
+export interface CustomerDocument {
+  _id: ObjectId;
+  public_id: string;
+  tenant_id: ObjectId;
+  first_name: string;
+  last_name: string | null;
+  preferred_name: string | null;
+  first_name_normalized: string;
+  last_name_normalized: string | null;
+  full_name_normalized: string;
+  email_normalized: string | null;
+  mobile_phone_e164: string | null;
+  mobile_phone_digits: string | null;
+  addresses: CustomerAddressDocument[];
+  communication_preferences: {
+    preferred_channel: 'email' | 'sms' | 'phone' | 'none' | null;
+    marketing_email: 'unknown' | 'opted_in' | 'opted_out';
+    marketing_sms: 'unknown' | 'opted_in' | 'opted_out';
+  };
+  source: 'manual' | 'seed' | 'import' | 'public_booking' | 'partner_api';
+  external_references: Array<{ system: string; external_id: string; recorded_at: Date }>;
+  status: 'active' | 'inactive';
+  deactivated_at: Date | null;
+  version: number;
+  created_at: Date;
+  updated_at: Date;
+  created_by: ObjectId;
+  updated_by: ObjectId;
+}
+
+export interface CustomerCursor {
+  lastName: string | null;
+  firstName: string;
+  publicId: string;
+}
+
 export interface ProviderCursor {
   displayOrder: number;
   displayName: string;
@@ -214,6 +262,7 @@ export class AdminStore {
   private readonly providerServiceAssignments: Collection<ProviderServiceAssignmentDocument>;
   private readonly availabilitySchedules: Collection<ProviderAvailabilityScheduleDocument>;
   private readonly availabilityExceptions: Collection<AvailabilityExceptionDocument>;
+  private readonly customers: Collection<CustomerDocument>;
 
   public constructor(db: Db) {
     this.tenants = db.collection<TenantDocument>('tenants');
@@ -228,6 +277,7 @@ export class AdminStore {
     );
     this.availabilitySchedules = db.collection('provider_availability_schedules');
     this.availabilityExceptions = db.collection('availability_exceptions');
+    this.customers = db.collection<CustomerDocument>('customers');
   }
 
   public findUserByEmail(email: string): Promise<UserDocument | null> {
@@ -887,6 +937,192 @@ export class AdminStore {
     return result.modifiedCount === 1 ? ('updated' as const) : ('version_conflict' as const);
   }
 
+  public listCustomers(input: {
+    tenantId: ObjectId;
+    status?: 'active' | 'inactive';
+    textPrefix?: string;
+    phonePrefix?: string;
+    after?: CustomerCursor;
+    limit: number;
+  }): Promise<CustomerDocument[]> {
+    const search = input.textPrefix
+      ? {
+          $or: [
+            { first_name_normalized: { $regex: `^${escapeRegex(input.textPrefix)}` } },
+            { last_name_normalized: { $regex: `^${escapeRegex(input.textPrefix)}` } },
+            { full_name_normalized: { $regex: `^${escapeRegex(input.textPrefix)}` } },
+            { email_normalized: { $regex: `^${escapeRegex(input.textPrefix)}` } },
+            ...(input.phonePrefix
+              ? [{ mobile_phone_digits: { $regex: `^${escapeRegex(input.phonePrefix)}` } }]
+              : []),
+          ],
+        }
+      : input.phonePrefix
+        ? { mobile_phone_digits: { $regex: `^${escapeRegex(input.phonePrefix)}` } }
+        : {};
+    const continuation = input.after
+      ? {
+          $or: [
+            { last_name_normalized: { $gt: input.after.lastName } },
+            {
+              last_name_normalized: input.after.lastName,
+              first_name_normalized: { $gt: input.after.firstName },
+            },
+            {
+              last_name_normalized: input.after.lastName,
+              first_name_normalized: input.after.firstName,
+              public_id: { $gt: input.after.publicId },
+            },
+          ],
+        }
+      : {};
+    return this.customers
+      .find({
+        tenant_id: input.tenantId,
+        ...(input.status ? { status: input.status } : {}),
+        ...search,
+        ...continuation,
+      })
+      .sort({ last_name_normalized: 1, first_name_normalized: 1, public_id: 1 })
+      .limit(input.limit)
+      .toArray();
+  }
+
+  public getCustomer(tenantId: ObjectId, publicId: string): Promise<CustomerDocument | null> {
+    return this.customers.findOne({ tenant_id: tenantId, public_id: publicId });
+  }
+
+  public findPossibleCustomers(input: {
+    tenantId: ObjectId;
+    email: string | null;
+    phone: string | null;
+    fullName: string;
+    postalCode: string | null;
+    excludePublicId?: string;
+  }): Promise<CustomerDocument[]> {
+    const signals: Record<string, unknown>[] = [{ full_name_normalized: input.fullName }];
+    if (input.email) signals.push({ email_normalized: input.email });
+    if (input.phone) signals.push({ mobile_phone_e164: input.phone });
+    if (input.postalCode)
+      signals.push({
+        full_name_normalized: input.fullName,
+        addresses: { $elemMatch: { is_primary: true, postal_code: input.postalCode } },
+      });
+    return this.customers
+      .find({
+        tenant_id: input.tenantId,
+        ...(input.excludePublicId ? { public_id: { $ne: input.excludePublicId } } : {}),
+        $or: signals,
+      })
+      .sort({ last_name_normalized: 1, first_name_normalized: 1, public_id: 1 })
+      .limit(5)
+      .toArray();
+  }
+
+  public async createCustomer(input: {
+    tenantId: ObjectId;
+    userId: ObjectId;
+    customer: Omit<
+      CustomerDocument,
+      | '_id'
+      | 'public_id'
+      | 'tenant_id'
+      | 'status'
+      | 'deactivated_at'
+      | 'version'
+      | 'created_at'
+      | 'updated_at'
+      | 'created_by'
+      | 'updated_by'
+    >;
+  }): Promise<CustomerDocument> {
+    const now = new Date();
+    const customer: CustomerDocument = {
+      _id: new ObjectId(),
+      public_id: randomUUID(),
+      tenant_id: input.tenantId,
+      ...input.customer,
+      status: 'active',
+      deactivated_at: null,
+      version: 1,
+      created_at: now,
+      updated_at: now,
+      created_by: input.userId,
+      updated_by: input.userId,
+    };
+    await this.customers.insertOne(customer);
+    return customer;
+  }
+
+  public async updateCustomer(input: {
+    tenantId: ObjectId;
+    publicId: string;
+    userId: ObjectId;
+    expectedVersion: number;
+    changes: Partial<
+      Pick<
+        CustomerDocument,
+        | 'first_name'
+        | 'last_name'
+        | 'preferred_name'
+        | 'first_name_normalized'
+        | 'last_name_normalized'
+        | 'full_name_normalized'
+        | 'email_normalized'
+        | 'mobile_phone_e164'
+        | 'mobile_phone_digits'
+        | 'addresses'
+        | 'communication_preferences'
+      >
+    >;
+  }): Promise<'updated' | 'unchanged' | 'version_conflict' | 'not_found'> {
+    const current = await this.getCustomer(input.tenantId, input.publicId);
+    if (!current) return 'not_found';
+    const changed = Object.entries(input.changes).some(
+      ([key, value]) =>
+        JSON.stringify(current[key as keyof CustomerDocument]) !== JSON.stringify(value),
+    );
+    if (!changed) return 'unchanged';
+    const result = await this.customers.updateOne(
+      {
+        _id: current._id,
+        tenant_id: input.tenantId,
+        version: input.expectedVersion,
+      },
+      {
+        $set: { ...input.changes, updated_at: new Date(), updated_by: input.userId },
+        $inc: { version: 1 },
+      },
+    );
+    return result.modifiedCount === 1 ? 'updated' : 'version_conflict';
+  }
+
+  public async transitionCustomer(input: {
+    tenantId: ObjectId;
+    publicId: string;
+    userId: ObjectId;
+    expectedVersion: number;
+    status: 'active' | 'inactive';
+  }): Promise<'updated' | 'unchanged' | 'version_conflict' | 'not_found'> {
+    const current = await this.getCustomer(input.tenantId, input.publicId);
+    if (!current) return 'not_found';
+    if (current.status === input.status) return 'unchanged';
+    const now = new Date();
+    const result = await this.customers.updateOne(
+      { _id: current._id, tenant_id: input.tenantId, version: input.expectedVersion },
+      {
+        $set: {
+          status: input.status,
+          deactivated_at: input.status === 'inactive' ? now : null,
+          updated_at: now,
+          updated_by: input.userId,
+        },
+        $inc: { version: 1 },
+      },
+    );
+    return result.modifiedCount === 1 ? 'updated' : 'version_conflict';
+  }
+
   private async loadMemberships(
     userId: ObjectId,
   ): Promise<Array<{ membership: RoleDocument; tenant: TenantDocument }>> {
@@ -938,4 +1174,8 @@ function createToken(): string {
 
 function hashSecret(value: string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

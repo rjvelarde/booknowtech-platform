@@ -297,6 +297,107 @@ const validators: Record<string, Document> = {
       },
     },
   },
+  customers: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: [
+        'public_id',
+        'tenant_id',
+        'first_name',
+        'last_name',
+        'preferred_name',
+        'first_name_normalized',
+        'last_name_normalized',
+        'full_name_normalized',
+        'email_normalized',
+        'mobile_phone_e164',
+        'mobile_phone_digits',
+        'addresses',
+        'communication_preferences',
+        'source',
+        'external_references',
+        'status',
+        'deactivated_at',
+        'version',
+        'created_at',
+        'updated_at',
+        'created_by',
+        'updated_by',
+      ],
+      properties: {
+        public_id: { bsonType: 'string' },
+        tenant_id: { bsonType: 'objectId' },
+        first_name: { bsonType: 'string', minLength: 1, maxLength: 100 },
+        last_name: { bsonType: ['string', 'null'], maxLength: 100 },
+        preferred_name: { bsonType: ['string', 'null'], maxLength: 100 },
+        first_name_normalized: { bsonType: 'string', minLength: 1, maxLength: 100 },
+        last_name_normalized: { bsonType: ['string', 'null'], maxLength: 100 },
+        full_name_normalized: { bsonType: 'string', minLength: 1, maxLength: 201 },
+        email_normalized: { bsonType: ['string', 'null'], maxLength: 320 },
+        mobile_phone_e164: { bsonType: ['string', 'null'], pattern: '^\\+[1-9][0-9]{1,14}$' },
+        mobile_phone_digits: { bsonType: ['string', 'null'], pattern: '^[0-9]{2,15}$' },
+        addresses: {
+          bsonType: 'array',
+          maxItems: 5,
+          items: {
+            bsonType: 'object',
+            required: [
+              'public_id',
+              'label',
+              'line_1',
+              'line_2',
+              'city',
+              'region',
+              'postal_code',
+              'country_code',
+              'is_primary',
+            ],
+            properties: {
+              public_id: { bsonType: 'string' },
+              label: { enum: ['home', 'work', 'other'] },
+              line_1: { bsonType: 'string', minLength: 1, maxLength: 200 },
+              line_2: { bsonType: ['string', 'null'], maxLength: 200 },
+              city: { bsonType: 'string', minLength: 1, maxLength: 200 },
+              region: { bsonType: 'string', minLength: 1, maxLength: 200 },
+              postal_code: { bsonType: 'string', minLength: 1, maxLength: 32 },
+              country_code: { bsonType: 'string', pattern: '^[A-Z]{2}$' },
+              is_primary: { bsonType: 'bool' },
+            },
+          },
+        },
+        communication_preferences: {
+          bsonType: 'object',
+          required: ['preferred_channel', 'marketing_email', 'marketing_sms'],
+          properties: {
+            preferred_channel: { enum: ['email', 'sms', 'phone', 'none', null] },
+            marketing_email: { enum: ['unknown', 'opted_in', 'opted_out'] },
+            marketing_sms: { enum: ['unknown', 'opted_in', 'opted_out'] },
+          },
+        },
+        source: { enum: ['manual', 'seed', 'import', 'public_booking', 'partner_api'] },
+        external_references: {
+          bsonType: 'array',
+          maxItems: 20,
+          items: {
+            bsonType: 'object',
+            required: ['system', 'external_id', 'recorded_at'],
+            properties: {
+              system: { bsonType: 'string', minLength: 1, maxLength: 64 },
+              external_id: { bsonType: 'string', minLength: 1, maxLength: 255 },
+              recorded_at: { bsonType: 'date' },
+            },
+          },
+        },
+        status: { enum: ['active', 'inactive'] },
+        deactivated_at: { bsonType: ['date', 'null'] },
+        version: { bsonType: ['int', 'long'], minimum: 1 },
+        created_at: { bsonType: 'date' },
+        updated_at: { bsonType: 'date' },
+        created_by: { bsonType: 'objectId' },
+        updated_by: { bsonType: 'objectId' },
+      },
+    },
+  },
 };
 
 export async function migrateDatabase(db: Db): Promise<void> {
@@ -481,6 +582,43 @@ export async function migrateDatabase(db: Db): Promise<void> {
     {
       key: { tenant_id: 1, scope: 1, provider_id: 1, status: 1, starts_on: 1, ends_before: 1 },
       name: 'availability_exception_date_lookup',
+    },
+  ]);
+  await db.collection('customers').createIndexes([
+    {
+      key: { tenant_id: 1, public_id: 1 },
+      name: 'customers_tenant_public_id_unique',
+      unique: true,
+    },
+    {
+      key: {
+        tenant_id: 1,
+        status: 1,
+        last_name_normalized: 1,
+        first_name_normalized: 1,
+        public_id: 1,
+      },
+      name: 'customers_directory',
+    },
+    {
+      key: { tenant_id: 1, email_normalized: 1, public_id: 1 },
+      name: 'customers_email_lookup',
+    },
+    {
+      key: { tenant_id: 1, mobile_phone_e164: 1, public_id: 1 },
+      name: 'customers_phone_lookup',
+    },
+    {
+      key: { tenant_id: 1, first_name_normalized: 1, public_id: 1 },
+      name: 'customers_first_name_search',
+    },
+    {
+      key: { tenant_id: 1, full_name_normalized: 1, public_id: 1 },
+      name: 'customers_full_name_search',
+    },
+    {
+      key: { tenant_id: 1, updated_at: -1, public_id: 1 },
+      name: 'customers_updated',
     },
   ]);
 }

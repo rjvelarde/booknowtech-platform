@@ -17,6 +17,7 @@ import { ServiceProviderAssignmentsPage } from './pages/ServiceProviderAssignmen
 import { TenantSelectionPage } from './pages/TenantSelectionPage.js';
 import { AvailabilityPage } from './pages/AvailabilityPage.js';
 import { ClosuresPage } from './pages/ClosuresPage.js';
+import { CustomersPage } from './pages/CustomersPage.js';
 
 type View = 'loading' | 'placeholder' | 'login' | 'select' | 'hub' | 'denied';
 
@@ -138,6 +139,13 @@ export function App() {
           path={path}
           csrfToken={session.csrf_token}
           canManage={canManage(session)}
+          onNavigate={(next) => navigate(next, setPath)}
+        />
+      ) : null}
+      {path.startsWith('/customers') && session.active_tenant?.role !== 'provider' ? (
+        <CustomersPage
+          path={path}
+          csrfToken={session.csrf_token}
           onNavigate={(next) => navigate(next, setPath)}
         />
       ) : null}
