@@ -2,6 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { MongoClient, ObjectId } from 'mongodb';
 
 import { hashPassword } from '../auth/password.js';
+import type {
+  CustomerDocument,
+  ProviderDocument,
+  ProviderServiceAssignmentDocument,
+  ServiceDocument,
+} from '../admin/store.js';
 import { loadEnvironment } from '../config.js';
 
 async function main(): Promise<void> {
@@ -392,6 +398,175 @@ async function main(): Promise<void> {
             { upsert: true },
           );
         }
+      }
+      if (tenant.slug === 'city-services-demo') {
+        const braider = await db.collection('providers').findOneAndUpdate(
+          { tenant_id: tenantResult._id, internal_code: 'NIA' },
+          {
+            $set: {
+              display_name: 'Nia',
+              first_name: 'Nia',
+              last_name: null,
+              email_normalized: null,
+              phone_e164: null,
+              photo_url: null,
+              bio: null,
+              status: 'active',
+              customer_selectable: true,
+              accepting_new_clients: true,
+              display_order: 10,
+              linked_user_id: null,
+              updated_by: userResult._id,
+              updated_at: now,
+            },
+            $setOnInsert: {
+              _id: new ObjectId(),
+              public_id: randomUUID(),
+              version: 1,
+              created_by: userResult._id,
+              created_at: now,
+            },
+          },
+          { upsert: true, returnDocument: 'after' },
+        );
+        const service = await db.collection('services').findOne({
+          tenant_id: tenantResult._id,
+          internal_code: 'BRAID-KNOTLESS-MED',
+        });
+        if (!braider || !service) throw new Error('Unable to resolve braiding appointment seed');
+        await db.collection('provider_service_assignments').updateOne(
+          { tenant_id: tenantResult._id, provider_id: braider._id, service_id: service._id },
+          {
+            $set: {
+              buffer_before_minutes: 15,
+              buffer_after_minutes: 15,
+              status: 'active',
+              updated_by: userResult._id,
+              updated_at: now,
+            },
+            $setOnInsert: {
+              _id: new ObjectId(),
+              public_id: randomUUID(),
+              version: 1,
+              created_by: userResult._id,
+              created_at: now,
+            },
+          },
+          { upsert: true },
+        );
+        await db.collection('provider_availability_schedules').updateOne(
+          { tenant_id: tenantResult._id, provider_id: braider._id },
+          {
+            $set: {
+              timezone: 'America/New_York',
+              weekly_hours: [2, 3, 4, 5, 6].map((day_of_week) => ({
+                day_of_week,
+                start_minute: 540,
+                end_minute: 1080,
+              })),
+              breaks: [],
+              updated_at: now,
+              updated_by: userResult._id,
+            },
+            $setOnInsert: {
+              _id: new ObjectId(),
+              public_id: randomUUID(),
+              version: 1,
+              created_at: now,
+              created_by: userResult._id,
+            },
+          },
+          { upsert: true },
+        );
+      }
+
+      const seedProvider = await db.collection<ProviderDocument>('providers').findOne({
+        tenant_id: tenantResult._id,
+        internal_code: tenant.slug === 'harbor-demo' ? 'LISA' : 'NIA',
+      });
+      const seedService = await db.collection<ServiceDocument>('services').findOne({
+        tenant_id: tenantResult._id,
+        internal_code: tenant.slug === 'harbor-demo' ? 'BRAZILIAN-WAX' : 'BRAID-KNOTLESS-MED',
+      });
+      const seedCustomer = await db
+        .collection<CustomerDocument>('customers')
+        .findOne({ tenant_id: tenantResult._id, status: 'active' });
+      if (!seedProvider || !seedService || !seedCustomer)
+        throw new Error('Unable to resolve appointment seed subjects');
+      const seedAssignment = await db
+        .collection<ProviderServiceAssignmentDocument>('provider_service_assignments')
+        .findOne({
+          tenant_id: tenantResult._id,
+          provider_id: seedProvider._id,
+          service_id: seedService._id,
+        });
+      if (!seedAssignment) throw new Error('Unable to resolve appointment seed assignment');
+      const tenantPrefix = tenant.slug === 'harbor-demo' ? 'A' : 'B';
+      for (const [sequence, status, startsAtValue] of [
+        [1, 'scheduled', '2027-02-02T15:00:00.000Z'],
+        [2, 'completed', '2026-06-02T15:00:00.000Z'],
+        [3, 'cancelled', '2026-06-03T15:00:00.000Z'],
+        [4, 'no_show', '2026-06-04T15:00:00.000Z'],
+      ] as const) {
+        const startsAt = new Date(startsAtValue);
+        const before = seedAssignment.buffer_before_minutes;
+        const after = seedAssignment.buffer_after_minutes;
+        const duration = seedService.duration_minutes;
+        const reference = `BNT-${tenantPrefix}${String(sequence).padStart(7, '0')}`;
+        const terminalAt = status === 'scheduled' ? null : startsAt;
+        await db.collection('appointments').updateOne(
+          { tenant_id: tenantResult._id, reference },
+          {
+            $setOnInsert: {
+              _id: new ObjectId(),
+              public_id: randomUUID(),
+              reference,
+              tenant_id: tenantResult._id,
+              customer_id: seedCustomer._id,
+              provider_id: seedProvider._id,
+              service_id: seedService._id,
+              provider_service_assignment_id: seedAssignment._id,
+              starts_at: startsAt,
+              ends_at: new Date(startsAt.valueOf() + duration * 60_000),
+              blocked_starts_at: new Date(startsAt.valueOf() - before * 60_000),
+              blocked_ends_at: new Date(startsAt.valueOf() + (duration + after) * 60_000),
+              timezone: 'America/New_York',
+              local_start_date: startsAtValue.slice(0, 10),
+              snapshot: {
+                customer_display_name:
+                  `${seedCustomer.preferred_name ?? seedCustomer.first_name} ${seedCustomer.last_name ?? ''}`.trim(),
+                provider_display_name: seedProvider.display_name,
+                service_name: seedService.name,
+                service_duration_minutes: duration,
+                slot_cadence_minutes:
+                  seedService.slot_cadence_minutes ?? (tenant.slug === 'harbor-demo' ? 15 : 30),
+                buffer_before_minutes: before,
+                buffer_after_minutes: after,
+                delivery_mode: seedService.delivery_mode,
+                base_price_minor: seedService.base_price_minor,
+                booking_fee_minor: seedService.booking_fee_minor,
+                currency: seedService.currency,
+              },
+              location: { mode: seedService.delivery_mode, customer_address: null },
+              status,
+              source: 'seed',
+              cancelled_at: status === 'cancelled' ? terminalAt : null,
+              cancelled_by: status === 'cancelled' ? userResult._id : null,
+              cancellation_reason: status === 'cancelled' ? 'customer_request' : null,
+              cancellation_detail: null,
+              completed_at: status === 'completed' ? terminalAt : null,
+              completed_by: status === 'completed' ? userResult._id : null,
+              no_show_at: status === 'no_show' ? terminalAt : null,
+              no_show_by: status === 'no_show' ? userResult._id : null,
+              version: 1,
+              created_at: now,
+              updated_at: now,
+              created_by: userResult._id,
+              updated_by: userResult._id,
+            },
+          },
+          { upsert: true },
+        );
       }
     }
     process.stdout.write(`Seeded internal administrative user ${email}.\n`);

@@ -25,6 +25,8 @@ describe('internal scheduling slot routes', () => {
       scheduleFixture(context.tenant!._id, provider._id),
     );
     vi.spyOn(store, 'listAvailabilityExceptions').mockResolvedValue([]);
+    vi.spyOn(store, 'listBlockingAppointments').mockResolvedValue([]);
+    vi.spyOn(store, 'getScheduleLockRevisions').mockResolvedValue([]);
 
     const first = await app.inject({
       method: 'GET',

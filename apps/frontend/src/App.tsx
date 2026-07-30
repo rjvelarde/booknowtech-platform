@@ -18,6 +18,7 @@ import { TenantSelectionPage } from './pages/TenantSelectionPage.js';
 import { AvailabilityPage } from './pages/AvailabilityPage.js';
 import { ClosuresPage } from './pages/ClosuresPage.js';
 import { CustomersPage } from './pages/CustomersPage.js';
+import { AppointmentsPage } from './pages/AppointmentsPage.js';
 
 type View = 'loading' | 'placeholder' | 'login' | 'select' | 'hub' | 'denied';
 
@@ -146,6 +147,14 @@ export function App() {
         <CustomersPage
           path={path}
           csrfToken={session.csrf_token}
+          onNavigate={(next) => navigate(next, setPath)}
+        />
+      ) : null}
+      {path.startsWith('/appointments') && session.active_tenant?.role !== 'provider' ? (
+        <AppointmentsPage
+          path={path}
+          csrfToken={session.csrf_token}
+          role={session.active_tenant!.role}
           onNavigate={(next) => navigate(next, setPath)}
         />
       ) : null}

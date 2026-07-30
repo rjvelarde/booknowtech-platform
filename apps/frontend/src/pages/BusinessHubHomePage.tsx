@@ -81,6 +81,15 @@ export function BusinessHubHomePage({
             <button
               type="button"
               className="secondary-button"
+              onClick={() => onNavigate('/appointments')}
+            >
+              Appointments
+            </button>
+          ) : null}
+          {tenant.role !== 'provider' ? (
+            <button
+              type="button"
+              className="secondary-button"
               onClick={() => onNavigate('/customers')}
             >
               Customers

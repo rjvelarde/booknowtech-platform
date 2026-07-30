@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { type Collection, type Db, ObjectId } from 'mongodb';
+import { type ClientSession, type Collection, type Db, type Filter, ObjectId } from 'mongodb';
 
 export const ADMIN_ROLES = ['tenant_owner', 'tenant_admin', 'provider', 'front_desk'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
@@ -173,6 +173,74 @@ export interface CustomerDocument {
   updated_by: ObjectId;
 }
 
+export const APPOINTMENT_STATUSES = ['scheduled', 'completed', 'cancelled', 'no_show'] as const;
+export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
+
+export interface AppointmentSnapshot {
+  customer_display_name: string;
+  provider_display_name: string;
+  service_name: string;
+  service_duration_minutes: number;
+  slot_cadence_minutes: number;
+  buffer_before_minutes: number;
+  buffer_after_minutes: number;
+  delivery_mode: DeliveryMode;
+  base_price_minor: number;
+  booking_fee_minor: number;
+  currency: string;
+}
+
+export interface AppointmentDocument {
+  _id: ObjectId;
+  public_id: string;
+  reference: string;
+  tenant_id: ObjectId;
+  customer_id: ObjectId;
+  provider_id: ObjectId;
+  service_id: ObjectId;
+  provider_service_assignment_id: ObjectId;
+  starts_at: Date;
+  ends_at: Date;
+  blocked_starts_at: Date;
+  blocked_ends_at: Date;
+  timezone: string;
+  local_start_date: string;
+  snapshot: AppointmentSnapshot;
+  location: {
+    mode: DeliveryMode;
+    customer_address: Omit<CustomerAddressDocument, 'public_id' | 'label' | 'is_primary'> | null;
+  };
+  status: AppointmentStatus;
+  source: 'business_hub' | 'seed';
+  cancelled_at: Date | null;
+  cancelled_by: ObjectId | null;
+  cancellation_reason:
+    'customer_request' | 'provider_unavailable' | 'business_closed' | 'duplicate' | 'other' | null;
+  cancellation_detail: string | null;
+  completed_at: Date | null;
+  completed_by: ObjectId | null;
+  no_show_at: Date | null;
+  no_show_by: ObjectId | null;
+  version: number;
+  created_at: Date;
+  updated_at: Date;
+  created_by: ObjectId;
+  updated_by: ObjectId;
+}
+
+export interface AppointmentCursor {
+  startsAt: Date;
+  publicId: string;
+}
+
+interface AppointmentScheduleLockDocument {
+  tenant_id: ObjectId;
+  provider_id: ObjectId;
+  utc_date: string;
+  revision: number;
+  updated_at: Date;
+}
+
 export interface CustomerCursor {
   lastName: string | null;
   firstName: string;
@@ -263,8 +331,11 @@ export class AdminStore {
   private readonly availabilitySchedules: Collection<ProviderAvailabilityScheduleDocument>;
   private readonly availabilityExceptions: Collection<AvailabilityExceptionDocument>;
   private readonly customers: Collection<CustomerDocument>;
+  private readonly appointments: Collection<AppointmentDocument>;
+  private readonly appointmentScheduleLocks: Collection<AppointmentScheduleLockDocument>;
 
-  public constructor(db: Db) {
+  public constructor(private readonly database: Db) {
+    const db = database;
     this.tenants = db.collection<TenantDocument>('tenants');
     this.users = db.collection<UserDocument>('users');
     this.roles = db.collection<RoleDocument>('roles');
@@ -278,6 +349,10 @@ export class AdminStore {
     this.availabilitySchedules = db.collection('provider_availability_schedules');
     this.availabilityExceptions = db.collection('availability_exceptions');
     this.customers = db.collection<CustomerDocument>('customers');
+    this.appointments = db.collection<AppointmentDocument>('appointments');
+    this.appointmentScheduleLocks = db.collection<AppointmentScheduleLockDocument>(
+      'appointment_schedule_locks',
+    );
   }
 
   public findUserByEmail(email: string): Promise<UserDocument | null> {
@@ -418,12 +493,26 @@ export class AdminStore {
     return this.services.find({ tenant_id: tenantId }).sort({ name: 1, public_id: 1 }).toArray();
   }
 
-  public getService(tenantId: ObjectId, publicId: string): Promise<ServiceDocument | null> {
-    return this.services.findOne({ tenant_id: tenantId, public_id: publicId });
+  public getService(
+    tenantId: ObjectId,
+    publicId: string,
+    session?: ClientSession,
+  ): Promise<ServiceDocument | null> {
+    return this.services.findOne(
+      { tenant_id: tenantId, public_id: publicId },
+      session ? { session } : undefined,
+    );
   }
 
-  public getServiceById(tenantId: ObjectId, id: ObjectId): Promise<ServiceDocument | null> {
-    return this.services.findOne({ tenant_id: tenantId, _id: id });
+  public getServiceById(
+    tenantId: ObjectId,
+    id: ObjectId,
+    session?: ClientSession,
+  ): Promise<ServiceDocument | null> {
+    return this.services.findOne(
+      { tenant_id: tenantId, _id: id },
+      session ? { session } : undefined,
+    );
   }
 
   public async createService(
@@ -553,12 +642,26 @@ export class AdminStore {
       .toArray();
   }
 
-  public getProvider(tenantId: ObjectId, publicId: string): Promise<ProviderDocument | null> {
-    return this.providers.findOne({ tenant_id: tenantId, public_id: publicId });
+  public getProvider(
+    tenantId: ObjectId,
+    publicId: string,
+    session?: ClientSession,
+  ): Promise<ProviderDocument | null> {
+    return this.providers.findOne(
+      { tenant_id: tenantId, public_id: publicId },
+      session ? { session } : undefined,
+    );
   }
 
-  public getProviderById(tenantId: ObjectId, id: ObjectId): Promise<ProviderDocument | null> {
-    return this.providers.findOne({ tenant_id: tenantId, _id: id });
+  public getProviderById(
+    tenantId: ObjectId,
+    id: ObjectId,
+    session?: ClientSession,
+  ): Promise<ProviderDocument | null> {
+    return this.providers.findOne(
+      { tenant_id: tenantId, _id: id },
+      session ? { session } : undefined,
+    );
   }
 
   public async createProvider(
@@ -659,9 +762,10 @@ export class AdminStore {
   public listAssignmentsForProvider(
     tenantId: ObjectId,
     providerId: ObjectId,
+    session?: ClientSession,
   ): Promise<ProviderServiceAssignmentDocument[]> {
     return this.providerServiceAssignments
-      .find({ tenant_id: tenantId, provider_id: providerId })
+      .find({ tenant_id: tenantId, provider_id: providerId }, session ? { session } : undefined)
       .sort({ created_at: 1, public_id: 1 })
       .toArray();
   }
@@ -769,8 +873,15 @@ export class AdminStore {
     return result.modifiedCount === 1 ? 'updated' : 'version_conflict';
   }
 
-  public getAvailabilitySchedule(tenantId: ObjectId, providerId: ObjectId) {
-    return this.availabilitySchedules.findOne({ tenant_id: tenantId, provider_id: providerId });
+  public getAvailabilitySchedule(
+    tenantId: ObjectId,
+    providerId: ObjectId,
+    session?: ClientSession,
+  ) {
+    return this.availabilitySchedules.findOne(
+      { tenant_id: tenantId, provider_id: providerId },
+      session ? { session } : undefined,
+    );
   }
 
   public async createAvailabilitySchedule(input: {
@@ -828,14 +939,21 @@ export class AdminStore {
       : ('not_found' as const);
   }
 
-  public listAvailabilityExceptions(tenantId: ObjectId, providerId?: ObjectId) {
+  public listAvailabilityExceptions(
+    tenantId: ObjectId,
+    providerId?: ObjectId,
+    session?: ClientSession,
+  ) {
     return this.availabilityExceptions
-      .find({
-        tenant_id: tenantId,
-        ...(providerId
-          ? { $or: [{ scope: 'tenant' }, { scope: 'provider', provider_id: providerId }] }
-          : {}),
-      })
+      .find(
+        {
+          tenant_id: tenantId,
+          ...(providerId
+            ? { $or: [{ scope: 'tenant' }, { scope: 'provider', provider_id: providerId }] }
+            : {}),
+        },
+        session ? { session } : undefined,
+      )
       .sort({ starts_on: 1, starts_at: 1, public_id: 1 })
       .toArray();
   }
@@ -988,8 +1106,26 @@ export class AdminStore {
       .toArray();
   }
 
-  public getCustomer(tenantId: ObjectId, publicId: string): Promise<CustomerDocument | null> {
-    return this.customers.findOne({ tenant_id: tenantId, public_id: publicId });
+  public getCustomer(
+    tenantId: ObjectId,
+    publicId: string,
+    session?: ClientSession,
+  ): Promise<CustomerDocument | null> {
+    return this.customers.findOne(
+      { tenant_id: tenantId, public_id: publicId },
+      session ? { session } : undefined,
+    );
+  }
+
+  public getCustomerById(
+    tenantId: ObjectId,
+    id: ObjectId,
+    session?: ClientSession,
+  ): Promise<CustomerDocument | null> {
+    return this.customers.findOne(
+      { tenant_id: tenantId, _id: id },
+      session ? { session } : undefined,
+    );
   }
 
   public findPossibleCustomers(input: {
@@ -1119,6 +1255,256 @@ export class AdminStore {
         },
         $inc: { version: 1 },
       },
+    );
+    return result.modifiedCount === 1 ? 'updated' : 'version_conflict';
+  }
+
+  public getAppointment(
+    tenantId: ObjectId,
+    publicId: string,
+    session?: ClientSession,
+  ): Promise<AppointmentDocument | null> {
+    return this.appointments.findOne(
+      { tenant_id: tenantId, public_id: publicId },
+      session ? { session } : undefined,
+    );
+  }
+
+  public async listAppointments(input: {
+    tenantId: ObjectId;
+    statuses?: AppointmentStatus[];
+    providerId?: ObjectId;
+    serviceId?: ObjectId;
+    customerIds?: ObjectId[];
+    referencePrefix?: string;
+    startsAtFrom?: Date;
+    startsAtBefore?: Date;
+    after?: AppointmentCursor;
+    direction: 'ascending' | 'descending';
+    limit: number;
+  }): Promise<AppointmentDocument[]> {
+    const order = input.direction === 'ascending' ? 1 : -1;
+    const continuation: Filter<AppointmentDocument> = input.after
+      ? {
+          $or: [
+            { starts_at: { [order === 1 ? '$gt' : '$lt']: input.after.startsAt } },
+            {
+              starts_at: input.after.startsAt,
+              public_id: { [order === 1 ? '$gt' : '$lt']: input.after.publicId },
+            },
+          ],
+        }
+      : {};
+    const startsAt = {
+      ...(input.startsAtFrom ? { $gte: input.startsAtFrom } : {}),
+      ...(input.startsAtBefore ? { $lt: input.startsAtBefore } : {}),
+    };
+    return this.appointments
+      .find({
+        tenant_id: input.tenantId,
+        ...(input.statuses?.length ? { status: { $in: input.statuses } } : {}),
+        ...(input.providerId ? { provider_id: input.providerId } : {}),
+        ...(input.serviceId ? { service_id: input.serviceId } : {}),
+        ...(input.customerIds ? { customer_id: { $in: input.customerIds } } : {}),
+        ...(input.referencePrefix
+          ? { reference: { $regex: `^${escapeRegex(input.referencePrefix.toUpperCase())}` } }
+          : {}),
+        ...(Object.keys(startsAt).length ? { starts_at: startsAt } : {}),
+        ...continuation,
+      })
+      .sort({ starts_at: order, public_id: order })
+      .limit(input.limit)
+      .toArray();
+  }
+
+  public findAppointmentAssignment(
+    tenantId: ObjectId,
+    providerId: ObjectId,
+    serviceId: ObjectId,
+    session?: ClientSession,
+  ): Promise<ProviderServiceAssignmentDocument | null> {
+    return this.providerServiceAssignments.findOne(
+      { tenant_id: tenantId, provider_id: providerId, service_id: serviceId },
+      session ? { session } : undefined,
+    );
+  }
+
+  public listBlockingAppointments(input: {
+    tenantId: ObjectId;
+    providerId: ObjectId;
+    startsBefore: Date;
+    endsAfter: Date;
+    excludeAppointmentId?: ObjectId;
+    session?: ClientSession;
+  }): Promise<AppointmentDocument[]> {
+    return this.appointments
+      .find(
+        {
+          tenant_id: input.tenantId,
+          provider_id: input.providerId,
+          status: 'scheduled',
+          blocked_starts_at: { $lt: input.startsBefore },
+          blocked_ends_at: { $gt: input.endsAfter },
+          ...(input.excludeAppointmentId ? { _id: { $ne: input.excludeAppointmentId } } : {}),
+        },
+        input.session ? { session: input.session } : undefined,
+      )
+      .sort({ blocked_starts_at: 1, public_id: 1 })
+      .toArray();
+  }
+
+  public async getScheduleLockRevisions(
+    tenantId: ObjectId,
+    providerId: ObjectId,
+    utcDates: string[],
+  ): Promise<string[]> {
+    const documents = await this.appointmentScheduleLocks
+      .find({ tenant_id: tenantId, provider_id: providerId, utc_date: { $in: utcDates } })
+      .sort({ utc_date: 1 })
+      .toArray();
+    const revisions = new Map(documents.map((item) => [item.utc_date, item.revision]));
+    return utcDates
+      .slice()
+      .sort()
+      .map((date) => `${date}:${revisions.get(date) ?? 0}`);
+  }
+
+  public async withAppointmentScheduleLocks<T>(
+    tenantId: ObjectId,
+    scopes: Array<{ providerId: ObjectId; utcDate: string }>,
+    work: (session: ClientSession) => Promise<T>,
+  ): Promise<T> {
+    const unique = new Map<string, { providerId: ObjectId; utcDate: string }>();
+    for (const scope of scopes)
+      unique.set(`${scope.providerId.toHexString()}:${scope.utcDate}`, scope);
+    const ordered = [...unique.values()].sort((left, right) =>
+      `${left.providerId.toHexString()}:${left.utcDate}`.localeCompare(
+        `${right.providerId.toHexString()}:${right.utcDate}`,
+      ),
+    );
+    const now = new Date();
+    for (const scope of ordered)
+      await this.appointmentScheduleLocks.updateOne(
+        { tenant_id: tenantId, provider_id: scope.providerId, utc_date: scope.utcDate },
+        { $setOnInsert: { revision: 0, updated_at: now } },
+        { upsert: true },
+      );
+
+    const session = this.database.client.startSession();
+    try {
+      const result = await session.withTransaction(
+        async () => {
+          for (const scope of ordered)
+            await this.appointmentScheduleLocks.updateOne(
+              { tenant_id: tenantId, provider_id: scope.providerId, utc_date: scope.utcDate },
+              { $inc: { revision: 1 }, $set: { updated_at: new Date() } },
+              { session },
+            );
+          return work(session);
+        },
+        {
+          readConcern: { level: 'snapshot' },
+          writeConcern: { w: 'majority' },
+          readPreference: 'primary',
+        },
+      );
+      if (result === undefined) throw new Error('Appointment transaction returned no result');
+      return result;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  public async insertAppointment(
+    input: Omit<AppointmentDocument, '_id' | 'public_id' | 'reference'>,
+    session: ClientSession,
+  ): Promise<AppointmentDocument> {
+    const publicId = randomUUID();
+    const appointment: AppointmentDocument = {
+      ...input,
+      _id: new ObjectId(),
+      public_id: publicId,
+      reference: `BNT-${publicId.replaceAll('-', '').slice(0, 8).toUpperCase()}`,
+    };
+    await this.appointments.insertOne(appointment, { session });
+    return appointment;
+  }
+
+  public async updateAppointmentSchedule(input: {
+    appointment: AppointmentDocument;
+    tenantId: ObjectId;
+    userId: ObjectId;
+    expectedVersion: number;
+    startsAt: Date;
+    endsAt: Date;
+    blockedStartsAt: Date;
+    blockedEndsAt: Date;
+    localStartDate: string;
+    session: ClientSession;
+  }): Promise<'updated' | 'version_conflict'> {
+    const result = await this.appointments.updateOne(
+      {
+        _id: input.appointment._id,
+        tenant_id: input.tenantId,
+        status: 'scheduled',
+        version: input.expectedVersion,
+      },
+      {
+        $set: {
+          starts_at: input.startsAt,
+          ends_at: input.endsAt,
+          blocked_starts_at: input.blockedStartsAt,
+          blocked_ends_at: input.blockedEndsAt,
+          local_start_date: input.localStartDate,
+          updated_at: new Date(),
+          updated_by: input.userId,
+        },
+        $inc: { version: 1 },
+      },
+      { session: input.session },
+    );
+    return result.modifiedCount === 1 ? 'updated' : 'version_conflict';
+  }
+
+  public async transitionAppointment(input: {
+    appointment: AppointmentDocument;
+    tenantId: ObjectId;
+    userId: ObjectId;
+    expectedVersion: number;
+    status: Exclude<AppointmentStatus, 'scheduled'>;
+    reason?: AppointmentDocument['cancellation_reason'];
+    detail?: string | null;
+    session: ClientSession;
+  }): Promise<'updated' | 'version_conflict'> {
+    const now = new Date();
+    const lifecycle =
+      input.status === 'cancelled'
+        ? {
+            cancelled_at: now,
+            cancelled_by: input.userId,
+            cancellation_reason: input.reason ?? null,
+            cancellation_detail: input.detail ?? null,
+          }
+        : input.status === 'completed'
+          ? { completed_at: now, completed_by: input.userId }
+          : { no_show_at: now, no_show_by: input.userId };
+    const result = await this.appointments.updateOne(
+      {
+        _id: input.appointment._id,
+        tenant_id: input.tenantId,
+        status: 'scheduled',
+        version: input.expectedVersion,
+      },
+      {
+        $set: {
+          status: input.status,
+          ...lifecycle,
+          updated_at: now,
+          updated_by: input.userId,
+        },
+        $inc: { version: 1 },
+      },
+      { session: input.session },
     );
     return result.modifiedCount === 1 ? 'updated' : 'version_conflict';
   }
