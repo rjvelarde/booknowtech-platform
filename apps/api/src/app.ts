@@ -10,6 +10,7 @@ import { createLoggerOptions } from './logger.js';
 import { registerProviderRoutes } from './provider/routes.js';
 import { registerAvailabilityRoutes } from './availability/routes.js';
 import { registerCustomerRoutes } from './customer/routes.js';
+import { registerAppointmentRoutes } from './appointment/routes.js';
 import type { ReadinessProbe } from './readiness.js';
 
 interface BuildApplicationOptions {
@@ -141,6 +142,7 @@ export async function buildApplication({
     registerProviderRoutes(app, environment, adminStore);
     registerAvailabilityRoutes(app, environment, adminStore);
     registerCustomerRoutes(app, environment, adminStore);
+    registerAppointmentRoutes(app, environment, adminStore);
   }
 
   app.addHook('onClose', async () => {

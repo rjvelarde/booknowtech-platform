@@ -485,6 +485,22 @@ export function registerAvailabilityRoutes(
       const exceptions = (
         await store.listAvailabilityExceptions(context.tenant!._id, provider._id)
       ).filter((item) => item.status === 'active');
+      const previewStart = localToUtc(request.query.start_date, 0, schedule!.timezone, 'earlier');
+      const endMarker = new Date(`${request.query.end_date}T12:00:00Z`);
+      const dayAfterEnd = new Date(endMarker.valueOf() + 86_400_000).toISOString().slice(0, 10);
+      const previewEnd = localToUtc(dayAfterEnd, 0, schedule!.timezone, 'later');
+      const blockingAppointments = await store.listBlockingAppointments({
+        tenantId: context.tenant!._id,
+        providerId: provider._id,
+        startsBefore: previewEnd,
+        endsAfter: previewStart,
+      });
+      const lockDates = utcDatesBetween(previewStart, previewEnd);
+      const appointmentRevisions = await store.getScheduleLockRevisions(
+        context.tenant!._id,
+        provider._id,
+        lockDates,
+      );
       const fingerprint = slotFingerprint({
         tenant: String(context.tenant!._id),
         provider: provider.public_id,
@@ -495,6 +511,7 @@ export function registerAvailabilityRoutes(
         assignmentVersion: assignment.version,
         scheduleVersion: schedule!.version,
         exceptions: exceptions.map((item) => `${item.public_id}:${item.version}`).sort(),
+        appointmentRevisions,
         startDate: request.query.start_date,
         endDate: request.query.end_date,
         cadence,
@@ -504,25 +521,30 @@ export function registerAvailabilityRoutes(
         return error(reply, 400, 'invalid_cursor', request.id);
       const generated: ReturnType<typeof generateSlots> = [];
       for (const date of dates) {
-        generated.push(
-          ...generateSlots(
-            previewDay(
-              date,
-              schedule!,
-              exceptions,
-              service.duration_minutes,
-              assignment.buffer_before_minutes,
-              assignment.buffer_after_minutes,
-            ).windows,
-            schedule!.timezone,
-            cadence,
+        const candidates = generateSlots(
+          previewDay(
+            date,
+            schedule!,
+            exceptions,
             service.duration_minutes,
             assignment.buffer_before_minutes,
             assignment.buffer_after_minutes,
-            after,
-            limit + 1 - generated.length,
-          ),
+          ).windows,
+          schedule!.timezone,
+          cadence,
+          service.duration_minutes,
+          assignment.buffer_before_minutes,
+          assignment.buffer_after_minutes,
+          after,
+        ).filter(
+          (slot) =>
+            !blockingAppointments.some(
+              (appointment) =>
+                appointment.blocked_starts_at < new Date(slot.blocked_ends_at) &&
+                appointment.blocked_ends_at > new Date(slot.blocked_starts_at),
+            ),
         );
+        generated.push(...candidates.slice(0, limit + 1 - generated.length));
         if (generated.length > limit) break;
       }
       const slots = generated.slice(0, limit);
@@ -595,6 +617,17 @@ export function generateSlots(
 
 function slotFingerprint(value: object) {
   return createHash('sha256').update(JSON.stringify(value)).digest('base64url');
+}
+
+function utcDatesBetween(start: Date, end: Date) {
+  const dates: string[] = [];
+  for (
+    let value = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+    value <= Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+    value += 86_400_000
+  )
+    dates.push(new Date(value).toISOString().slice(0, 10));
+  return dates;
 }
 function encodeCursor(fingerprint: string, after: string) {
   return Buffer.from(JSON.stringify({ v: 1, fingerprint, after })).toString('base64url');
@@ -843,7 +876,12 @@ function subtract(windows: [number, number][], cut: [number, number]): [number, 
     return parts.filter(([start, end]) => start < end);
   });
 }
-function localToUtc(date: string, minute: number, zone: string, choice: 'earlier' | 'later') {
+export function localToUtc(
+  date: string,
+  minute: number,
+  zone: string,
+  choice: 'earlier' | 'later',
+) {
   const normalized = normalizeLocal(date, minute);
   date = normalized.date;
   minute = normalized.minute;

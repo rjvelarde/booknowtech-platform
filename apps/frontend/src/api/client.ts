@@ -208,6 +208,98 @@ export interface DuplicateCandidate {
   reasons: string[];
 }
 
+export type AppointmentStatus = 'scheduled' | 'completed' | 'cancelled' | 'no_show';
+
+export interface AppointmentView {
+  public_id: string;
+  reference: string;
+  customer: { public_id?: string | null; display_name: string };
+  provider: { public_id?: string | null; display_name: string };
+  service: { public_id?: string | null; name: string };
+  starts_at: string;
+  ends_at: string;
+  blocked_starts_at?: string;
+  blocked_ends_at?: string;
+  timezone: string;
+  local_start_date: string;
+  status: AppointmentStatus;
+  version: number;
+  snapshot?: {
+    service_duration_minutes: number;
+    buffer_before_minutes: number;
+    buffer_after_minutes: number;
+    base_price_minor: number;
+    booking_fee_minor: number;
+    currency: string;
+  };
+  cancellation_reason?: string | null;
+  cancellation_detail?: string | null;
+}
+
+export function listAppointments(
+  input: {
+    view?: 'today' | 'upcoming' | 'past';
+    status?: AppointmentStatus;
+    customer_query?: string;
+    reference?: string;
+  } = {},
+): Promise<{ items: AppointmentView[]; next_cursor: string | null }> {
+  const query = new URLSearchParams();
+  Object.entries(input).forEach(([key, value]) => value && query.set(key, value));
+  return request(`/v1/admin/appointments${query.size ? `?${query.toString()}` : ''}`);
+}
+
+export function getAppointment(publicId: string): Promise<AppointmentView> {
+  return request(`/v1/admin/appointments/${publicId}`);
+}
+
+export function createAppointment(
+  input: {
+    customer_public_id: string;
+    provider_public_id: string;
+    service_public_id: string;
+    starts_at: string;
+    customer_address_public_id?: string;
+  },
+  csrfToken: string,
+): Promise<AppointmentView> {
+  return request('/v1/admin/appointments', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+
+export function rescheduleAppointment(
+  item: AppointmentView,
+  startsAt: string,
+  csrfToken: string,
+): Promise<AppointmentView & { changed: boolean }> {
+  return appointmentAction(item, 'reschedule', { starts_at: startsAt }, csrfToken);
+}
+
+export function transitionAppointment(
+  item: AppointmentView,
+  action: 'cancel' | 'complete' | 'no-show',
+  input: { reason?: string; detail?: string | null; early_override?: boolean } = {},
+  csrfToken: string,
+): Promise<AppointmentView & { changed: boolean }> {
+  return appointmentAction(item, action, input, csrfToken);
+}
+
+function appointmentAction<T extends Record<string, unknown>>(
+  item: AppointmentView,
+  action: string,
+  input: T,
+  csrfToken: string,
+): Promise<AppointmentView & { changed: boolean }> {
+  return request(`/v1/admin/appointments/${item.public_id}/${action}`, {
+    method: 'POST',
+    body: JSON.stringify({ expected_version: item.version, ...input }),
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+
 export class ApiError extends Error {
   public constructor(
     public readonly status: number,

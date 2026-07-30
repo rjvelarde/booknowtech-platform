@@ -221,4 +221,25 @@ suite('administrative foundation migration', () => {
       db.collection('customers').insertOne({ ...customer(new ObjectId()), source: 'unknown' }),
     ).rejects.toThrow();
   });
+
+  it('creates appointment reference, agenda, conflict, and schedule-lock indexes', async () => {
+    await migrateDatabase(db);
+    expect((await db.collection('appointments').indexes()).map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        'appointments_tenant_public_id_unique',
+        'appointments_tenant_reference_unique',
+        'appointments_provider_conflicts',
+        'appointments_tenant_upcoming',
+        'appointments_tenant_customer_agenda',
+      ]),
+    );
+    expect(
+      (await db.collection('appointment_schedule_locks').indexes()).map(({ name }) => name),
+    ).toEqual(
+      expect.arrayContaining([
+        'appointment_schedule_locks_scope_unique',
+        'appointment_schedule_locks_updated',
+      ]),
+    );
+  });
 });
