@@ -59,6 +59,7 @@ suite('administrative foundation migration', () => {
         'services_tenant_public_id_unique',
         'services_tenant_internal_code_unique',
         'services_catalog_list',
+        'services_public_catalog',
       ]),
     );
     const service = {
@@ -99,6 +100,7 @@ suite('administrative foundation migration', () => {
         'providers_tenant_public_id_unique',
         'providers_tenant_internal_code_unique',
         'providers_directory_list',
+        'providers_public_directory',
       ]),
     );
     expect(

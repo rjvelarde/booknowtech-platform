@@ -19,6 +19,21 @@ export interface TenantDocument {
   default_slot_cadence_minutes: number;
   locale: string;
   currency: string;
+  public_booking_enabled: boolean;
+  public_profile: {
+    business_name: string;
+    description: string | null;
+    tagline: string | null;
+    logo_url: string | null;
+    primary_color: string | null;
+    website_url: string | null;
+    phone_e164: string | null;
+    email_normalized: string | null;
+  };
+  booking_policy: {
+    minimum_lead_minutes: number;
+    maximum_advance_days: number;
+  };
   version: number;
   updated_by: ObjectId | null;
   status: 'active' | 'suspended';
@@ -42,6 +57,12 @@ export interface ServiceDocument {
   booking_fee_minor: number;
   slot_cadence_minutes: number | null;
   currency: string;
+  publicly_bookable: boolean;
+  public_display_order: number;
+  public_booking_policy: {
+    minimum_lead_minutes: number | null;
+    maximum_advance_days: number | null;
+  };
   status: 'active' | 'inactive';
   version: number;
   created_by: ObjectId;
@@ -455,6 +476,66 @@ export class AdminStore {
     return this.tenants.findOne({ _id: tenantId, status: 'active' });
   }
 
+  public getPublicTenantBySlug(slug: string): Promise<TenantDocument | null> {
+    return this.tenants.findOne({ slug, status: 'active', public_booking_enabled: true });
+  }
+
+  public listPublicServices(tenantId: ObjectId): Promise<ServiceDocument[]> {
+    return this.services
+      .find({ tenant_id: tenantId, status: 'active', publicly_bookable: true })
+      .sort({ public_display_order: 1, name: 1, public_id: 1 })
+      .toArray();
+  }
+
+  public async listPublicProvidersForService(
+    tenantId: ObjectId,
+    serviceId: ObjectId,
+  ): Promise<Array<{ provider: ProviderDocument; assignment: ProviderServiceAssignmentDocument }>> {
+    const assignments = await this.providerServiceAssignments
+      .find({ tenant_id: tenantId, service_id: serviceId, status: 'active' })
+      .toArray();
+    if (!assignments.length) return [];
+    const providers = await this.providers
+      .find({
+        tenant_id: tenantId,
+        _id: { $in: assignments.map((item) => item.provider_id) },
+        status: 'active',
+        customer_selectable: true,
+        accepting_new_clients: true,
+      })
+      .sort({ display_order: 1, display_name: 1, public_id: 1 })
+      .toArray();
+    const byProvider = new Map(assignments.map((item) => [item.provider_id.toHexString(), item]));
+    return providers.map((provider) => ({
+      provider,
+      assignment: byProvider.get(provider._id.toHexString())!,
+    }));
+  }
+
+  public async updatePublicBookingSettings(input: {
+    tenantId: ObjectId;
+    userId: ObjectId;
+    expectedVersion: number;
+    changes: Pick<TenantDocument, 'public_booking_enabled' | 'public_profile' | 'booking_policy'>;
+  }): Promise<'updated' | 'unchanged' | 'version_conflict' | 'not_found'> {
+    const current = await this.getBusinessProfile(input.tenantId);
+    if (!current) return 'not_found';
+    if (
+      current.public_booking_enabled === input.changes.public_booking_enabled &&
+      JSON.stringify(current.public_profile) === JSON.stringify(input.changes.public_profile) &&
+      JSON.stringify(current.booking_policy) === JSON.stringify(input.changes.booking_policy)
+    )
+      return 'unchanged';
+    const result = await this.tenants.updateOne(
+      { _id: input.tenantId, status: 'active', version: input.expectedVersion },
+      {
+        $set: { ...input.changes, updated_by: input.userId, updated_at: new Date() },
+        $inc: { version: 1 },
+      },
+    );
+    return result.modifiedCount === 1 ? 'updated' : 'version_conflict';
+  }
+
   public async updateBusinessProfile(input: {
     tenantId: ObjectId;
     userId: ObjectId;
@@ -529,6 +610,9 @@ export class AdminStore {
       | 'updated_by'
       | 'created_at'
       | 'updated_at'
+      | 'publicly_bookable'
+      | 'public_display_order'
+      | 'public_booking_policy'
     >,
   ): Promise<ServiceDocument> {
     const now = new Date();
@@ -542,6 +626,12 @@ export class AdminStore {
       updated_by: userId,
       created_at: now,
       updated_at: now,
+      publicly_bookable: false,
+      public_display_order: 0,
+      public_booking_policy: {
+        minimum_lead_minutes: null,
+        maximum_advance_days: null,
+      },
       ...input,
     };
     await this.services.insertOne(document);
@@ -564,6 +654,9 @@ export class AdminStore {
         | 'base_price_minor'
         | 'booking_fee_minor'
         | 'slot_cadence_minutes'
+        | 'publicly_bookable'
+        | 'public_display_order'
+        | 'public_booking_policy'
       >
     >;
   }): Promise<'updated' | 'version_conflict' | 'not_found'> {

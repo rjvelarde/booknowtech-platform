@@ -66,6 +66,13 @@ export function BusinessHubHomePage({
           <button
             type="button"
             className="secondary-button"
+            onClick={() => onNavigate('/public-booking')}
+          >
+            Public booking
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
             onClick={() => onNavigate('/providers')}
           >
             Providers

@@ -437,3 +437,125 @@ button:disabled {
     flex-direction: column;
   }
 }
+
+.public-booking-page {
+  min-height: 100vh;
+  padding: 2rem max(1rem, calc((100vw - 64rem) / 2));
+  color: #11203d;
+  background: #f4f7fb;
+}
+.public-booking-header,
+.public-booking-flow {
+  max-width: 64rem;
+  margin: 0 auto;
+}
+.public-booking-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding-bottom: 1.5rem;
+}
+.public-booking-header h1 {
+  margin: 0.25rem 0;
+}
+.public-booking-logo,
+.public-booking-initials {
+  width: 4.5rem;
+  height: 4.5rem;
+  flex: 0 0 auto;
+  border-radius: 1rem;
+}
+.public-booking-logo {
+  object-fit: contain;
+}
+.public-booking-initials {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--booking-accent);
+  font-size: 2rem;
+  font-weight: 800;
+}
+.public-booking-flow {
+  display: grid;
+  gap: 1rem;
+}
+.public-booking-step,
+.public-booking-summary {
+  padding: 1.25rem;
+  border: 1px solid #d6e0ed;
+  border-radius: 1rem;
+  background: #fff;
+}
+.public-booking-step h2,
+.public-booking-summary h2 {
+  margin-top: 0;
+  font-size: 1.25rem;
+}
+.public-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+.public-choice,
+.public-time {
+  border: 2px solid #d6e0ed;
+  color: #11203d;
+  background: #fff;
+  text-align: left;
+}
+.public-choice {
+  display: grid;
+  gap: 0.35rem;
+  min-height: 5rem;
+  padding: 1rem;
+}
+.public-choice.selected,
+.public-time.selected {
+  border-color: var(--booking-accent);
+  outline: 2px solid color-mix(in srgb, var(--booking-accent) 25%, transparent);
+}
+.public-date-field {
+  display: grid;
+  gap: 0.4rem;
+  max-width: 20rem;
+  font-weight: 700;
+}
+.public-date-field input {
+  padding: 0.7rem;
+  border: 1px solid #aebed2;
+  border-radius: 0.5rem;
+  font: inherit;
+}
+.public-time-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.65rem;
+}
+.public-time {
+  padding: 0.75rem;
+  text-align: center;
+}
+.public-coming-soon {
+  padding: 0.85rem;
+  border-left: 0.35rem solid var(--booking-accent);
+  background: #eef5fb;
+  font-weight: 700;
+}
+.public-booking-footer {
+  max-width: 64rem;
+  margin: 2rem auto 0;
+  color: #4f6078;
+  text-align: center;
+}
+@media (max-width: 40rem) {
+  .public-booking-page {
+    padding: 1rem;
+  }
+  .public-booking-header {
+    align-items: flex-start;
+  }
+  .public-choice-grid {
+    grid-template-columns: 1fr;
+  }
+}
