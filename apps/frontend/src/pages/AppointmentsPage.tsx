@@ -36,12 +36,12 @@ function Agenda({ onNavigate }: Props) {
   const [query, setQuery] = useState('');
   const [error, setError] = useState(false);
   const load = () => {
-    const byReference = query.trim().toUpperCase().startsWith('BNT-');
+    const normalizedReference = appointmentReferencePrefix(query);
     void listAppointments({
       view,
       ...(query.trim().length >= 2
-        ? byReference
-          ? { reference: query.trim() }
+        ? normalizedReference
+          ? { reference: normalizedReference }
           : { customer_query: query.trim() }
         : {}),
     })
@@ -83,7 +83,7 @@ function Agenda({ onNavigate }: Props) {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Customer or BNT reference"
+            placeholder="Customer name or appointment reference"
           />
         </label>
         <button type="submit">Search</button>
@@ -123,10 +123,12 @@ function Agenda({ onNavigate }: Props) {
 }
 
 function CreateAppointment({ csrfToken, onNavigate }: Props) {
-  const [customers, setCustomers] = useState<CustomerView[]>([]);
+  const [customerResults, setCustomerResults] = useState<CustomerView[]>([]);
+  const [customerQuery, setCustomerQuery] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerView | null>(null);
+  const [customerSearching, setCustomerSearching] = useState(false);
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [provider, setProvider] = useState<ProviderView | null>(null);
-  const [customerId, setCustomerId] = useState('');
   const [providerId, setProviderId] = useState('');
   const [serviceId, setServiceId] = useState('');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -134,9 +136,26 @@ function CreateAppointment({ csrfToken, onNavigate }: Props) {
   const [slots, setSlots] = useState<Array<{ starts_at: string; local_start: string }>>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    void listCustomers({ status: 'active' }).then((r) => setCustomers(r.items));
     void listProviders('active').then((r) => setProviders(r.items));
   }, []);
+  useEffect(() => {
+    if (selectedCustomer || customerQuery.trim().length < 2) {
+      setCustomerResults([]);
+      setCustomerSearching(false);
+      return;
+    }
+    setCustomerSearching(true);
+    const timer = window.setTimeout(() => {
+      void listCustomers({ status: 'active', q: customerQuery.trim() })
+        .then((result) => {
+          setCustomerResults(result.items.slice(0, 20));
+          setError(null);
+        })
+        .catch(() => setError('customer_search_failed'))
+        .finally(() => setCustomerSearching(false));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [customerQuery, selectedCustomer]);
   useEffect(() => {
     setServiceId('');
     setStartsAt('');
@@ -160,10 +179,10 @@ function CreateAppointment({ csrfToken, onNavigate }: Props) {
       );
   };
   const submit = () => {
-    if (!customerId || !providerId || !serviceId || !startsAt) return;
+    if (!selectedCustomer || !providerId || !serviceId || !startsAt) return;
     void createAppointment(
       {
-        customer_public_id: customerId,
+        customer_public_id: selectedCustomer.public_id,
         provider_public_id: providerId,
         service_public_id: serviceId,
         starts_at: startsAt,
@@ -183,16 +202,52 @@ function CreateAppointment({ csrfToken, onNavigate }: Props) {
       <h2 id="new-appointment-title">New appointment</h2>
       <div className="form-card stack-form">
         <label>
-          Customer
-          <select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-            <option value="">Select a customer</option>
-            {customers.map((c) => (
-              <option key={c.public_id} value={c.public_id}>
-                {c.display_name}
-              </option>
-            ))}
-          </select>
+          Find customer
+          <input
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={!selectedCustomer && customerResults.length > 0}
+            aria-controls="customer-search-results"
+            value={customerQuery}
+            placeholder="Type at least 2 letters"
+            onChange={(event) => {
+              setCustomerQuery(event.target.value);
+              setSelectedCustomer(null);
+            }}
+          />
         </label>
+        {customerSearching ? <p role="status">Searching customers…</p> : null}
+        {!selectedCustomer && customerQuery.trim().length >= 2 && !customerSearching ? (
+          <div id="customer-search-results" role="listbox" aria-label="Customer results">
+            {customerResults.length ? (
+              customerResults.map((customer) => (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected="false"
+                  className="customer-search-option"
+                  key={customer.public_id}
+                  onClick={() => {
+                    setSelectedCustomer(customer);
+                    setCustomerQuery(customer.display_name);
+                    setCustomerResults([]);
+                  }}
+                >
+                  <strong>{customer.display_name}</strong>
+                  <span>{customer.email ?? customer.mobile_phone ?? 'No contact details'}</span>
+                </button>
+              ))
+            ) : (
+              <p className="empty-state">No customers found.</p>
+            )}
+          </div>
+        ) : null}
+        {selectedCustomer ? (
+          <p className="form-success" role="status">
+            Selected {selectedCustomer.display_name}
+            {selectedCustomer.email ? ` · ${selectedCustomer.email}` : ''}
+          </p>
+        ) : null}
         <label>
           Provider
           <select value={providerId} onChange={(e) => setProviderId(e.target.value)}>
@@ -263,7 +318,7 @@ function CreateAppointment({ csrfToken, onNavigate }: Props) {
             Unable to continue: {error.replaceAll('_', ' ')}.
           </p>
         ) : null}
-        <button type="button" disabled={!startsAt} onClick={submit}>
+        <button type="button" disabled={!startsAt || !selectedCustomer} onClick={submit}>
           Create appointment
         </button>
       </div>
@@ -284,6 +339,8 @@ function AppointmentDetail({
   const [reason, setReason] = useState('customer_request');
   const [detail, setDetail] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [rescheduling, setRescheduling] = useState(false);
+  const [rescheduleMessage, setRescheduleMessage] = useState<string | null>(null);
   useEffect(() => {
     void getAppointment(publicId)
       .then(setItem)
@@ -320,13 +377,21 @@ function AppointmentDetail({
       .catch((e: unknown) => setError(e instanceof ApiError ? e.code : 'request_failed'));
   };
   const reschedule = () => {
-    if (!newStart) return;
+    if (!newStart || rescheduling) return;
+    setRescheduling(true);
+    setError(null);
+    setRescheduleMessage(null);
     void rescheduleAppointment(item, newStart, csrfToken)
       .then((next) => {
         setItem(next);
         setNewStart('');
+        setRescheduleSlots([]);
+        setRescheduleMessage(
+          `Appointment rescheduled to ${formatWhen(next.starts_at, next.timezone)}.`,
+        );
       })
-      .catch((e: unknown) => setError(e instanceof ApiError ? e.code : 'request_failed'));
+      .catch((e: unknown) => setError(e instanceof ApiError ? e.code : 'request_failed'))
+      .finally(() => setRescheduling(false));
   };
   const findRescheduleSlots = () => {
     if (!rescheduleDate || !item.provider.public_id || !item.service.public_id) return;
@@ -414,9 +479,14 @@ function AppointmentDetail({
                 </div>
               </fieldset>
             ) : null}
-            <button type="button" disabled={!newStart} onClick={reschedule}>
-              Reschedule appointment
+            <button type="button" disabled={!newStart || rescheduling} onClick={reschedule}>
+              {rescheduling ? 'Rescheduling…' : 'Reschedule appointment'}
             </button>
+            {rescheduleMessage ? (
+              <p className="form-success" role="status">
+                {rescheduleMessage}
+              </p>
+            ) : null}
           </div>
           <div className="form-card stack-form">
             <h3>Cancel appointment</h3>
@@ -463,4 +533,13 @@ function formatWhen(value: string, timezone: string): string {
     timeStyle: 'short',
     timeZone: timezone,
   }).format(new Date(value));
+}
+
+function appointmentReferencePrefix(value: string): string | null {
+  const normalized = value.trim().toUpperCase().replaceAll(' ', '');
+  if (!normalized) return null;
+  if (normalized.startsWith('BNT-')) return normalized;
+  if (normalized === 'BNT') return 'BNT-';
+  if (/^[A-Z0-9]{2,8}$/.test(normalized) && /\d/.test(normalized)) return `BNT-${normalized}`;
+  return null;
 }
