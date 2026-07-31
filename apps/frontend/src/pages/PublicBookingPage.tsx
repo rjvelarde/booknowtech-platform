@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties, InputHTMLAttributes, ReactNode } from 'react';
 
 import {
   ApiError,
+  type PublicAppointmentConfirmationView,
   type PublicBookingContextView,
   type PublicProviderView,
   type PublicServiceView,
   type PublicStartView,
+  createPublicAppointment,
   getPublicBookingContext,
   listPublicProviders,
   listPublicServices,
@@ -25,6 +27,10 @@ export function PublicBookingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [logoFailed, setLogoFailed] = useState(false);
+  const [review, setReview] = useState<Record<string, string> | null>(null);
+  const [confirmation, setConfirmation] = useState<PublicAppointmentConfirmationView | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
     Promise.all([getPublicBookingContext(), listPublicServices()])
@@ -48,6 +54,8 @@ export function PublicBookingPage() {
     setDate('');
     setStarts([]);
     setSelectedStart(null);
+    setReview(null);
+    setConfirmation(null);
     setLoading(true);
     setError(null);
     try {
@@ -63,6 +71,7 @@ export function PublicBookingPage() {
     setDate(nextDate);
     setStarts([]);
     setSelectedStart(null);
+    setReview(null);
     if (!service || !provider || !nextDate) return;
     setLoading(true);
     setError(null);
@@ -203,7 +212,12 @@ export function PublicBookingPage() {
                       : 'public-time'
                   }
                   aria-pressed={selectedStart?.starts_at === item.starts_at}
-                  onClick={() => setSelectedStart(item)}
+                  onClick={() => {
+                    setSelectedStart(item);
+                    setReview(null);
+                    setConfirmation(null);
+                    setError(null);
+                  }}
                 >
                   <span>{timeLabel(item.local_start)}</span>
                   {selectedStart?.starts_at === item.starts_at ? <SelectedBadge /> : null}
@@ -219,9 +233,13 @@ export function PublicBookingPage() {
           </Step>
         ) : null}
 
-        {selectedStart && service && provider ? (
+        {confirmation ? (
+          <ConfirmationCard confirmation={confirmation} />
+        ) : selectedStart && service && provider ? (
           <section className="public-booking-summary" aria-labelledby="booking-summary-title">
-            <h2 id="booking-summary-title">Your selection</h2>
+            <h2 id="booking-summary-title">
+              {review ? 'Review your appointment' : 'Your details'}
+            </h2>
             <p>
               <strong>{service.name}</strong> with {provider.display_name}
             </p>
@@ -232,9 +250,94 @@ export function PublicBookingPage() {
                 timeZone: selectedStart.timezone,
               })}
             </p>
-            <p className="public-coming-soon" role="status">
-              Online booking is coming soon. This selection has not been reserved or submitted.
-            </p>
+            {review ? (
+              <div className="public-review-details">
+                <p>
+                  <strong>
+                    {review.first_name} {review.last_name}
+                  </strong>
+                </p>
+                <p>
+                  {review.email} · {review.mobile_phone}
+                </p>
+                {review.appointment_note ? <p>Note: {review.appointment_note}</p> : null}
+                <button type="button" className="text-button" onClick={() => setReview(null)}>
+                  Edit details
+                </button>
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => {
+                    setSubmitting(true);
+                    setError(null);
+                    void createPublicAppointment(
+                      {
+                        service_public_id: service.public_id,
+                        provider_public_id: provider.public_id,
+                        starts_at: selectedStart.starts_at,
+                        customer: {
+                          first_name: review.first_name,
+                          last_name: review.last_name,
+                          email: review.email,
+                          mobile_phone: review.mobile_phone,
+                          preferred_contact_channel: review.preferred_contact_channel,
+                          customer_location_address:
+                            service.delivery_mode === 'customer_location'
+                              ? {
+                                  line_1: review.line_1,
+                                  line_2: review.line_2 || null,
+                                  city: review.city,
+                                  region: review.region,
+                                  postal_code: review.postal_code,
+                                  country_code: 'US',
+                                }
+                              : null,
+                          appointment_note: review.appointment_note || null,
+                        },
+                        consent: {
+                          booking_terms_version: context.booking_terms.version,
+                          booking_terms_accepted: true,
+                        },
+                        website: '',
+                      },
+                      idempotencyKey,
+                    )
+                      .then(setConfirmation)
+                      .catch((reason: unknown) => {
+                        if (
+                          reason instanceof ApiError &&
+                          reason.code === 'slot_no_longer_available'
+                        ) {
+                          setSelectedStart(null);
+                          setReview(null);
+                          setIdempotencyKey(crypto.randomUUID());
+                          setError(
+                            'That time was just taken. Please choose another available time.',
+                          );
+                        } else if (
+                          reason instanceof ApiError &&
+                          reason.code === 'booking_terms_changed'
+                        ) {
+                          setReview(null);
+                          setError('The booking terms changed. Please review them and try again.');
+                        } else setError('Unable to book this appointment. Please try again.');
+                      })
+                      .finally(() => setSubmitting(false));
+                  }}
+                >
+                  {submitting ? 'Booking…' : 'Book appointment'}
+                </button>
+              </div>
+            ) : (
+              <GuestDetailsForm
+                terms={context.booking_terms}
+                deliveryMode={service.delivery_mode}
+                onReview={(values) => {
+                  setReview(values);
+                  setIdempotencyKey(crypto.randomUUID());
+                }}
+              />
+            )}
           </section>
         ) : null}
         {error && context ? (
@@ -287,6 +390,156 @@ function ProviderAvatar({ provider }: { provider: PublicProviderView }) {
   ) : (
     <span className="public-provider-avatar public-provider-initials" aria-hidden="true">
       {initials || '?'}
+    </span>
+  );
+}
+
+function GuestDetailsForm({
+  terms,
+  deliveryMode,
+  onReview,
+}: {
+  terms: PublicBookingContextView['booking_terms'];
+  deliveryMode: PublicServiceView['delivery_mode'];
+  onReview: (values: Record<string, string>) => void;
+}) {
+  return (
+    <form
+      className="public-guest-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        onReview(
+          Object.fromEntries(
+            [...data.entries()].map(([key, value]) => [
+              key,
+              typeof value === 'string' ? value : '',
+            ]),
+          ),
+        );
+      }}
+    >
+      <div className="public-form-grid">
+        <PublicField name="first_name" label="First name" autoComplete="given-name" required />
+        <PublicField name="last_name" label="Last name" autoComplete="family-name" required />
+        <PublicField name="email" label="Email" type="email" autoComplete="email" required />
+        <PublicField
+          name="mobile_phone"
+          label="Mobile phone"
+          type="tel"
+          autoComplete="tel"
+          placeholder="(843) 555-0123"
+          required
+        />
+      </div>
+      <label>
+        <span>How should the business contact you about this appointment?</span>
+        <select name="preferred_contact_channel" defaultValue="email">
+          <option value="email">Email</option>
+          <option value="sms">Text message</option>
+        </select>
+      </label>
+      {deliveryMode === 'customer_location' ? (
+        <fieldset>
+          <legend>Appointment address</legend>
+          <PublicField name="line_1" label="Street address" autoComplete="address-line1" required />
+          <PublicField
+            name="line_2"
+            label="Apartment or suite (optional)"
+            autoComplete="address-line2"
+          />
+          <PublicField name="city" label="City" autoComplete="address-level2" required />
+          <PublicField name="region" label="State" autoComplete="address-level1" required />
+          <PublicField name="postal_code" label="ZIP code" autoComplete="postal-code" required />
+        </fieldset>
+      ) : null}
+      <label>
+        <span>Note for the business (optional)</span>
+        <textarea name="appointment_note" maxLength={1000} />
+      </label>
+      <label className="checkbox-label">
+        <input type="checkbox" name="terms_accepted" required />
+        <span>
+          {terms.acknowledgment_label}{' '}
+          {terms.terms_url ? (
+            <a href={terms.terms_url} target="_blank" rel="noreferrer">
+              Read terms
+            </a>
+          ) : null}
+        </span>
+      </label>
+      <label className="public-honeypot" aria-hidden="true">
+        <span>Website</span>
+        <input name="website" tabIndex={-1} autoComplete="off" />
+      </label>
+      <button type="submit">Review appointment</button>
+    </form>
+  );
+}
+
+function PublicField(
+  props: { name: string; label: string } & InputHTMLAttributes<HTMLInputElement>,
+) {
+  const { label, ...input } = props;
+  return (
+    <label>
+      <span>{label}</span>
+      <input {...input} />
+    </label>
+  );
+}
+
+function ConfirmationCard({ confirmation }: { confirmation: PublicAppointmentConfirmationView }) {
+  return (
+    <section
+      className="public-booking-summary public-confirmation"
+      aria-labelledby="confirmation-title"
+    >
+      <div className="public-confirmation-provider">
+        <ConfirmationAvatar confirmation={confirmation} />
+        <div>
+          <h2 id="confirmation-title">You’re booked!</h2>
+          <p>
+            Your appointment with {confirmation.provider.display_name} at{' '}
+            {confirmation.business.name} is confirmed.
+          </p>
+        </div>
+      </div>
+      <p>
+        <strong>{confirmation.service.name}</strong>
+      </p>
+      <p>
+        {new Date(confirmation.starts_at).toLocaleString([], {
+          dateStyle: 'long',
+          timeStyle: 'short',
+          timeZone: confirmation.timezone,
+        })}
+      </p>
+      <p className="appointment-reference">
+        Reference: <strong>{confirmation.appointment_reference}</strong>
+      </p>
+      <p>
+        Email and text confirmations are not available yet. Please save this reference or take a
+        screenshot.
+      </p>
+    </section>
+  );
+}
+
+function ConfirmationAvatar({ confirmation }: { confirmation: PublicAppointmentConfirmationView }) {
+  const [failed, setFailed] = useState(false);
+  if (confirmation.provider.photo_url && !failed)
+    return (
+      <img
+        className="public-provider-avatar"
+        src={confirmation.provider.photo_url}
+        alt=""
+        onError={() => setFailed(true)}
+      />
+    );
+  return (
+    <span className="public-provider-avatar public-provider-initials" aria-hidden="true">
+      {confirmation.provider.display_name.slice(0, 1).toUpperCase()}
     </span>
   );
 }

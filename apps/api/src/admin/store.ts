@@ -34,6 +34,11 @@ export interface TenantDocument {
     minimum_lead_minutes: number;
     maximum_advance_days: number;
   };
+  public_booking_terms: {
+    version: string;
+    acknowledgment_label: string;
+    terms_url: string | null;
+  };
   version: number;
   updated_by: ObjectId | null;
   status: 'active' | 'suspended';
@@ -190,8 +195,8 @@ export interface CustomerDocument {
   version: number;
   created_at: Date;
   updated_at: Date;
-  created_by: ObjectId;
-  updated_by: ObjectId;
+  created_by: ObjectId | null;
+  updated_by: ObjectId | null;
 }
 
 export const APPOINTMENT_STATUSES = ['scheduled', 'completed', 'cancelled', 'no_show'] as const;
@@ -209,6 +214,7 @@ export interface AppointmentSnapshot {
   base_price_minor: number;
   booking_fee_minor: number;
   currency: string;
+  customer_note: string | null;
 }
 
 export interface AppointmentDocument {
@@ -232,7 +238,12 @@ export interface AppointmentDocument {
     customer_address: Omit<CustomerAddressDocument, 'public_id' | 'label' | 'is_primary'> | null;
   };
   status: AppointmentStatus;
-  source: 'business_hub' | 'seed';
+  source: 'business_hub' | 'seed' | 'public_booking';
+  public_submission: {
+    idempotency_key_hash: string;
+    request_fingerprint: string;
+  } | null;
+  booking_terms: { version: string; accepted_at: Date } | null;
   cancelled_at: Date | null;
   cancelled_by: ObjectId | null;
   cancellation_reason:
@@ -245,8 +256,8 @@ export interface AppointmentDocument {
   version: number;
   created_at: Date;
   updated_at: Date;
-  created_by: ObjectId;
-  updated_by: ObjectId;
+  created_by: ObjectId | null;
+  updated_by: ObjectId | null;
 }
 
 export interface AppointmentCursor {
@@ -476,8 +487,14 @@ export class AdminStore {
     return this.tenants.findOne({ _id: tenantId, status: 'active' });
   }
 
-  public getPublicTenantBySlug(slug: string): Promise<TenantDocument | null> {
-    return this.tenants.findOne({ slug, status: 'active', public_booking_enabled: true });
+  public getPublicTenantBySlug(
+    slug: string,
+    session?: ClientSession,
+  ): Promise<TenantDocument | null> {
+    return this.tenants.findOne(
+      { slug, status: 'active', public_booking_enabled: true },
+      session ? { session } : undefined,
+    );
   }
 
   public listPublicServices(tenantId: ObjectId): Promise<ServiceDocument[]> {
@@ -516,14 +533,19 @@ export class AdminStore {
     tenantId: ObjectId;
     userId: ObjectId;
     expectedVersion: number;
-    changes: Pick<TenantDocument, 'public_booking_enabled' | 'public_profile' | 'booking_policy'>;
+    changes: Pick<
+      TenantDocument,
+      'public_booking_enabled' | 'public_profile' | 'booking_policy' | 'public_booking_terms'
+    >;
   }): Promise<'updated' | 'unchanged' | 'version_conflict' | 'not_found'> {
     const current = await this.getBusinessProfile(input.tenantId);
     if (!current) return 'not_found';
     if (
       current.public_booking_enabled === input.changes.public_booking_enabled &&
       JSON.stringify(current.public_profile) === JSON.stringify(input.changes.public_profile) &&
-      JSON.stringify(current.booking_policy) === JSON.stringify(input.changes.booking_policy)
+      JSON.stringify(current.booking_policy) === JSON.stringify(input.changes.booking_policy) &&
+      JSON.stringify(current.public_booking_terms) ===
+        JSON.stringify(input.changes.public_booking_terms)
     )
       return 'unchanged';
     const result = await this.tenants.updateOne(
@@ -1283,6 +1305,63 @@ export class AdminStore {
     return customer;
   }
 
+  public findActiveCustomersByEmail(
+    tenantId: ObjectId,
+    email: string,
+    session: ClientSession,
+  ): Promise<CustomerDocument[]> {
+    return this.customers
+      .find({ tenant_id: tenantId, status: 'active', email_normalized: email }, { session })
+      .limit(2)
+      .toArray();
+  }
+
+  public findActiveCustomersByPhone(
+    tenantId: ObjectId,
+    phone: string,
+    session: ClientSession,
+  ): Promise<CustomerDocument[]> {
+    return this.customers
+      .find({ tenant_id: tenantId, status: 'active', mobile_phone_e164: phone }, { session })
+      .limit(2)
+      .toArray();
+  }
+
+  public async createPublicCustomer(
+    tenantId: ObjectId,
+    customer: Omit<
+      CustomerDocument,
+      | '_id'
+      | 'public_id'
+      | 'tenant_id'
+      | 'status'
+      | 'deactivated_at'
+      | 'version'
+      | 'created_at'
+      | 'updated_at'
+      | 'created_by'
+      | 'updated_by'
+    >,
+    session: ClientSession,
+  ): Promise<CustomerDocument> {
+    const now = new Date();
+    const item: CustomerDocument = {
+      _id: new ObjectId(),
+      public_id: randomUUID(),
+      tenant_id: tenantId,
+      ...customer,
+      status: 'active',
+      deactivated_at: null,
+      version: 1,
+      created_at: now,
+      updated_at: now,
+      created_by: null,
+      updated_by: null,
+    };
+    await this.customers.insertOne(item, { session });
+    return item;
+  }
+
   public async updateCustomer(input: {
     tenantId: ObjectId;
     publicId: string;
@@ -1359,6 +1438,21 @@ export class AdminStore {
   ): Promise<AppointmentDocument | null> {
     return this.appointments.findOne(
       { tenant_id: tenantId, public_id: publicId },
+      session ? { session } : undefined,
+    );
+  }
+
+  public getPublicAppointmentByIdempotency(
+    tenantId: ObjectId,
+    keyHash: string,
+    session?: ClientSession,
+  ): Promise<AppointmentDocument | null> {
+    return this.appointments.findOne(
+      {
+        tenant_id: tenantId,
+        source: 'public_booking',
+        'public_submission.idempotency_key_hash': keyHash,
+      },
       session ? { session } : undefined,
     );
   }
