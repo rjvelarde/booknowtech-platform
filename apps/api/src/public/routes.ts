@@ -1011,7 +1011,12 @@ function errorName(value: unknown) {
 
 function safeMongoErrorDetails(value: unknown) {
   if (!value || typeof value !== 'object') return {};
-  const candidate = value as { code?: unknown; codeName?: unknown; errorLabels?: unknown };
+  const candidate = value as {
+    code?: unknown;
+    codeName?: unknown;
+    errorLabels?: unknown;
+    errInfo?: { details?: unknown };
+  };
   return {
     ...(typeof candidate.code === 'number' ? { mongo_error_code: candidate.code } : {}),
     ...(typeof candidate.codeName === 'string'
@@ -1021,7 +1026,30 @@ function safeMongoErrorDetails(value: unknown) {
     candidate.errorLabels.every((label) => typeof label === 'string')
       ? { mongo_error_labels: candidate.errorLabels }
       : {}),
+    ...(candidate.code === 121 && candidate.errInfo?.details
+      ? { mongo_validation_details: redactMongoValidationDetails(candidate.errInfo.details) }
+      : {}),
   };
+}
+
+function redactMongoValidationDetails(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactMongoValidationDetails);
+  if (!value || typeof value !== 'object') return value;
+  const allowed = new Set([
+    'operatorName',
+    'propertyName',
+    'reason',
+    'consideredType',
+    'missingProperties',
+    'schemaRulesNotSatisfied',
+    'propertiesNotSatisfied',
+    'details',
+  ]);
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => allowed.has(key))
+      .map(([key, item]) => [key, redactMongoValidationDetails(item)]),
+  );
 }
 
 function effectivePolicy(tenant: TenantDocument, service: ServiceDocument) {
