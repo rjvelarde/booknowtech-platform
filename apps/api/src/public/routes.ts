@@ -402,6 +402,7 @@ export function registerPublicBookingRoutes(
             60_000,
       );
 
+      let databaseOperation = 'appointment_schedule_lock';
       try {
         const result = await store.withAppointmentScheduleLocks(
           tenant._id,
@@ -473,6 +474,7 @@ export function registerPublicBookingRoutes(
               startsAt,
               session,
             );
+            databaseOperation = 'public_customer';
             const customer = await resolvePublicCustomer(
               store,
               currentTenant._id,
@@ -480,6 +482,7 @@ export function registerPublicBookingRoutes(
               session,
             );
             const now = new Date();
+            databaseOperation = 'public_appointment';
             const appointment = await store.insertAppointment(
               {
                 tenant_id: currentTenant._id,
@@ -537,7 +540,8 @@ export function registerPublicBookingRoutes(
             return { appointment, provider, replayed: false };
           },
         );
-        if (!result.replayed)
+        if (!result.replayed) {
+          databaseOperation = 'public_appointment_audit';
           await store.audit({
             event: 'public_appointment_created',
             outcome: 'success',
@@ -549,6 +553,7 @@ export function registerPublicBookingRoutes(
               appointment_reference: result.appointment.reference,
             },
           });
+        }
         return reply
           .status(result.replayed ? 200 : 201)
           .send(
@@ -572,6 +577,7 @@ export function registerPublicBookingRoutes(
         request.log.error({
           event: 'public_booking.create_failed',
           error_name: errorName(reason),
+          database_operation: databaseOperation,
           ...safeMongoErrorDetails(reason),
         });
         return safeError(reply, 500, 'public_booking_failed', request.id);
