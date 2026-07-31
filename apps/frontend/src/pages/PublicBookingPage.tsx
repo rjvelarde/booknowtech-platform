@@ -103,15 +103,19 @@ export function PublicBookingPage() {
             {context.business.name.slice(0, 1).toUpperCase()}
           </div>
         )}
-        <div>
+        <div className="public-booking-identity">
           <p className="eyebrow">Book an appointment</p>
           <h1>{context.business.name}</h1>
-          {context.business.tagline ? <p>{context.business.tagline}</p> : null}
+          {context.business.tagline ? (
+            <p className="public-booking-tagline">{context.business.tagline}</p>
+          ) : null}
         </div>
       </header>
       <section className="public-booking-flow" aria-live="polite">
-        {context.business.description ? <p>{context.business.description}</p> : null}
-        <Step title="1. Choose a service">
+        {context.business.description ? (
+          <p className="public-booking-description">{context.business.description}</p>
+        ) : null}
+        <Step number={1} title="Service">
           <div className="public-choice-grid">
             {services.map((item) => (
               <button
@@ -123,10 +127,11 @@ export function PublicBookingPage() {
                 aria-pressed={service?.public_id === item.public_id}
                 onClick={() => void chooseService(item)}
               >
-                <strong>{item.name}</strong>
-                <span>
+                <strong className="public-choice-title">{item.name}</strong>
+                <span className="public-choice-detail">
                   {item.duration_minutes} minutes · {money(item.base_price_minor, item.currency)}
                 </span>
+                {service?.public_id === item.public_id ? <SelectedBadge /> : null}
               </button>
             ))}
           </div>
@@ -134,7 +139,7 @@ export function PublicBookingPage() {
         </Step>
 
         {service ? (
-          <Step title="2. Choose a provider">
+          <Step number={2} title="Provider">
             <div className="public-choice-grid">
               {providers.map((item) => (
                 <button
@@ -153,8 +158,12 @@ export function PublicBookingPage() {
                     setSelectedStart(null);
                   }}
                 >
-                  <strong>{item.display_name}</strong>
-                  {item.bio ? <span>{item.bio}</span> : null}
+                  <ProviderAvatar provider={item} />
+                  <span className="public-provider-copy">
+                    <strong className="public-choice-title">{item.display_name}</strong>
+                    {item.bio ? <span className="public-choice-detail">{item.bio}</span> : null}
+                  </span>
+                  {provider?.public_id === item.public_id ? <SelectedBadge /> : null}
                 </button>
               ))}
             </div>
@@ -165,21 +174,24 @@ export function PublicBookingPage() {
         ) : null}
 
         {provider ? (
-          <Step title="3. Choose a date">
-            <label className="public-date-field">
-              <span>Appointment date</span>
-              <input
-                type="date"
-                value={date}
-                onChange={(event) => void loadStarts(event.target.value)}
-              />
-            </label>
+          <Step number={3} title="Date">
+            <div className="public-date-panel">
+              <label className="public-date-field">
+                <span>Appointment date</span>
+                <input
+                  type="date"
+                  value={date}
+                  onChange={(event) => void loadStarts(event.target.value)}
+                />
+              </label>
+              <p>Choose a date to see this provider’s available appointment times.</p>
+            </div>
           </Step>
         ) : null}
 
         {date ? (
-          <Step title="4. Choose an available time">
-            {loading ? <p>Loading available times…</p> : null}
+          <Step number={4} title="Time">
+            {loading ? <p role="status">Loading available times…</p> : null}
             <div className="public-time-grid">
               {starts.map((item) => (
                 <button
@@ -193,12 +205,16 @@ export function PublicBookingPage() {
                   aria-pressed={selectedStart?.starts_at === item.starts_at}
                   onClick={() => setSelectedStart(item)}
                 >
-                  {timeLabel(item.local_start)}
+                  <span>{timeLabel(item.local_start)}</span>
+                  {selectedStart?.starts_at === item.starts_at ? <SelectedBadge /> : null}
                 </button>
               ))}
             </div>
             {!loading && starts.length === 0 ? (
-              <p>No available times were found for this date.</p>
+              <div className="public-empty-state" role="status">
+                <strong>No appointments are available for this date.</strong>
+                <span>Try another date or provider.</span>
+              </div>
             ) : null}
           </Step>
         ) : null}
@@ -227,17 +243,51 @@ export function PublicBookingPage() {
           </p>
         ) : null}
       </section>
-      <footer className="public-booking-footer">Powered by BookNowTech</footer>
     </main>
   );
 }
 
-function Step({ title, children }: { title: string; children: ReactNode }) {
+function Step({ number, title, children }: { number: number; title: string; children: ReactNode }) {
   return (
-    <section className="public-booking-step">
-      <h2>{title}</h2>
+    <section className="public-booking-step" aria-labelledby={`public-booking-step-${number}`}>
+      <h2 id={`public-booking-step-${number}`}>
+        <span className="public-step-number" aria-hidden="true">
+          {number}
+        </span>
+        <span>
+          <small>Step {number} of 4</small>
+          {title}
+        </span>
+      </h2>
       {children}
     </section>
+  );
+}
+
+function SelectedBadge() {
+  return <span className="public-selected-badge">✓ Selected</span>;
+}
+
+function ProviderAvatar({ provider }: { provider: PublicProviderView }) {
+  const [photoFailed, setPhotoFailed] = useState(false);
+  const initials = provider.display_name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('');
+
+  return provider.photo_url && !photoFailed ? (
+    <img
+      className="public-provider-avatar"
+      src={provider.photo_url}
+      alt=""
+      onError={() => setPhotoFailed(true)}
+    />
+  ) : (
+    <span className="public-provider-avatar public-provider-initials" aria-hidden="true">
+      {initials || '?'}
+    </span>
   );
 }
 
@@ -245,7 +295,6 @@ function PublicStatus({ message, alert = false }: { message: string; alert?: boo
   return (
     <main className="landing-page">
       <section className="landing-card">
-        <p className="eyebrow">BookNowTech</p>
         <h1>Booking</h1>
         <p className="status-copy" role={alert ? 'alert' : 'status'}>
           {message}

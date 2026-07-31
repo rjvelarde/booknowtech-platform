@@ -89,9 +89,79 @@ describe('PublicBookingPage', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       'This selection has not been reserved or submitted',
     );
+    expect(screen.getAllByText('✓ Selected')).toHaveLength(3);
+    expect(screen.queryByText('Powered by BookNowTech')).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(4);
     for (const [, init] of fetchMock.mock.calls) expect(init?.method ?? 'GET').toBe('GET');
     expect(screen.queryByText(/Any available provider/i)).not.toBeInTheDocument();
+  });
+
+  it('shows provider initials and a clear empty-time state', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          data: {
+            business: {
+              public_id: 'tenant',
+              name: 'Brazilian Wax Demo',
+              description: null,
+              tagline: null,
+              logo_url: null,
+              primary_color: '#176CAB',
+              website_url: null,
+              phone: null,
+              email: null,
+            },
+            timezone: 'America/New_York',
+            locale: 'en-US',
+            currency: 'USD',
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          data: {
+            items: [
+              {
+                public_id: 'wax',
+                name: 'Brazilian Wax',
+                description: null,
+                delivery_mode: 'provider_location',
+                duration_minutes: 30,
+                base_price_minor: 5500,
+                booking_fee_minor: 125,
+                currency: 'USD',
+                policy: { minimum_lead_minutes: 120, maximum_advance_days: 90 },
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          data: {
+            service: { public_id: 'wax', name: 'Brazilian Wax' },
+            items: [{ public_id: 'lisa', display_name: 'Lisa Jones', bio: null, photo_url: null }],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, { data: { timezone: 'America/New_York', items: [] } }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<PublicBookingPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Brazilian Wax/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Lisa Jones/ }));
+    expect(screen.getByText('LJ')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Appointment date'), {
+      target: { value: '2026-08-03' },
+    });
+    expect(
+      await screen.findByText('No appointments are available for this date.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Try another date or provider.')).toBeInTheDocument();
   });
 
   it('shows a safe unavailable page for a public 404', async () => {

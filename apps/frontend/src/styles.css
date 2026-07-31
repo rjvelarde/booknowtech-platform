@@ -452,16 +452,18 @@ button:disabled {
 .public-booking-header {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding-bottom: 1.5rem;
+  gap: 1.5rem;
+  padding-bottom: 2rem;
 }
 .public-booking-header h1 {
-  margin: 0.25rem 0;
+  margin: 0.2rem 0 0.35rem;
+  font-size: clamp(2.5rem, 7vw, 4.5rem);
+  line-height: 0.98;
 }
 .public-booking-logo,
 .public-booking-initials {
-  width: 4.5rem;
-  height: 4.5rem;
+  width: 7rem;
+  height: 7rem;
   flex: 0 0 auto;
   border-radius: 1rem;
 }
@@ -475,6 +477,21 @@ button:disabled {
   background: var(--booking-accent);
   font-size: 2rem;
   font-weight: 800;
+}
+.public-booking-identity {
+  min-width: 0;
+}
+.public-booking-tagline,
+.public-booking-description {
+  color: #4f6078;
+}
+.public-booking-tagline {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.public-booking-description {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 1rem;
 }
 .public-booking-flow {
   display: grid;
@@ -492,6 +509,31 @@ button:disabled {
   margin-top: 0;
   font-size: 1.25rem;
 }
+.public-booking-step h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.public-booking-step h2 small {
+  display: block;
+  margin-bottom: 0.1rem;
+  color: #63738a;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.public-step-number {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--booking-accent);
+  font-weight: 800;
+}
 .public-choice-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
@@ -505,15 +547,81 @@ button:disabled {
   text-align: left;
 }
 .public-choice {
+  position: relative;
   display: grid;
   gap: 0.35rem;
-  min-height: 5rem;
+  min-height: 6rem;
   padding: 1rem;
 }
 .public-choice.selected,
 .public-time.selected {
   border-color: var(--booking-accent);
-  outline: 2px solid color-mix(in srgb, var(--booking-accent) 25%, transparent);
+  color: #fff;
+  background: var(--booking-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--booking-accent) 24%, transparent);
+}
+.public-choice-title {
+  padding-right: 5.5rem;
+  font-size: 1.15rem;
+  line-height: 1.25;
+}
+.public-choice-detail {
+  color: #52637a;
+  font-size: 0.92rem;
+}
+.selected .public-choice-detail {
+  color: inherit;
+}
+.public-selected-badge {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  border-radius: 999px;
+  color: var(--booking-accent);
+  background: #fff;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.public-choice:focus-visible,
+.public-time:focus-visible,
+.public-date-field input:focus-visible {
+  outline: 3px solid #0b3155;
+  outline-offset: 3px;
+}
+.public-provider-copy {
+  display: grid;
+  align-content: center;
+  gap: 0.25rem;
+}
+.public-provider-avatar {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 999px;
+  object-fit: cover;
+}
+.public-provider-initials {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--booking-accent);
+  font-weight: 800;
+}
+.public-choice:has(.public-provider-avatar) {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+.public-date-panel {
+  display: flex;
+  align-items: end;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  background: #f4f7fb;
+}
+.public-date-panel p {
+  margin: 0 0 0.75rem;
+  color: #52637a;
 }
 .public-date-field {
   display: grid;
@@ -522,6 +630,7 @@ button:disabled {
   font-weight: 700;
 }
 .public-date-field input {
+  min-height: 3rem;
   padding: 0.7rem;
   border: 1px solid #aebed2;
   border-radius: 0.5rem;
@@ -533,8 +642,24 @@ button:disabled {
   gap: 0.65rem;
 }
 .public-time {
+  position: relative;
+  display: grid;
+  gap: 0.3rem;
+  min-height: 3.25rem;
+  place-items: center;
   padding: 0.75rem;
   text-align: center;
+}
+.public-time .public-selected-badge {
+  position: static;
+}
+.public-empty-state {
+  display: grid;
+  gap: 0.2rem;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  color: #34465e;
+  background: #f4f7fb;
 }
 .public-coming-soon {
   padding: 0.85rem;
@@ -542,20 +667,38 @@ button:disabled {
   background: #eef5fb;
   font-weight: 700;
 }
-.public-booking-footer {
-  max-width: 64rem;
-  margin: 2rem auto 0;
-  color: #4f6078;
-  text-align: center;
-}
 @media (max-width: 40rem) {
   .public-booking-page {
     padding: 1rem;
   }
   .public-booking-header {
-    align-items: flex-start;
+    align-items: center;
+    flex-direction: column;
+    gap: 1rem;
+    text-align: center;
+  }
+  .public-booking-logo,
+  .public-booking-initials {
+    width: 5rem;
+    height: 5rem;
+  }
+  .public-booking-header h1 {
+    font-size: clamp(2.2rem, 11vw, 3.3rem);
   }
   .public-choice-grid {
     grid-template-columns: 1fr;
+  }
+  .public-date-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .public-date-field {
+    max-width: none;
+  }
+  .public-date-panel p {
+    margin: 0;
+  }
+  .public-time-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
