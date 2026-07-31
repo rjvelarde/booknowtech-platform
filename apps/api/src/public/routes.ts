@@ -569,7 +569,11 @@ export function registerPublicBookingRoutes(
               envelope(publicConfirmation(afterRace, tenant, replayProvider, true), request.id),
             );
         }
-        request.log.error({ event: 'public_booking.create_failed', error_name: errorName(reason) });
+        request.log.error({
+          event: 'public_booking.create_failed',
+          error_name: errorName(reason),
+          ...safeMongoErrorDetails(reason),
+        });
         return safeError(reply, 500, 'public_booking_failed', request.id);
       }
     },
@@ -997,6 +1001,21 @@ class PublicBookingError extends Error {
 
 function errorName(value: unknown) {
   return value instanceof Error ? value.name : 'UnknownError';
+}
+
+function safeMongoErrorDetails(value: unknown) {
+  if (!value || typeof value !== 'object') return {};
+  const candidate = value as { code?: unknown; codeName?: unknown; errorLabels?: unknown };
+  return {
+    ...(typeof candidate.code === 'number' ? { mongo_error_code: candidate.code } : {}),
+    ...(typeof candidate.codeName === 'string'
+      ? { mongo_error_code_name: candidate.codeName }
+      : {}),
+    ...(Array.isArray(candidate.errorLabels) &&
+    candidate.errorLabels.every((label) => typeof label === 'string')
+      ? { mongo_error_labels: candidate.errorLabels }
+      : {}),
+  };
 }
 
 function effectivePolicy(tenant: TenantDocument, service: ServiceDocument) {
