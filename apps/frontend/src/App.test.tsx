@@ -2,13 +2,21 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { App } from './App.js';
+import { App, isPublicBookingHost } from './App.js';
 
 describe('Business Hub', () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
     window.history.replaceState({}, '', '/');
+  });
+
+  it('selects public booking only for supported tenant hosts', () => {
+    expect(isPublicBookingHost('brazilian-wax.booknowtech.com')).toBe(true);
+    expect(isPublicBookingHost('brazilian-wax.localhost')).toBe(true);
+    expect(isPublicBookingHost('brazilian-wax.example.test')).toBe(true);
+    expect(isPublicBookingHost('admin.booknowtech.com')).toBe(false);
+    expect(isPublicBookingHost('tenant.attacker.booknowtech.com')).toBe(false);
   });
 
   it('preserves the launch placeholder while the rollout flag is disabled', async () => {
@@ -124,6 +132,12 @@ describe('Business Hub', () => {
               slot_cadence_minutes: null,
               currency: 'USD',
               status: 'active',
+              publicly_bookable: false,
+              public_display_order: 0,
+              public_booking_policy: {
+                minimum_lead_minutes: null,
+                maximum_advance_days: null,
+              },
               version: 1,
             },
           ],

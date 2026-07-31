@@ -11,6 +11,7 @@ import { registerProviderRoutes } from './provider/routes.js';
 import { registerAvailabilityRoutes } from './availability/routes.js';
 import { registerCustomerRoutes } from './customer/routes.js';
 import { registerAppointmentRoutes } from './appointment/routes.js';
+import { registerPublicBookingRoutes } from './public/routes.js';
 import type { ReadinessProbe } from './readiness.js';
 
 interface BuildApplicationOptions {
@@ -143,6 +144,7 @@ export async function buildApplication({
     registerAvailabilityRoutes(app, environment, adminStore);
     registerCustomerRoutes(app, environment, adminStore);
     registerAppointmentRoutes(app, environment, adminStore);
+    registerPublicBookingRoutes(app, environment, adminStore);
   }
 
   app.addHook('onClose', async () => {

@@ -27,6 +27,23 @@ export interface BusinessProfileView {
   updated_at: string;
 }
 
+export interface PublicBookingSettingsView {
+  public_booking_enabled: boolean;
+  fallback_hostname: string;
+  public_profile: {
+    business_name: string;
+    description: string | null;
+    tagline: string | null;
+    logo_url: string | null;
+    primary_color: string | null;
+    website_url: string | null;
+    phone_e164: string | null;
+    email_normalized: string | null;
+  };
+  booking_policy: { minimum_lead_minutes: number; maximum_advance_days: number };
+  version: number;
+}
+
 export interface ServiceView {
   public_id: string;
   internal_code: string | null;
@@ -39,7 +56,56 @@ export interface ServiceView {
   slot_cadence_minutes: number | null;
   currency: string;
   status: 'active' | 'inactive';
+  publicly_bookable: boolean;
+  public_display_order: number;
+  public_booking_policy: {
+    minimum_lead_minutes: number | null;
+    maximum_advance_days: number | null;
+  };
   version: number;
+}
+
+export interface PublicBookingContextView {
+  business: {
+    public_id: string;
+    name: string;
+    description: string | null;
+    tagline: string | null;
+    logo_url: string | null;
+    primary_color: string | null;
+    website_url: string | null;
+    phone: string | null;
+    email: string | null;
+  };
+  timezone: string;
+  locale: string;
+  currency: string;
+}
+
+export interface PublicServiceView {
+  public_id: string;
+  name: string;
+  description: string | null;
+  delivery_mode: ServiceView['delivery_mode'];
+  duration_minutes: number;
+  base_price_minor: number;
+  booking_fee_minor: number;
+  currency: string;
+  policy: { minimum_lead_minutes: number; maximum_advance_days: number };
+}
+
+export interface PublicProviderView {
+  public_id: string;
+  display_name: string;
+  bio: string | null;
+  photo_url: string | null;
+}
+
+export interface PublicStartView {
+  starts_at: string;
+  ends_at: string;
+  local_start: string;
+  timezone: string;
 }
 
 export interface ProviderView {
@@ -411,6 +477,61 @@ export function updateBusinessProfile(
     body: JSON.stringify(input),
     headers: { 'x-csrf-token': csrfToken },
   });
+}
+
+export function getPublicBookingSettings(): Promise<PublicBookingSettingsView> {
+  return request('/v1/admin/public-booking-settings');
+}
+
+export function updatePublicBookingSettings(
+  input: Omit<PublicBookingSettingsView, 'fallback_hostname' | 'version'> & {
+    expected_version: number;
+  },
+  csrfToken: string,
+): Promise<PublicBookingSettingsView & { changed: boolean }> {
+  return request('/v1/admin/public-booking-settings', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+
+export function updateServicePublicBooking(
+  service: ServiceView,
+  input: Pick<ServiceView, 'publicly_bookable' | 'public_display_order' | 'public_booking_policy'>,
+  csrfToken: string,
+): Promise<ServiceView> {
+  return request(`/v1/admin/services/${service.public_id}/public-booking`, {
+    method: 'PATCH',
+    body: JSON.stringify({ expected_version: service.version, ...input }),
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+
+export function getPublicBookingContext(): Promise<PublicBookingContextView> {
+  return request('/v1/public/booking-context');
+}
+
+export function listPublicServices(): Promise<{ items: PublicServiceView[] }> {
+  return request('/v1/public/services');
+}
+
+export function listPublicProviders(
+  servicePublicId: string,
+): Promise<{ service: { public_id: string; name: string }; items: PublicProviderView[] }> {
+  return request(`/v1/public/services/${servicePublicId}/providers`);
+}
+
+export function listPublicStarts(
+  servicePublicId: string,
+  providerPublicId: string,
+  startDate: string,
+  endDate: string,
+): Promise<{ timezone: string; items: PublicStartView[] }> {
+  const query = new URLSearchParams({ start_date: startDate, end_date: endDate });
+  return request(
+    `/v1/public/services/${servicePublicId}/providers/${providerPublicId}/available-starts?${query}`,
+  );
 }
 
 export function listServices(): Promise<ServiceView[]> {

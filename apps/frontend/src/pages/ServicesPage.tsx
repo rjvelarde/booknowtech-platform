@@ -7,7 +7,11 @@ import {
   listServices,
   setServiceActive,
   updateService,
+  updateServicePublicBooking,
 } from '../api/client.js';
+
+type ServiceFormInput = ServiceInput &
+  Pick<ServiceView, 'publicly_bookable' | 'public_display_order' | 'public_booking_policy'>;
 
 export function ServicesPage({
   csrfToken,
@@ -60,13 +64,32 @@ export function ServicesPage({
             setEditing(null);
           }}
           onSave={async (input) => {
-            if (editing)
-              await updateService(
-                editing.public_id,
-                { ...input, expected_version: editing.version },
-                csrfToken,
-              );
-            else await createService(input, csrfToken);
+            const catalogInput: ServiceInput = {
+              internal_code: input.internal_code,
+              name: input.name,
+              description: input.description,
+              delivery_mode: input.delivery_mode,
+              duration_minutes: input.duration_minutes,
+              base_price_minor: input.base_price_minor,
+              booking_fee_minor: input.booking_fee_minor,
+              slot_cadence_minutes: input.slot_cadence_minutes,
+            };
+            const saved = editing
+              ? await updateService(
+                  editing.public_id,
+                  { ...catalogInput, expected_version: editing.version },
+                  csrfToken,
+                )
+              : await createService(catalogInput, csrfToken);
+            await updateServicePublicBooking(
+              saved,
+              {
+                publicly_bookable: input.publicly_bookable,
+                public_display_order: input.public_display_order,
+                public_booking_policy: input.public_booking_policy,
+              },
+              csrfToken,
+            );
             setCreating(false);
             setEditing(null);
             await reload();
@@ -85,6 +108,11 @@ export function ServicesPage({
                 {money(service.booking_fee_minor, service.currency)} booking fee
               </p>
               <span className={`status-pill ${service.status}`}>{service.status}</span>
+              <p>
+                {service.publicly_bookable
+                  ? 'Visible on public booking page'
+                  : 'Not publicly bookable'}
+              </p>
             </div>
             {canManage ? (
               <div className="card-actions">
@@ -132,7 +160,7 @@ function ServiceForm({
   onCancel,
 }: {
   service: ServiceView | null;
-  onSave: (input: ServiceInput) => Promise<void>;
+  onSave: (input: ServiceFormInput) => Promise<void>;
   onCancel: () => void;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -157,6 +185,12 @@ function ServiceForm({
           base_price_minor: Math.round(Number(values.get('base_price')) * 100),
           booking_fee_minor: Math.round(Number(values.get('booking_fee')) * 100),
           slot_cadence_minutes: nullableNumber(values.get('slot_cadence_minutes')),
+          publicly_bookable: values.get('publicly_bookable') === 'on',
+          public_display_order: Number(values.get('public_display_order')),
+          public_booking_policy: {
+            minimum_lead_minutes: nullableNumber(values.get('public_minimum_lead_minutes')),
+            maximum_advance_days: nullableNumber(values.get('public_maximum_advance_days')),
+          },
         });
       }}
     >
@@ -172,6 +206,51 @@ function ServiceForm({
           maxLength={64}
         />
       </label>
+      <fieldset>
+        <legend>Public booking discovery</legend>
+        <label className="checkbox-label">
+          <input
+            name="publicly_bookable"
+            type="checkbox"
+            defaultChecked={service?.publicly_bookable ?? false}
+            disabled={service?.status === 'inactive'}
+          />
+          <span>Show this active service on the public booking page</span>
+        </label>
+        <label>
+          <span>Public display order</span>
+          <input
+            name="public_display_order"
+            type="number"
+            min={0}
+            max={100000}
+            defaultValue={service?.public_display_order ?? 0}
+            required
+          />
+        </label>
+        <label>
+          <span>Minimum lead time override (minutes)</span>
+          <input
+            name="public_minimum_lead_minutes"
+            type="number"
+            min={0}
+            max={43200}
+            defaultValue={service?.public_booking_policy.minimum_lead_minutes ?? ''}
+            placeholder="Use business default"
+          />
+        </label>
+        <label>
+          <span>Maximum advance override (days)</span>
+          <input
+            name="public_maximum_advance_days"
+            type="number"
+            min={1}
+            max={365}
+            defaultValue={service?.public_booking_policy.maximum_advance_days ?? ''}
+            placeholder="Use business default"
+          />
+        </label>
+      </fieldset>
       <label>
         <span>Name</span>
         <input name="name" defaultValue={service?.name ?? ''} required maxLength={160} />

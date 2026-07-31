@@ -19,10 +19,13 @@ import { AvailabilityPage } from './pages/AvailabilityPage.js';
 import { ClosuresPage } from './pages/ClosuresPage.js';
 import { CustomersPage } from './pages/CustomersPage.js';
 import { AppointmentsPage } from './pages/AppointmentsPage.js';
+import { PublicBookingPage } from './pages/PublicBookingPage.js';
+import { PublicBookingSettingsPage } from './pages/PublicBookingSettingsPage.js';
 
 type View = 'loading' | 'placeholder' | 'login' | 'select' | 'hub' | 'denied';
 
 export function App() {
+  if (isPublicBookingHost(window.location.hostname)) return <PublicBookingPage />;
   const [view, setView] = useState<View>('loading');
   const [session, setSession] = useState<AdminSessionView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -110,6 +113,9 @@ export function App() {
       {path === '/business' ? (
         <BusinessProfilePage csrfToken={session.csrf_token} canManage={canManage(session)} />
       ) : null}
+      {path === '/public-booking' ? (
+        <PublicBookingSettingsPage csrfToken={session.csrf_token} canManage={canManage(session)} />
+      ) : null}
       {path === '/services' ? (
         <ServicesPage
           csrfToken={session.csrf_token}
@@ -160,6 +166,15 @@ export function App() {
       ) : null}
     </BusinessHubHomePage>
   );
+}
+
+export function isPublicBookingHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/, '');
+  if (normalized.endsWith('.localhost')) return normalized.split('.').length === 2;
+  if (normalized.endsWith('.example.test')) return normalized.split('.').length === 3;
+  if (!normalized.endsWith('.booknowtech.com')) return false;
+  const label = normalized.slice(0, -'.booknowtech.com'.length);
+  return Boolean(label && !label.includes('.') && !['admin', 'www', 'api'].includes(label));
 }
 
 function navigate(path: string, setPath: (path: string) => void): void {

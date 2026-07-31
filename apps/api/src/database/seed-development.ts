@@ -72,6 +72,24 @@ async function main(): Promise<void> {
             default_slot_cadence_minutes: tenant.slug === 'harbor-demo' ? 15 : 30,
             locale: 'en-US',
             currency: 'USD',
+            public_booking_enabled: true,
+            public_profile: {
+              business_name: tenant.display_name,
+              description:
+                tenant.slug === 'harbor-demo'
+                  ? 'Professional appointment services in a welcoming setting.'
+                  : 'Professional braiding services with experienced providers.',
+              tagline: 'Book your next appointment with confidence.',
+              logo_url: null,
+              primary_color: tenant.slug === 'harbor-demo' ? '#1261A0' : '#6D3FA0',
+              website_url: null,
+              phone_e164: null,
+              email_normalized: null,
+            },
+            booking_policy: {
+              minimum_lead_minutes: tenant.slug === 'harbor-demo' ? 120 : 240,
+              maximum_advance_days: tenant.slug === 'harbor-demo' ? 90 : 120,
+            },
             status: 'active',
             updated_at: now,
           },
@@ -117,6 +135,19 @@ async function main(): Promise<void> {
                     : null,
               currency: 'USD',
               status,
+              publicly_bookable: status === 'active',
+              public_display_order:
+                internalCode === 'BRAZILIAN-WAX'
+                  ? 10
+                  : internalCode === 'BRAZILIAN-FIRST'
+                    ? 20
+                    : internalCode === 'FULL-FACE'
+                      ? 30
+                      : 40,
+              public_booking_policy: {
+                minimum_lead_minutes: null,
+                maximum_advance_days: null,
+              },
               updated_by: userResult._id,
               updated_at: now,
             },

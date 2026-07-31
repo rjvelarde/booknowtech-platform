@@ -14,6 +14,9 @@ const validators: Record<string, Document> = {
         'default_slot_cadence_minutes',
         'locale',
         'currency',
+        'public_booking_enabled',
+        'public_profile',
+        'booking_policy',
         'version',
         'updated_by',
         'status',
@@ -26,6 +29,38 @@ const validators: Record<string, Document> = {
           required: ['email_normalized', 'phone_e164', 'website_url'],
         },
         currency: { bsonType: 'string', pattern: '^[A-Z]{3}$' },
+        public_booking_enabled: { bsonType: 'bool' },
+        public_profile: {
+          bsonType: 'object',
+          required: [
+            'business_name',
+            'description',
+            'tagline',
+            'logo_url',
+            'primary_color',
+            'website_url',
+            'phone_e164',
+            'email_normalized',
+          ],
+          properties: {
+            business_name: { bsonType: 'string', minLength: 1, maxLength: 120 },
+            description: { bsonType: ['string', 'null'], maxLength: 1000 },
+            tagline: { bsonType: ['string', 'null'], maxLength: 160 },
+            logo_url: { bsonType: ['string', 'null'], maxLength: 2048, pattern: '^https://' },
+            primary_color: { bsonType: ['string', 'null'], pattern: '^#[A-F0-9]{6}$' },
+            website_url: { bsonType: ['string', 'null'], maxLength: 2048, pattern: '^https://' },
+            phone_e164: { bsonType: ['string', 'null'], pattern: '^\\+[1-9][0-9]{1,14}$' },
+            email_normalized: { bsonType: ['string', 'null'], maxLength: 320 },
+          },
+        },
+        booking_policy: {
+          bsonType: 'object',
+          required: ['minimum_lead_minutes', 'maximum_advance_days'],
+          properties: {
+            minimum_lead_minutes: { bsonType: ['int', 'long'], minimum: 0, maximum: 43200 },
+            maximum_advance_days: { bsonType: ['int', 'long'], minimum: 1, maximum: 365 },
+          },
+        },
         default_slot_cadence_minutes: { enum: [5, 10, 15, 20, 30, 60] },
         version: { bsonType: ['int', 'long'], minimum: 1 },
         status: { enum: ['active', 'suspended'] },
@@ -97,6 +132,9 @@ const validators: Record<string, Document> = {
         'booking_fee_minor',
         'slot_cadence_minutes',
         'currency',
+        'publicly_bookable',
+        'public_display_order',
+        'public_booking_policy',
         'status',
         'version',
         'created_by',
@@ -122,6 +160,24 @@ const validators: Record<string, Document> = {
           enum: [5, 10, 15, 20, 30, 60, null],
         },
         currency: { bsonType: 'string', pattern: '^[A-Z]{3}$' },
+        publicly_bookable: { bsonType: 'bool' },
+        public_display_order: { bsonType: ['int', 'long'], minimum: 0, maximum: 100000 },
+        public_booking_policy: {
+          bsonType: 'object',
+          required: ['minimum_lead_minutes', 'maximum_advance_days'],
+          properties: {
+            minimum_lead_minutes: {
+              bsonType: ['int', 'long', 'null'],
+              minimum: 0,
+              maximum: 43200,
+            },
+            maximum_advance_days: {
+              bsonType: ['int', 'long', 'null'],
+              minimum: 1,
+              maximum: 365,
+            },
+          },
+        },
         status: { enum: ['active', 'inactive'] },
         version: { bsonType: ['int', 'long'], minimum: 1 },
       },
@@ -546,16 +602,45 @@ export async function migrateDatabase(db: Db): Promise<void> {
           currency: { $ifNull: ['$currency', 'USD'] },
           version: { $ifNull: ['$version', 1] },
           updated_by: { $ifNull: ['$updated_by', null] },
+          public_booking_enabled: { $ifNull: ['$public_booking_enabled', false] },
+          public_profile: {
+            $ifNull: [
+              '$public_profile',
+              {
+                business_name: '$display_name',
+                description: null,
+                tagline: null,
+                logo_url: null,
+                primary_color: null,
+                website_url: null,
+                phone_e164: null,
+                email_normalized: null,
+              },
+            ],
+          },
+          booking_policy: {
+            $ifNull: ['$booking_policy', { minimum_lead_minutes: 120, maximum_advance_days: 90 }],
+          },
         },
       },
     ]);
   }
   if (existing.has('services')) {
-    await db
-      .collection('services')
-      .updateMany({ slot_cadence_minutes: { $exists: false } }, [
-        { $set: { slot_cadence_minutes: null } },
-      ]);
+    await db.collection('services').updateMany({}, [
+      {
+        $set: {
+          slot_cadence_minutes: { $ifNull: ['$slot_cadence_minutes', null] },
+          publicly_bookable: { $ifNull: ['$publicly_bookable', false] },
+          public_display_order: { $ifNull: ['$public_display_order', 0] },
+          public_booking_policy: {
+            $ifNull: [
+              '$public_booking_policy',
+              { minimum_lead_minutes: null, maximum_advance_days: null },
+            ],
+          },
+        },
+      },
+    ]);
   }
   if (existing.has('provider_service_assignments')) {
     await db.collection('provider_service_assignments').updateMany(
@@ -642,6 +727,17 @@ export async function migrateDatabase(db: Db): Promise<void> {
     },
     { key: { tenant_id: 1, status: 1, name: 1, public_id: 1 }, name: 'services_catalog_list' },
     { key: { tenant_id: 1, updated_at: -1, public_id: 1 }, name: 'services_updated' },
+    {
+      key: {
+        tenant_id: 1,
+        publicly_bookable: 1,
+        status: 1,
+        public_display_order: 1,
+        name: 1,
+        public_id: 1,
+      },
+      name: 'services_public_catalog',
+    },
   ]);
   await db.collection('providers').createIndexes([
     {
@@ -660,6 +756,18 @@ export async function migrateDatabase(db: Db): Promise<void> {
       name: 'providers_directory_list',
     },
     { key: { tenant_id: 1, updated_at: -1, public_id: 1 }, name: 'providers_updated' },
+    {
+      key: {
+        tenant_id: 1,
+        status: 1,
+        customer_selectable: 1,
+        accepting_new_clients: 1,
+        display_order: 1,
+        display_name: 1,
+        public_id: 1,
+      },
+      name: 'providers_public_directory',
+    },
   ]);
   await db.collection('provider_service_assignments').createIndexes([
     {

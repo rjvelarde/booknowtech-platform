@@ -35,6 +35,12 @@ describe('service editor', () => {
                 slot_cadence_minutes: null,
                 currency: 'USD',
                 status: 'active',
+                publicly_bookable: false,
+                public_display_order: 0,
+                public_booking_policy: {
+                  minimum_lead_minutes: null,
+                  maximum_advance_days: null,
+                },
                 version: 1,
               },
             ],
