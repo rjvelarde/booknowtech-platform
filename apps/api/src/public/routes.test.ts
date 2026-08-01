@@ -10,7 +10,7 @@ import {
 } from '../admin/store.js';
 import { buildApplication } from '../app.js';
 import { StubReadinessProbe, testEnvironment } from '../test-fixtures.js';
-import { normalizePublicHostname } from './routes.js';
+import { normalizePublicHostname, publicRequestFingerprint } from './routes.js';
 
 describe('public booking discovery', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -21,6 +21,21 @@ describe('public booking discovery', () => {
     expect(normalizePublicHostname('admin.booknowtech.com')).toBeNull();
     expect(normalizePublicHostname('tenant.attacker.booknowtech.com')).toBeNull();
     expect(normalizePublicHostname('booknowtech.com.attacker.test')).toBeNull();
+  });
+
+  it('creates a deterministic validator-compatible public request fingerprint', () => {
+    const request = {
+      service_public_id: 'service-public',
+      provider_public_id: 'provider-public',
+      starts_at: '2027-02-02T15:00:00.000Z',
+    };
+    const fingerprint = publicRequestFingerprint(request);
+
+    expect(fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(publicRequestFingerprint(request)).toBe(fingerprint);
+    expect(
+      publicRequestFingerprint({ ...request, starts_at: '2027-02-02T15:15:00.000Z' }),
+    ).not.toBe(fingerprint);
   });
 
   it('returns only approved public fields and supports ETag revalidation', async () => {

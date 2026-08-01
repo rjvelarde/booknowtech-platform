@@ -371,7 +371,7 @@ export function registerPublicBookingRoutes(
       const normalized = normalizePublicAppointment(request.body);
       if (!normalized) return safeError(reply, 400, 'invalid_public_booking_request', request.id);
       const keyHash = createHash('sha256').update(key).digest('hex');
-      const fingerprint = hash(normalized);
+      const fingerprint = publicRequestFingerprint(normalized);
       const replay = await store.getPublicAppointmentByIdempotency(tenant._id, keyHash);
       if (replay) {
         if (replay.public_submission?.request_fingerprint !== fingerprint)
@@ -722,6 +722,10 @@ export function normalizePublicHostname(hostname: string): string | null {
     label = normalized.slice(0, -'.example.test'.length);
   if (!label || label.includes('.') || reservedLabels.has(label)) return null;
   return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label) ? label : null;
+}
+
+export function publicRequestFingerprint(value: unknown) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
 async function publicService(store: AdminStore, tenant: TenantDocument, publicId: string) {
