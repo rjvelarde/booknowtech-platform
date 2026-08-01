@@ -138,6 +138,11 @@ function contextFixture(
       email_normalized: null,
     },
     booking_policy: { minimum_lead_minutes: 120, maximum_advance_days: 90 },
+    public_booking_terms: {
+      version: 'test-v1',
+      acknowledgment_label: 'I agree to the booking terms.',
+      terms_url: null,
+    },
     default_timezone: 'UTC',
     default_slot_cadence_minutes: 15,
     locale: 'en-US',

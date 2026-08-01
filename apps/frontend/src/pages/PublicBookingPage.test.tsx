@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PublicBookingPage } from './PublicBookingPage.js';
@@ -10,7 +10,7 @@ describe('PublicBookingPage', () => {
     vi.unstubAllGlobals();
   });
 
-  it('completes the read-only discovery flow without issuing a mutation', async () => {
+  it('reviews and creates a public appointment with an accessible confirmation', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -30,6 +30,11 @@ describe('PublicBookingPage', () => {
             timezone: 'America/New_York',
             locale: 'en-US',
             currency: 'USD',
+            booking_terms: {
+              version: 'test-v1',
+              acknowledgment_label: 'I agree to the booking terms.',
+              terms_url: null,
+            },
           },
         }),
       )
@@ -74,6 +79,23 @@ describe('PublicBookingPage', () => {
             ],
           },
         }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(201, {
+          data: {
+            appointment_reference: 'BNT-PUBLIC01',
+            status: 'scheduled',
+            business: { name: 'Brazilian Wax Demo' },
+            service: { name: 'Brazilian Wax', duration_minutes: 30 },
+            provider: { display_name: 'Lisa', photo_url: null },
+            starts_at: '2026-08-03T13:00:00.000Z',
+            ends_at: '2026-08-03T13:30:00.000Z',
+            local_start: '2026-08-03T09:00:00-04:00',
+            timezone: 'America/New_York',
+            location_mode: 'provider_location',
+            replayed: false,
+          },
+        }),
       );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -86,13 +108,27 @@ describe('PublicBookingPage', () => {
     });
     fireEvent.click(await screen.findByRole('button', { name: '9:00 AM' }));
 
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'This selection has not been reserved or submitted',
-    );
+    fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Taylor' } });
+    fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Guest' } });
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'taylor@example.test' },
+    });
+    fireEvent.change(screen.getByLabelText('Mobile phone'), {
+      target: { value: '(843) 555-0104' },
+    });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Review appointment' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Book appointment' }));
+
+    expect(await screen.findByRole('heading', { name: 'You’re booked!' })).toBeInTheDocument();
+    expect(screen.getByText(/BNT-PUBLIC01/)).toBeInTheDocument();
     expect(screen.getAllByText('✓ Selected')).toHaveLength(3);
     expect(screen.queryByText('Powered by BookNowTech')).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    for (const [, init] of fetchMock.mock.calls) expect(init?.method ?? 'GET').toBe('GET');
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
+    expect(fetchMock.mock.calls.at(-1)?.[1]?.method).toBe('POST');
+    expect(fetchMock.mock.calls.at(-1)?.[1]?.headers).toMatchObject({
+      'Idempotency-Key': expect.any(String),
+    });
     expect(screen.queryByText(/Any available provider/i)).not.toBeInTheDocument();
   });
 
@@ -116,6 +152,11 @@ describe('PublicBookingPage', () => {
             timezone: 'America/New_York',
             locale: 'en-US',
             currency: 'USD',
+            booking_terms: {
+              version: 'test-v1',
+              acknowledgment_label: 'I agree to the booking terms.',
+              terms_url: null,
+            },
           },
         }),
       )

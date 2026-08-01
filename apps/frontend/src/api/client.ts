@@ -41,6 +41,11 @@ export interface PublicBookingSettingsView {
     email_normalized: string | null;
   };
   booking_policy: { minimum_lead_minutes: number; maximum_advance_days: number };
+  public_booking_terms: {
+    version: string;
+    acknowledgment_label: string;
+    terms_url: string | null;
+  };
   version: number;
 }
 
@@ -80,6 +85,7 @@ export interface PublicBookingContextView {
   timezone: string;
   locale: string;
   currency: string;
+  booking_terms: PublicBookingSettingsView['public_booking_terms'];
 }
 
 export interface PublicServiceView {
@@ -106,6 +112,20 @@ export interface PublicStartView {
   ends_at: string;
   local_start: string;
   timezone: string;
+}
+
+export interface PublicAppointmentConfirmationView {
+  appointment_reference: string;
+  status: 'scheduled';
+  business: { name: string };
+  service: { name: string; duration_minutes: number };
+  provider: { display_name: string; photo_url: string | null };
+  starts_at: string;
+  ends_at: string;
+  local_start: string;
+  timezone: string;
+  location_mode: ServiceView['delivery_mode'];
+  replayed: boolean;
 }
 
 export interface ProviderView {
@@ -297,6 +317,7 @@ export interface AppointmentView {
     base_price_minor: number;
     booking_fee_minor: number;
     currency: string;
+    customer_note?: string | null;
   };
   cancellation_reason?: string | null;
   cancellation_detail?: string | null;
@@ -532,6 +553,17 @@ export function listPublicStarts(
   return request(
     `/v1/public/services/${servicePublicId}/providers/${providerPublicId}/available-starts?${query}`,
   );
+}
+
+export function createPublicAppointment(
+  input: Record<string, unknown>,
+  idempotencyKey: string,
+): Promise<PublicAppointmentConfirmationView> {
+  return request('/v1/public/appointments', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
 }
 
 export function listServices(): Promise<ServiceView[]> {

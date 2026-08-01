@@ -1,8 +1,18 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { ClientSession, ObjectId } from 'mongodb';
 
-import type { AdminStore, ServiceDocument, TenantDocument } from '../admin/store.js';
+import type {
+  AdminStore,
+  AppointmentDocument,
+  CustomerAddressDocument,
+  CustomerDocument,
+  ProviderDocument,
+  ProviderServiceAssignmentDocument,
+  ServiceDocument,
+  TenantDocument,
+} from '../admin/store.js';
 import { dateRange, generateSlots, localToUtc, previewDay } from '../availability/routes.js';
 import { authenticateAdminMutation, authenticateAdminRequest } from '../auth/routes.js';
 import type { Environment } from '../config.js';
@@ -14,6 +24,73 @@ const PLATFORM_MINIMUM_LEAD_MINUTES = 120;
 const PLATFORM_MAXIMUM_ADVANCE_DAYS = 90;
 const MAXIMUM_RANGE_DAYS = 14;
 const MAXIMUM_STARTS = 100;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const publicAppointmentSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'service_public_id',
+    'provider_public_id',
+    'starts_at',
+    'customer',
+    'consent',
+    'website',
+  ],
+  properties: {
+    service_public_id: { type: 'string', minLength: 1, maxLength: 100 },
+    provider_public_id: { type: 'string', minLength: 1, maxLength: 100 },
+    starts_at: { type: 'string', format: 'date-time' },
+    website: { type: 'string', maxLength: 200 },
+    customer: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'first_name',
+        'last_name',
+        'email',
+        'mobile_phone',
+        'preferred_contact_channel',
+        'customer_location_address',
+      ],
+      properties: {
+        first_name: { type: 'string', minLength: 1, maxLength: 100 },
+        last_name: { type: 'string', minLength: 1, maxLength: 100 },
+        email: { type: 'string', minLength: 3, maxLength: 320 },
+        mobile_phone: { type: 'string', minLength: 7, maxLength: 32 },
+        preferred_contact_channel: { enum: ['email', 'sms'] },
+        appointment_note: { anyOf: [{ type: 'string', maxLength: 1000 }, { type: 'null' }] },
+        customer_location_address: {
+          anyOf: [
+            { type: 'null' },
+            {
+              type: 'object',
+              additionalProperties: false,
+              required: ['line_1', 'city', 'region', 'postal_code', 'country_code'],
+              properties: {
+                line_1: { type: 'string', minLength: 1, maxLength: 200 },
+                line_2: { anyOf: [{ type: 'string', maxLength: 200 }, { type: 'null' }] },
+                city: { type: 'string', minLength: 1, maxLength: 200 },
+                region: { type: 'string', minLength: 1, maxLength: 200 },
+                postal_code: { type: 'string', minLength: 1, maxLength: 32 },
+                country_code: { type: 'string', pattern: '^[A-Za-z]{2}$' },
+              },
+            },
+          ],
+        },
+      },
+    },
+    consent: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['booking_terms_version', 'booking_terms_accepted'],
+      properties: {
+        booking_terms_version: { type: 'string', minLength: 1, maxLength: 64 },
+        booking_terms_accepted: { const: true },
+      },
+    },
+  },
+} as const;
 
 interface StartsQuery {
   start_date: string;
@@ -27,6 +104,7 @@ interface PublicSettingsBody {
   public_booking_enabled: boolean;
   public_profile: TenantDocument['public_profile'];
   booking_policy: TenantDocument['booking_policy'];
+  public_booking_terms: TenantDocument['public_booking_terms'];
 }
 
 interface ServicePublicSettingsBody {
@@ -36,20 +114,59 @@ interface ServicePublicSettingsBody {
   public_booking_policy: ServiceDocument['public_booking_policy'];
 }
 
+interface PublicAppointmentBody {
+  service_public_id: string;
+  provider_public_id: string;
+  starts_at: string;
+  customer: {
+    first_name: string;
+    last_name: string;
+    email: string;
+    mobile_phone: string;
+    preferred_contact_channel: 'email' | 'sms';
+    customer_location_address: PublicAddressBody | null;
+    appointment_note?: string | null;
+  };
+  consent: { booking_terms_version: string; booking_terms_accepted: boolean };
+  website: string;
+}
+
+interface PublicAddressBody {
+  line_1: string;
+  line_2?: string | null;
+  city: string;
+  region: string;
+  postal_code: string;
+  country_code: string;
+}
+
 export function registerPublicBookingRoutes(
   app: FastifyInstance,
   environment: Environment,
   store: AdminStore,
 ): void {
   const limiter = createPublicRateLimiter();
+  const submissionLimiter = createPublicRateLimiter();
   app.addHook('onRequest', async (request, reply) => {
     if (!request.url.startsWith('/api/v1/public/')) return;
     const hostname = normalizePublicHostname(request.hostname) ?? 'invalid';
     const route = request.routeOptions.url ?? request.url.split('?')[0]!;
     const maximum = route.endsWith('/available-starts') ? 30 : 120;
-    if (!limiter.allow(`${request.ip}:${hostname}:${route}`, maximum)) {
+    if (!limiter.allow(`${request.ip}:${hostname}:${route}`, maximum, 60_000)) {
       void reply.header('Retry-After', '60');
       return safeError(reply, 429, 'public_rate_limit_exceeded', request.id);
+    }
+    if (request.method === 'POST' && route === '/api/v1/public/appointments') {
+      const actor = `${request.ip}:${hostname}:public-appointment`;
+      const tenant = `${hostname}:public-appointment`;
+      if (
+        !submissionLimiter.allow(`${actor}:10m`, 5, 10 * 60_000) ||
+        !submissionLimiter.allow(`${actor}:24h`, 20, 24 * 60 * 60_000) ||
+        !submissionLimiter.allow(`${tenant}:10m`, 120, 10 * 60_000)
+      ) {
+        void reply.header('Retry-After', '600');
+        return safeError(reply, 429, 'public_rate_limit_exceeded', request.id);
+      }
     }
   });
 
@@ -230,7 +347,264 @@ export function registerPublicBookingRoutes(
     },
   );
 
+  app.post<{ Body: PublicAppointmentBody }>(
+    '/api/v1/public/appointments',
+    {
+      ...publicSchema('createPublicAppointment'),
+      bodyLimit: 16 * 1024,
+      schema: {
+        operationId: 'createPublicAppointment',
+        tags: ['public-booking'],
+        body: publicAppointmentSchema,
+      },
+    },
+    async (request, reply) => {
+      if (!isPublicJsonRequest(request) || !isSamePublicOrigin(request))
+        return safeError(reply, 403, 'invalid_public_booking_request', request.id);
+      const tenant = await resolvePublicTenant(request, reply, store);
+      if (!tenant) return;
+      if (request.body.website)
+        return safeError(reply, 400, 'invalid_public_booking_request', request.id);
+      const key = request.headers['idempotency-key'];
+      if (typeof key !== 'string' || !UUID_PATTERN.test(key))
+        return safeError(reply, 400, 'invalid_public_booking_request', request.id);
+      const normalized = normalizePublicAppointment(request.body);
+      if (!normalized) return safeError(reply, 400, 'invalid_public_booking_request', request.id);
+      const keyHash = createHash('sha256').update(key).digest('hex');
+      const fingerprint = publicRequestFingerprint(normalized);
+      const replay = await store.getPublicAppointmentByIdempotency(tenant._id, keyHash);
+      if (replay) {
+        if (replay.public_submission?.request_fingerprint !== fingerprint)
+          return safeError(reply, 409, 'idempotency_key_reused', request.id);
+        const replayProvider = await store.getProviderById(tenant._id, replay.provider_id);
+        return reply
+          .status(200)
+          .send(envelope(publicConfirmation(replay, tenant, replayProvider, true), request.id));
+      }
+
+      const initialService = await publicService(store, tenant, normalized.service_public_id);
+      if (!initialService) return safeResourceNotFound(reply, request.id);
+      const initialProviders = await store.listPublicProvidersForService(
+        tenant._id,
+        initialService._id,
+      );
+      const initialSubject = initialProviders.find(
+        ({ provider }) => provider.public_id === normalized.provider_public_id,
+      );
+      if (!initialSubject) return safeResourceNotFound(reply, request.id);
+      const startsAt = new Date(normalized.starts_at);
+      const preliminaryStart = new Date(
+        startsAt.valueOf() - initialSubject.assignment.buffer_before_minutes * 60_000,
+      );
+      const preliminaryEnd = new Date(
+        startsAt.valueOf() +
+          (initialService.duration_minutes + initialSubject.assignment.buffer_after_minutes) *
+            60_000,
+      );
+
+      let databaseOperation = 'appointment_schedule_lock';
+      try {
+        const result = await store.withAppointmentScheduleLocks(
+          tenant._id,
+          utcDateScopes(initialSubject.provider._id, preliminaryStart, preliminaryEnd),
+          async (session) => {
+            const currentTenant = await store.getPublicTenantBySlug(tenant.slug, session);
+            if (!currentTenant) throw new PublicBookingError(404, 'public_booking_not_found');
+            if (
+              currentTenant.public_booking_terms.version !==
+              normalized.consent.booking_terms_version
+            )
+              throw new PublicBookingError(409, 'booking_terms_changed');
+            const existing = await store.getPublicAppointmentByIdempotency(
+              currentTenant._id,
+              keyHash,
+              session,
+            );
+            if (existing) {
+              if (existing.public_submission?.request_fingerprint !== fingerprint)
+                throw new PublicBookingError(409, 'idempotency_key_reused');
+              return {
+                appointment: existing,
+                provider: await store.getProviderById(
+                  currentTenant._id,
+                  existing.provider_id,
+                  session,
+                ),
+                replayed: true,
+              };
+            }
+            const service = await store.getService(
+              currentTenant._id,
+              normalized.service_public_id,
+              session,
+            );
+            const provider = await store.getProvider(
+              currentTenant._id,
+              normalized.provider_public_id,
+              session,
+            );
+            if (!service || service.status !== 'active' || !service.publicly_bookable)
+              throw new PublicBookingError(404, 'public_booking_not_found');
+            if (
+              !provider ||
+              provider.status !== 'active' ||
+              !provider.customer_selectable ||
+              !provider.accepting_new_clients
+            )
+              throw new PublicBookingError(404, 'public_booking_not_found');
+            const assignment = await store.findAppointmentAssignment(
+              currentTenant._id,
+              provider._id,
+              service._id,
+              session,
+            );
+            if (!assignment || assignment.status !== 'active')
+              throw new PublicBookingError(404, 'public_booking_not_found');
+            if (
+              (service.delivery_mode === 'customer_location') !==
+              Boolean(normalized.customer.customer_location_address)
+            )
+              throw new PublicBookingError(400, 'invalid_public_booking_request');
+            const candidate = await validatePublicCandidate(
+              store,
+              currentTenant,
+              service,
+              provider,
+              assignment,
+              startsAt,
+              session,
+            );
+            databaseOperation = 'public_customer';
+            const customer = await resolvePublicCustomer(
+              store,
+              currentTenant._id,
+              normalized,
+              session,
+            );
+            const now = new Date();
+            databaseOperation = 'public_appointment';
+            const appointment = await store.insertAppointment(
+              {
+                tenant_id: currentTenant._id,
+                customer_id: customer._id,
+                provider_id: provider._id,
+                service_id: service._id,
+                provider_service_assignment_id: assignment._id,
+                ...candidate,
+                snapshot: {
+                  customer_display_name:
+                    `${customer.preferred_name ?? customer.first_name} ${customer.last_name ?? ''}`.trim(),
+                  provider_display_name: provider.display_name,
+                  service_name: service.name,
+                  service_duration_minutes: service.duration_minutes,
+                  slot_cadence_minutes:
+                    service.slot_cadence_minutes ?? currentTenant.default_slot_cadence_minutes,
+                  buffer_before_minutes: assignment.buffer_before_minutes,
+                  buffer_after_minutes: assignment.buffer_after_minutes,
+                  delivery_mode: service.delivery_mode,
+                  base_price_minor: service.base_price_minor,
+                  booking_fee_minor: service.booking_fee_minor,
+                  currency: service.currency,
+                  customer_note: normalized.customer.appointment_note,
+                },
+                location: {
+                  mode: service.delivery_mode,
+                  customer_address: normalized.customer.customer_location_address,
+                },
+                status: 'scheduled',
+                source: 'public_booking',
+                public_submission: {
+                  idempotency_key_hash: keyHash,
+                  request_fingerprint: fingerprint,
+                },
+                booking_terms: {
+                  version: currentTenant.public_booking_terms.version,
+                  accepted_at: now,
+                },
+                cancelled_at: null,
+                cancelled_by: null,
+                cancellation_reason: null,
+                cancellation_detail: null,
+                completed_at: null,
+                completed_by: null,
+                no_show_at: null,
+                no_show_by: null,
+                version: 1,
+                created_at: now,
+                updated_at: now,
+                created_by: null,
+                updated_by: null,
+              },
+              session,
+            );
+            return { appointment, provider, replayed: false };
+          },
+        );
+        if (!result.replayed) {
+          databaseOperation = 'public_appointment_audit';
+          await store.audit({
+            event: 'public_appointment_created',
+            outcome: 'success',
+            actorUserId: null,
+            tenantId: tenant._id,
+            requestId: request.id,
+            metadata: {
+              appointment_public_id: result.appointment.public_id,
+              appointment_reference: result.appointment.reference,
+            },
+          });
+        }
+        return reply
+          .status(result.replayed ? 200 : 201)
+          .send(
+            envelope(
+              publicConfirmation(result.appointment, tenant, result.provider, result.replayed),
+              request.id,
+            ),
+          );
+      } catch (reason) {
+        if (reason instanceof PublicBookingError)
+          return safeError(reply, reason.status, reason.code, request.id);
+        const afterRace = await store.getPublicAppointmentByIdempotency(tenant._id, keyHash);
+        if (afterRace && afterRace.public_submission?.request_fingerprint === fingerprint) {
+          const replayProvider = await store.getProviderById(tenant._id, afterRace.provider_id);
+          return reply
+            .status(200)
+            .send(
+              envelope(publicConfirmation(afterRace, tenant, replayProvider, true), request.id),
+            );
+        }
+        request.log.error({
+          event: 'public_booking.create_failed',
+          error_name: errorName(reason),
+          database_operation: databaseOperation,
+          ...safeMongoErrorDetails(reason),
+        });
+        return safeError(reply, 500, 'public_booking_failed', request.id);
+      }
+    },
+  );
+
   registerAdministrativeConfiguration(app, environment, store);
+}
+
+function isPublicJsonRequest(request: FastifyRequest): boolean {
+  const contentType = request.headers['content-type'];
+  return (
+    typeof contentType === 'string' && contentType.toLowerCase().startsWith('application/json')
+  );
+}
+
+function isSamePublicOrigin(request: FastifyRequest): boolean {
+  const origin = request.headers.origin;
+  if (origin === undefined) return true;
+  try {
+    const originUrl = new URL(origin);
+    const requestHost = (request.headers.host ?? request.hostname).trim().toLowerCase();
+    return originUrl.host.toLowerCase() === requestHost;
+  } catch {
+    return false;
+  }
 }
 
 function registerAdministrativeConfiguration(
@@ -350,6 +724,10 @@ export function normalizePublicHostname(hostname: string): string | null {
   return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label) ? label : null;
 }
 
+export function publicRequestFingerprint(value: unknown) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
 async function publicService(store: AdminStore, tenant: TenantDocument, publicId: string) {
   const service = await store.getService(tenant._id, publicId);
   return service?.status === 'active' && service.publicly_bookable ? service : null;
@@ -371,6 +749,7 @@ function bookingContextView(tenant: TenantDocument) {
     timezone: tenant.default_timezone,
     locale: tenant.locale,
     currency: tenant.currency,
+    booking_terms: tenant.public_booking_terms,
   };
 }
 
@@ -386,6 +765,295 @@ function publicServiceView(service: ServiceDocument, tenant: TenantDocument) {
     currency: service.currency,
     policy: effectivePolicy(tenant, service),
   };
+}
+
+function normalizePublicAppointment(body: PublicAppointmentBody) {
+  const firstName = body.customer.first_name.trim();
+  const lastName = body.customer.last_name.trim();
+  const email = body.customer.email.trim().toLowerCase();
+  const phone = normalizeUsPhone(body.customer.mobile_phone);
+  const startsAt = new Date(body.starts_at);
+  if (
+    !firstName ||
+    !lastName ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+    !phone ||
+    Number.isNaN(startsAt.valueOf()) ||
+    !body.consent.booking_terms_accepted
+  )
+    return null;
+  const address = body.customer.customer_location_address
+    ? normalizePublicAddress(body.customer.customer_location_address)
+    : null;
+  if (body.customer.customer_location_address && !address) return null;
+  return {
+    service_public_id: body.service_public_id,
+    provider_public_id: body.provider_public_id,
+    starts_at: startsAt.toISOString(),
+    customer: {
+      first_name: firstName,
+      last_name: lastName,
+      email,
+      mobile_phone_e164: phone,
+      preferred_contact_channel: body.customer.preferred_contact_channel,
+      customer_location_address: address,
+      appointment_note: body.customer.appointment_note?.trim() || null,
+    },
+    consent: {
+      booking_terms_version: body.consent.booking_terms_version.trim(),
+      booking_terms_accepted: true,
+    },
+  };
+}
+
+function normalizeUsPhone(value: string) {
+  let digits = value.replace(/\D/g, '');
+  if (digits.length === 10) digits = `1${digits}`;
+  return digits.length === 11 && digits.startsWith('1') ? `+${digits}` : null;
+}
+
+function normalizePublicAddress(value: PublicAddressBody) {
+  const address = {
+    line_1: value.line_1.trim(),
+    line_2: value.line_2?.trim() || null,
+    city: value.city.trim(),
+    region: value.region.trim(),
+    postal_code: value.postal_code.trim(),
+    country_code: value.country_code.trim().toUpperCase(),
+  };
+  return address.line_1 &&
+    address.city &&
+    address.region &&
+    address.postal_code &&
+    /^[A-Z]{2}$/.test(address.country_code)
+    ? address
+    : null;
+}
+
+async function resolvePublicCustomer(
+  store: AdminStore,
+  tenantId: ObjectId,
+  input: NonNullable<ReturnType<typeof normalizePublicAppointment>>,
+  session: ClientSession,
+) {
+  const emails = await store.findActiveCustomersByEmail(tenantId, input.customer.email, session);
+  const phones = await store.findActiveCustomersByPhone(
+    tenantId,
+    input.customer.mobile_phone_e164,
+    session,
+  );
+  let existing: CustomerDocument | null = null;
+  if (emails.length === 1 && phones.length === 1 && emails[0]!._id.equals(phones[0]!._id))
+    existing = emails[0]!;
+  else if (emails.length === 1 && phones.length === 0 && emails[0]!.mobile_phone_e164 === null)
+    existing = emails[0]!;
+  else if (phones.length === 1 && emails.length === 0 && phones[0]!.email_normalized === null)
+    existing = phones[0]!;
+  if (existing) return existing;
+
+  const address: CustomerAddressDocument[] = input.customer.customer_location_address
+    ? [
+        {
+          public_id: randomUUID(),
+          label: 'other',
+          ...input.customer.customer_location_address,
+          is_primary: true,
+        },
+      ]
+    : [];
+  return store.createPublicCustomer(
+    tenantId,
+    {
+      first_name: input.customer.first_name,
+      last_name: input.customer.last_name,
+      preferred_name: null,
+      first_name_normalized: input.customer.first_name.toLowerCase(),
+      last_name_normalized: input.customer.last_name.toLowerCase(),
+      full_name_normalized:
+        `${input.customer.first_name} ${input.customer.last_name}`.toLowerCase(),
+      email_normalized: input.customer.email,
+      mobile_phone_e164: input.customer.mobile_phone_e164,
+      mobile_phone_digits: input.customer.mobile_phone_e164.slice(1),
+      addresses: address,
+      communication_preferences: {
+        preferred_channel: input.customer.preferred_contact_channel,
+        marketing_email: 'unknown',
+        marketing_sms: 'unknown',
+      },
+      source: 'public_booking',
+      external_references: [],
+    },
+    session,
+  );
+}
+
+async function validatePublicCandidate(
+  store: AdminStore,
+  tenant: TenantDocument,
+  service: ServiceDocument,
+  provider: ProviderDocument,
+  assignment: ProviderServiceAssignmentDocument,
+  start: Date,
+  session: ClientSession,
+) {
+  const policy = effectivePolicy(tenant, service);
+  const now = new Date();
+  if (start < new Date(now.valueOf() + policy.minimum_lead_minutes * 60_000))
+    throw new PublicBookingError(409, 'slot_no_longer_available');
+  const date = localDate(start, tenant.default_timezone);
+  if (date > addLocalDays(localDate(now, tenant.default_timezone), policy.maximum_advance_days))
+    throw new PublicBookingError(409, 'slot_no_longer_available');
+  const schedule = await store.getAvailabilitySchedule(tenant._id, provider._id, session);
+  if (!schedule) throw new PublicBookingError(409, 'slot_no_longer_available');
+  const exceptions = (
+    await store.listAvailabilityExceptions(tenant._id, provider._id, session)
+  ).filter((item) => item.status === 'active');
+  const cadence = service.slot_cadence_minutes ?? tenant.default_slot_cadence_minutes;
+  const slot = generateSlots(
+    previewDay(
+      date,
+      schedule,
+      exceptions,
+      service.duration_minutes,
+      assignment.buffer_before_minutes,
+      assignment.buffer_after_minutes,
+    ).windows,
+    schedule.timezone,
+    cadence,
+    service.duration_minutes,
+    assignment.buffer_before_minutes,
+    assignment.buffer_after_minutes,
+  ).find((item) => item.starts_at === start.toISOString());
+  if (!slot) throw new PublicBookingError(409, 'slot_no_longer_available');
+  const blockedStartsAt = new Date(slot.blocked_starts_at);
+  const blockedEndsAt = new Date(slot.blocked_ends_at);
+  const conflicts = await store.listBlockingAppointments({
+    tenantId: tenant._id,
+    providerId: provider._id,
+    startsBefore: blockedEndsAt,
+    endsAfter: blockedStartsAt,
+    session,
+  });
+  if (conflicts.length) throw new PublicBookingError(409, 'slot_no_longer_available');
+  return {
+    starts_at: start,
+    ends_at: new Date(slot.service_ends_at),
+    blocked_starts_at: blockedStartsAt,
+    blocked_ends_at: blockedEndsAt,
+    timezone: schedule.timezone,
+    local_start_date: date,
+  };
+}
+
+function utcDateScopes(providerId: ObjectId, start: Date, end: Date) {
+  const scopes = [];
+  for (
+    let value = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+    value <= Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+    value += 86_400_000
+  )
+    scopes.push({ providerId, utcDate: new Date(value).toISOString().slice(0, 10) });
+  return scopes;
+}
+
+function publicConfirmation(
+  item: AppointmentDocument,
+  tenant: TenantDocument,
+  provider: ProviderDocument | null,
+  replayed: boolean,
+) {
+  return {
+    appointment_reference: item.reference,
+    status: item.status,
+    business: { name: tenant.public_profile.business_name },
+    service: {
+      name: item.snapshot.service_name,
+      duration_minutes: item.snapshot.service_duration_minutes,
+    },
+    provider: {
+      display_name: item.snapshot.provider_display_name,
+      photo_url: provider?.photo_url ?? null,
+    },
+    starts_at: item.starts_at.toISOString(),
+    ends_at: item.ends_at.toISOString(),
+    local_start: localDateTime(item.starts_at, item.timezone),
+    timezone: item.timezone,
+    location_mode: item.location.mode,
+    replayed,
+  };
+}
+
+function localDateTime(value: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'longOffset',
+  }).formatToParts(value);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const offset = (values.timeZoneName ?? 'GMT+00:00').replace('GMT', '');
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}:${values.second}${offset}`;
+}
+
+class PublicBookingError extends Error {
+  public constructor(
+    public readonly status: number,
+    public readonly code: string,
+  ) {
+    super(code);
+  }
+}
+
+function errorName(value: unknown) {
+  return value instanceof Error ? value.name : 'UnknownError';
+}
+
+function safeMongoErrorDetails(value: unknown) {
+  if (!value || typeof value !== 'object') return {};
+  const candidate = value as {
+    code?: unknown;
+    codeName?: unknown;
+    errorLabels?: unknown;
+    errInfo?: { details?: unknown };
+  };
+  return {
+    ...(typeof candidate.code === 'number' ? { mongo_error_code: candidate.code } : {}),
+    ...(typeof candidate.codeName === 'string'
+      ? { mongo_error_code_name: candidate.codeName }
+      : {}),
+    ...(Array.isArray(candidate.errorLabels) &&
+    candidate.errorLabels.every((label) => typeof label === 'string')
+      ? { mongo_error_labels: candidate.errorLabels }
+      : {}),
+    ...(candidate.code === 121 && candidate.errInfo?.details
+      ? { mongo_validation_details: redactMongoValidationDetails(candidate.errInfo.details) }
+      : {}),
+  };
+}
+
+function redactMongoValidationDetails(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactMongoValidationDetails);
+  if (!value || typeof value !== 'object') return value;
+  const allowed = new Set([
+    'operatorName',
+    'propertyName',
+    'reason',
+    'consideredType',
+    'missingProperties',
+    'schemaRulesNotSatisfied',
+    'propertiesNotSatisfied',
+    'details',
+  ]);
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => allowed.has(key))
+      .map(([key, item]) => [key, redactMongoValidationDetails(item)]),
+  );
 }
 
 function effectivePolicy(tenant: TenantDocument, service: ServiceDocument) {
@@ -513,11 +1181,11 @@ function addLocalDays(date: string, count: number) {
 function createPublicRateLimiter() {
   const counters = new Map<string, { count: number; resetsAt: number }>();
   return {
-    allow(key: string, maximum: number) {
+    allow(key: string, maximum: number, windowMilliseconds: number) {
       const now = Date.now();
       const current = counters.get(key);
       if (!current || current.resetsAt <= now) {
-        counters.set(key, { count: 1, resetsAt: now + 60_000 });
+        counters.set(key, { count: 1, resetsAt: now + windowMilliseconds });
         if (counters.size > 10_000)
           for (const [itemKey, value] of counters)
             if (value.resetsAt <= now) counters.delete(itemKey);
@@ -560,6 +1228,7 @@ function adminSettingsView(tenant: TenantDocument) {
     fallback_hostname: `${tenant.slug}.booknowtech.com`,
     public_profile: tenant.public_profile,
     booking_policy: tenant.booking_policy,
+    public_booking_terms: tenant.public_booking_terms,
     version: tenant.version,
   };
 }
@@ -574,6 +1243,7 @@ function normalizePublicSettings(body: PublicSettingsBody, tenant: TenantDocumen
     !businessName ||
     businessName.length > 120 ||
     !validPolicy(body.booking_policy) ||
+    !validTerms(body.public_booking_terms) ||
     !validNullable(profile.description, 1000) ||
     !validNullable(profile.tagline, 160) ||
     !validHttps(profile.logo_url) ||
@@ -604,7 +1274,25 @@ function normalizePublicSettings(body: PublicSettingsBody, tenant: TenantDocumen
       email_normalized: profile.email_normalized?.trim().toLowerCase() || null,
     },
     booking_policy: body.booking_policy,
+    public_booking_terms: {
+      version: body.public_booking_terms.version.trim(),
+      acknowledgment_label: body.public_booking_terms.acknowledgment_label.trim(),
+      terms_url: normalizeNullable(body.public_booking_terms.terms_url),
+    },
   };
+}
+
+function validTerms(terms: TenantDocument['public_booking_terms']) {
+  return (
+    Boolean(terms && typeof terms === 'object') &&
+    typeof terms.version === 'string' &&
+    terms.version.trim().length >= 1 &&
+    terms.version.trim().length <= 64 &&
+    typeof terms.acknowledgment_label === 'string' &&
+    terms.acknowledgment_label.trim().length >= 1 &&
+    terms.acknowledgment_label.trim().length <= 300 &&
+    validHttps(terms.terms_url)
+  );
 }
 
 function validServiceSettings(body: ServicePublicSettingsBody) {

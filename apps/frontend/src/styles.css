@@ -667,7 +667,116 @@ button:disabled {
   background: #eef5fb;
   font-weight: 700;
 }
+
+.public-guest-form,
+.public-review-details {
+  display: grid;
+  gap: 1rem;
+}
+
+.public-form-grid,
+.public-guest-form fieldset {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.public-guest-form label,
+.public-guest-form fieldset {
+  min-width: 0;
+}
+
+.public-guest-form label:not(.checkbox-label),
+.public-guest-form fieldset label {
+  display: grid;
+  gap: 0.4rem;
+  font-weight: 700;
+}
+
+.public-guest-form input,
+.public-guest-form select,
+.public-guest-form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #9fb3cc;
+  border-radius: 0.55rem;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+}
+
+.public-guest-form textarea {
+  min-height: 6rem;
+  resize: vertical;
+}
+
+.public-guest-form input:focus-visible,
+.public-guest-form select:focus-visible,
+.public-guest-form textarea:focus-visible {
+  outline: 3px solid #f3b63b;
+  outline-offset: 2px;
+}
+
+.public-guest-form fieldset {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid #d3deeb;
+  border-radius: 0.75rem;
+}
+
+.public-guest-form legend {
+  padding: 0 0.35rem;
+  font-weight: 800;
+}
+
+.public-guest-form .checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  font-weight: 600;
+}
+
+.public-guest-form .checkbox-label input {
+  flex: 0 0 auto;
+  width: 1.25rem;
+  min-height: 1.25rem;
+  margin-top: 0.1rem;
+}
+
+.public-honeypot {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+}
+
+.public-confirmation-provider {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.public-confirmation-provider h2,
+.public-confirmation-provider p {
+  margin: 0;
+}
+
+.appointment-reference {
+  padding: 0.75rem 1rem;
+  border-radius: 0.6rem;
+  background: #eef5fc;
+}
 @media (max-width: 40rem) {
+  .public-form-grid,
+  .public-guest-form fieldset {
+    grid-template-columns: 1fr;
+  }
   .public-booking-page {
     padding: 1rem;
   }

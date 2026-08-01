@@ -10,7 +10,7 @@ import {
 } from '../admin/store.js';
 import { buildApplication } from '../app.js';
 import { StubReadinessProbe, testEnvironment } from '../test-fixtures.js';
-import { normalizePublicHostname } from './routes.js';
+import { normalizePublicHostname, publicRequestFingerprint } from './routes.js';
 
 describe('public booking discovery', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -21,6 +21,21 @@ describe('public booking discovery', () => {
     expect(normalizePublicHostname('admin.booknowtech.com')).toBeNull();
     expect(normalizePublicHostname('tenant.attacker.booknowtech.com')).toBeNull();
     expect(normalizePublicHostname('booknowtech.com.attacker.test')).toBeNull();
+  });
+
+  it('creates a deterministic validator-compatible public request fingerprint', () => {
+    const request = {
+      service_public_id: 'service-public',
+      provider_public_id: 'provider-public',
+      starts_at: '2027-02-02T15:00:00.000Z',
+    };
+    const fingerprint = publicRequestFingerprint(request);
+
+    expect(fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(publicRequestFingerprint(request)).toBe(fingerprint);
+    expect(
+      publicRequestFingerprint({ ...request, starts_at: '2027-02-02T15:15:00.000Z' }),
+    ).not.toBe(fingerprint);
   });
 
   it('returns only approved public fields and supports ETag revalidation', async () => {
@@ -52,6 +67,7 @@ describe('public booking discovery', () => {
       timezone: 'America/New_York',
       locale: 'en-US',
       currency: 'USD',
+      booking_terms: tenant.public_booking_terms,
     });
     expect(first.body).not.toContain('legal_name');
     expect(first.body).not.toContain('tenant_id');
@@ -119,6 +135,88 @@ describe('public booking discovery', () => {
     expect(response.body).not.toContain('linked_user_id');
     await app.close();
   });
+
+  it('rejects invalid public writes safely and applies the stricter submission limit', async () => {
+    const { app, store, tenant } = await testApp();
+    vi.spyOn(store, 'getPublicTenantBySlug').mockResolvedValue(tenant);
+    const body = {
+      service_public_id: '5c71e00f-5761-49f4-a17a-7b66cc55cdac',
+      provider_public_id: 'b32a897d-cf3d-465b-92bb-54dc5152d14f',
+      starts_at: '2027-02-02T15:00:00.000Z',
+      customer: {
+        first_name: 'Taylor',
+        last_name: 'Guest',
+        email: 'taylor@example.test',
+        mobile_phone: '(843) 555-0104',
+        preferred_contact_channel: 'email',
+        customer_location_address: null,
+        appointment_note: null,
+      },
+      consent: { booking_terms_version: 'test-v1', booking_terms_accepted: true },
+      website: 'bot-value',
+    };
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/public/appointments',
+        headers: {
+          host: 'brazilian-wax.booknowtech.com',
+          'idempotency-key': `550e8400-e29b-41d4-a716-44665544000${attempt}`,
+        },
+        payload: body,
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe('invalid_public_booking_request');
+      expect(response.body).not.toContain('taylor@example.test');
+    }
+    const limited = await app.inject({
+      method: 'POST',
+      url: '/api/v1/public/appointments',
+      headers: {
+        host: 'brazilian-wax.booknowtech.com',
+        'idempotency-key': '550e8400-e29b-41d4-a716-446655440009',
+      },
+      payload: body,
+    });
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json().error.code).toBe('public_rate_limit_exceeded');
+    expect(limited.headers['retry-after']).toBe('600');
+    await app.close();
+  });
+
+  it('rejects cross-origin public appointment submissions without exposing tenant data', async () => {
+    const { app } = await testApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/public/appointments',
+      headers: {
+        host: 'brazilian-wax.booknowtech.com',
+        origin: 'https://attacker.example',
+        'idempotency-key': '550e8400-e29b-41d4-a716-446655440020',
+      },
+      payload: {
+        service_public_id: 'service-public',
+        provider_public_id: 'provider-public',
+        starts_at: '2027-02-02T15:00:00.000Z',
+        customer: {
+          first_name: 'Taylor',
+          last_name: 'Guest',
+          email: 'taylor@example.test',
+          mobile_phone: '(843) 555-0104',
+          preferred_contact_channel: 'email',
+          customer_location_address: null,
+          appointment_note: null,
+        },
+        consent: { booking_terms_version: 'test-v1', booking_terms_accepted: true },
+        website: '',
+      },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('invalid_public_booking_request');
+    expect(response.body).not.toContain('taylor@example.test');
+    await app.close();
+  });
 });
 
 async function testApp() {
@@ -158,6 +256,11 @@ function tenantFixture(): TenantDocument {
       email_normalized: null,
     },
     booking_policy: { minimum_lead_minutes: 120, maximum_advance_days: 90 },
+    public_booking_terms: {
+      version: 'test-v1',
+      acknowledgment_label: 'I agree to the booking terms.',
+      terms_url: null,
+    },
     default_timezone: 'America/New_York',
     default_slot_cadence_minutes: 15,
     locale: 'en-US',

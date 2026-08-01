@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { MongoClient, ObjectId } from 'mongodb';
 
 import { hashPassword } from '../auth/password.js';
@@ -89,6 +89,11 @@ async function main(): Promise<void> {
             booking_policy: {
               minimum_lead_minutes: tenant.slug === 'harbor-demo' ? 120 : 240,
               maximum_advance_days: tenant.slug === 'harbor-demo' ? 90 : 120,
+            },
+            public_booking_terms: {
+              version: 'staging-v1',
+              acknowledgment_label: 'I agree to the booking terms for this appointment.',
+              terms_url: null,
             },
             status: 'active',
             updated_at: now,
@@ -524,6 +529,61 @@ async function main(): Promise<void> {
         .findOne({ tenant_id: tenantResult._id, status: 'active' });
       if (!seedProvider || !seedService || !seedCustomer)
         throw new Error('Unable to resolve appointment seed subjects');
+      const publicCustomerExternalId = `${tenant.slug}-public-booking-guest`;
+      await db.collection<CustomerDocument>('customers').updateOne(
+        {
+          tenant_id: tenantResult._id,
+          external_references: {
+            $elemMatch: { system: 'booknowtech_seed', external_id: publicCustomerExternalId },
+          },
+        },
+        {
+          $setOnInsert: {
+            _id: new ObjectId(),
+            public_id: randomUUID(),
+            tenant_id: tenantResult._id,
+            first_name: 'Public',
+            last_name: 'Guest',
+            preferred_name: null,
+            first_name_normalized: 'public',
+            last_name_normalized: 'guest',
+            full_name_normalized: 'public guest',
+            email_normalized: `public-${tenant.slug}@example.test`,
+            mobile_phone_e164: tenant.slug === 'harbor-demo' ? '+18435550141' : '+18435550142',
+            mobile_phone_digits: tenant.slug === 'harbor-demo' ? '18435550141' : '18435550142',
+            addresses: [],
+            communication_preferences: {
+              preferred_channel: 'email',
+              marketing_email: 'unknown',
+              marketing_sms: 'unknown',
+            },
+            source: 'public_booking',
+            external_references: [
+              {
+                system: 'booknowtech_seed',
+                external_id: publicCustomerExternalId,
+                recorded_at: now,
+              },
+            ],
+            status: 'active',
+            deactivated_at: null,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            created_by: null,
+            updated_by: null,
+          },
+        },
+        { upsert: true },
+      );
+      const publicSeedCustomer = await db.collection<CustomerDocument>('customers').findOne({
+        tenant_id: tenantResult._id,
+        external_references: {
+          $elemMatch: { system: 'booknowtech_seed', external_id: publicCustomerExternalId },
+        },
+      });
+      if (!publicSeedCustomer)
+        throw new Error('Unable to resolve public appointment seed customer');
       const seedAssignment = await db
         .collection<ProviderServiceAssignmentDocument>('provider_service_assignments')
         .findOne({
@@ -577,10 +637,13 @@ async function main(): Promise<void> {
                 base_price_minor: seedService.base_price_minor,
                 booking_fee_minor: seedService.booking_fee_minor,
                 currency: seedService.currency,
+                customer_note: null,
               },
               location: { mode: seedService.delivery_mode, customer_address: null },
               status,
               source: 'seed',
+              public_submission: null,
+              booking_terms: null,
               cancelled_at: status === 'cancelled' ? terminalAt : null,
               cancelled_by: status === 'cancelled' ? userResult._id : null,
               cancellation_reason: status === 'cancelled' ? 'customer_request' : null,
@@ -599,6 +662,76 @@ async function main(): Promise<void> {
           { upsert: true },
         );
       }
+      const publicStartsAt = new Date('2027-02-03T15:00:00.000Z');
+      const publicReference = `BNT-${tenantPrefix}0000005`;
+      const publicDuration = seedService.duration_minutes;
+      await db.collection('appointments').updateOne(
+        { tenant_id: tenantResult._id, reference: publicReference },
+        {
+          $setOnInsert: {
+            _id: new ObjectId(),
+            public_id: randomUUID(),
+            reference: publicReference,
+            tenant_id: tenantResult._id,
+            customer_id: publicSeedCustomer._id,
+            provider_id: seedProvider._id,
+            service_id: seedService._id,
+            provider_service_assignment_id: seedAssignment._id,
+            starts_at: publicStartsAt,
+            ends_at: new Date(publicStartsAt.valueOf() + publicDuration * 60_000),
+            blocked_starts_at: new Date(
+              publicStartsAt.valueOf() - seedAssignment.buffer_before_minutes * 60_000,
+            ),
+            blocked_ends_at: new Date(
+              publicStartsAt.valueOf() +
+                (publicDuration + seedAssignment.buffer_after_minutes) * 60_000,
+            ),
+            timezone: 'America/New_York',
+            local_start_date: '2027-02-03',
+            snapshot: {
+              customer_display_name: 'Public Guest',
+              provider_display_name: seedProvider.display_name,
+              service_name: seedService.name,
+              service_duration_minutes: publicDuration,
+              slot_cadence_minutes:
+                seedService.slot_cadence_minutes ?? (tenant.slug === 'harbor-demo' ? 15 : 30),
+              buffer_before_minutes: seedAssignment.buffer_before_minutes,
+              buffer_after_minutes: seedAssignment.buffer_after_minutes,
+              delivery_mode: seedService.delivery_mode,
+              base_price_minor: seedService.base_price_minor,
+              booking_fee_minor: seedService.booking_fee_minor,
+              currency: seedService.currency,
+              customer_note: 'Seeded public appointment for staging QA.',
+            },
+            location: { mode: seedService.delivery_mode, customer_address: null },
+            status: 'scheduled',
+            source: 'public_booking',
+            public_submission: {
+              idempotency_key_hash: createHash('sha256')
+                .update(`seed-public-key:${tenant.slug}`)
+                .digest('hex'),
+              request_fingerprint: createHash('sha256')
+                .update(`seed-public-request:${tenant.slug}`)
+                .digest('hex'),
+            },
+            booking_terms: { version: 'staging-v1', accepted_at: now },
+            cancelled_at: null,
+            cancelled_by: null,
+            cancellation_reason: null,
+            cancellation_detail: null,
+            completed_at: null,
+            completed_by: null,
+            no_show_at: null,
+            no_show_by: null,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            created_by: null,
+            updated_by: null,
+          },
+        },
+        { upsert: true },
+      );
     }
     process.stdout.write(`Seeded internal administrative user ${email}.\n`);
   } finally {

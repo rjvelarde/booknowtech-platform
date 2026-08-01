@@ -17,6 +17,7 @@ const validators: Record<string, Document> = {
         'public_booking_enabled',
         'public_profile',
         'booking_policy',
+        'public_booking_terms',
         'version',
         'updated_by',
         'status',
@@ -59,6 +60,15 @@ const validators: Record<string, Document> = {
           properties: {
             minimum_lead_minutes: { bsonType: ['int', 'long'], minimum: 0, maximum: 43200 },
             maximum_advance_days: { bsonType: ['int', 'long'], minimum: 1, maximum: 365 },
+          },
+        },
+        public_booking_terms: {
+          bsonType: 'object',
+          required: ['version', 'acknowledgment_label', 'terms_url'],
+          properties: {
+            version: { bsonType: 'string', minLength: 1, maxLength: 64 },
+            acknowledgment_label: { bsonType: 'string', minLength: 1, maxLength: 300 },
+            terms_url: { bsonType: ['string', 'null'], maxLength: 2048, pattern: '^https://' },
           },
         },
         default_slot_cadence_minutes: { enum: [5, 10, 15, 20, 30, 60] },
@@ -449,8 +459,8 @@ const validators: Record<string, Document> = {
         version: { bsonType: ['int', 'long'], minimum: 1 },
         created_at: { bsonType: 'date' },
         updated_at: { bsonType: 'date' },
-        created_by: { bsonType: 'objectId' },
-        updated_by: { bsonType: 'objectId' },
+        created_by: { bsonType: ['objectId', 'null'] },
+        updated_by: { bsonType: ['objectId', 'null'] },
       },
     },
   },
@@ -475,6 +485,8 @@ const validators: Record<string, Document> = {
         'location',
         'status',
         'source',
+        'public_submission',
+        'booking_terms',
         'cancelled_at',
         'cancelled_by',
         'cancellation_reason',
@@ -517,6 +529,7 @@ const validators: Record<string, Document> = {
             'base_price_minor',
             'booking_fee_minor',
             'currency',
+            'customer_note',
           ],
           properties: {
             customer_display_name: { bsonType: 'string', minLength: 1, maxLength: 201 },
@@ -530,6 +543,7 @@ const validators: Record<string, Document> = {
             base_price_minor: { bsonType: ['int', 'long'], minimum: 0 },
             booking_fee_minor: { bsonType: ['int', 'long'], minimum: 0 },
             currency: { bsonType: 'string', pattern: '^[A-Z]{3}$' },
+            customer_note: { bsonType: ['string', 'null'], maxLength: 1000 },
           },
         },
         location: {
@@ -543,7 +557,23 @@ const validators: Record<string, Document> = {
           },
         },
         status: { enum: ['scheduled', 'completed', 'cancelled', 'no_show'] },
-        source: { enum: ['business_hub', 'seed'] },
+        source: { enum: ['business_hub', 'seed', 'public_booking'] },
+        public_submission: {
+          bsonType: ['object', 'null'],
+          required: ['idempotency_key_hash', 'request_fingerprint'],
+          properties: {
+            idempotency_key_hash: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+            request_fingerprint: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+          },
+        },
+        booking_terms: {
+          bsonType: ['object', 'null'],
+          required: ['version', 'accepted_at'],
+          properties: {
+            version: { bsonType: 'string', minLength: 1, maxLength: 64 },
+            accepted_at: { bsonType: 'date' },
+          },
+        },
         cancelled_at: { bsonType: ['date', 'null'] },
         cancelled_by: { bsonType: ['objectId', 'null'] },
         cancellation_reason: {
@@ -564,9 +594,29 @@ const validators: Record<string, Document> = {
         version: { bsonType: ['int', 'long'], minimum: 1 },
         created_at: { bsonType: 'date' },
         updated_at: { bsonType: 'date' },
-        created_by: { bsonType: 'objectId' },
-        updated_by: { bsonType: 'objectId' },
+        created_by: { bsonType: ['objectId', 'null'] },
+        updated_by: { bsonType: ['objectId', 'null'] },
       },
+      oneOf: [
+        {
+          properties: {
+            source: { enum: ['business_hub', 'seed'] },
+            public_submission: { bsonType: 'null' },
+            booking_terms: { bsonType: 'null' },
+            created_by: { bsonType: 'objectId' },
+            updated_by: { bsonType: 'objectId' },
+          },
+        },
+        {
+          properties: {
+            source: { enum: ['public_booking'] },
+            public_submission: { bsonType: 'object' },
+            booking_terms: { bsonType: 'object' },
+            created_by: { bsonType: 'null' },
+            updated_by: { bsonType: 'null' },
+          },
+        },
+      ],
     },
   },
   appointment_schedule_locks: {
@@ -621,6 +671,16 @@ export async function migrateDatabase(db: Db): Promise<void> {
           booking_policy: {
             $ifNull: ['$booking_policy', { minimum_lead_minutes: 120, maximum_advance_days: 90 }],
           },
+          public_booking_terms: {
+            $ifNull: [
+              '$public_booking_terms',
+              {
+                version: '1',
+                acknowledgment_label: 'I agree to the booking and cancellation terms.',
+                terms_url: null,
+              },
+            ],
+          },
         },
       },
     ]);
@@ -638,6 +698,17 @@ export async function migrateDatabase(db: Db): Promise<void> {
               { minimum_lead_minutes: null, maximum_advance_days: null },
             ],
           },
+        },
+      },
+    ]);
+  }
+  if (existing.has('appointments')) {
+    await db.collection('appointments').updateMany({}, [
+      {
+        $set: {
+          'snapshot.customer_note': { $ifNull: ['$snapshot.customer_note', null] },
+          public_submission: { $ifNull: ['$public_submission', null] },
+          booking_terms: { $ifNull: ['$booking_terms', null] },
         },
       },
     ]);
@@ -901,6 +972,15 @@ export async function migrateDatabase(db: Db): Promise<void> {
     {
       key: { tenant_id: 1, customer_id: 1, starts_at: -1, public_id: -1 },
       name: 'appointments_tenant_customer_agenda',
+    },
+    {
+      key: { tenant_id: 1, 'public_submission.idempotency_key_hash': 1 },
+      name: 'appointments_public_idempotency_unique',
+      unique: true,
+      partialFilterExpression: {
+        source: 'public_booking',
+        'public_submission.idempotency_key_hash': { $type: 'string' },
+      },
     },
   ]);
   await db.collection('appointment_schedule_locks').createIndexes([

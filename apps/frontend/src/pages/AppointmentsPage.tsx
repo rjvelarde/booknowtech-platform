@@ -434,6 +434,12 @@ function AppointmentDetail({
           <dd>{item.provider.display_name}</dd>
         </div>
       </dl>
+      {item.snapshot?.customer_note ? (
+        <div className="form-card">
+          <h3>Customer note</h3>
+          <p className="pre-wrap">{item.snapshot.customer_note}</p>
+        </div>
+      ) : null}
       {item.status === 'scheduled' ? (
         <>
           <div className="form-card stack-form">

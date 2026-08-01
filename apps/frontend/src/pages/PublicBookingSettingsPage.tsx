@@ -56,6 +56,11 @@ export function PublicBookingSettingsPage({
                 minimum_lead_minutes: Number(values.get('minimum_lead_minutes')),
                 maximum_advance_days: Number(values.get('maximum_advance_days')),
               },
+              public_booking_terms: {
+                version: text(values, 'terms_version'),
+                acknowledgment_label: text(values, 'terms_label'),
+                terms_url: nullable(values, 'terms_url'),
+              },
             },
             csrfToken,
           )
@@ -143,6 +148,26 @@ export function PublicBookingSettingsPage({
           max={365}
           defaultValue={settings.booking_policy.maximum_advance_days}
           required
+        />
+        <Field
+          name="terms_version"
+          label="Booking terms version"
+          defaultValue={settings.public_booking_terms.version}
+          maxLength={64}
+          required
+        />
+        <Field
+          name="terms_label"
+          label="Booking terms acknowledgment"
+          defaultValue={settings.public_booking_terms.acknowledgment_label}
+          maxLength={300}
+          required
+        />
+        <Field
+          name="terms_url"
+          label="Booking terms URL (HTTPS)"
+          type="url"
+          defaultValue={settings.public_booking_terms.terms_url ?? ''}
         />
         {canManage ? (
           <button type="submit">Save public booking settings</button>
