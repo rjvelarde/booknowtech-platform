@@ -49,6 +49,13 @@ export interface PublicBookingSettingsView {
   version: number;
 }
 
+export interface AppointmentEmailSettingsView {
+  enabled: boolean;
+  sender_name: string;
+  reply_to_email: string | null;
+  version: number;
+}
+
 export interface ServiceView {
   public_id: string;
   internal_code: string | null;
@@ -126,6 +133,7 @@ export interface PublicAppointmentConfirmationView {
   timezone: string;
   location_mode: ServiceView['delivery_mode'];
   replayed: boolean;
+  confirmation_email_queued: boolean;
 }
 
 export interface ProviderView {
@@ -321,6 +329,13 @@ export interface AppointmentView {
   };
   cancellation_reason?: string | null;
   cancellation_detail?: string | null;
+  email_notifications?: Array<{
+    public_id: string;
+    type: 'appointment_confirmation' | 'appointment_rescheduled' | 'appointment_cancelled';
+    status: 'pending' | 'processing' | 'sent' | 'failed';
+    created_at: string;
+    sent_at: string | null;
+  }>;
 }
 
 export function listAppointments(
@@ -502,6 +517,21 @@ export function updateBusinessProfile(
 
 export function getPublicBookingSettings(): Promise<PublicBookingSettingsView> {
   return request('/v1/admin/public-booking-settings');
+}
+
+export function getAppointmentEmailSettings(): Promise<AppointmentEmailSettingsView> {
+  return request('/v1/admin/appointment-email-settings');
+}
+
+export function updateAppointmentEmailSettings(
+  input: Omit<AppointmentEmailSettingsView, 'version'> & { expected_version: number },
+  csrfToken: string,
+): Promise<AppointmentEmailSettingsView & { changed: boolean }> {
+  return request('/v1/admin/appointment-email-settings', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+    headers: { 'x-csrf-token': csrfToken },
+  });
 }
 
 export function updatePublicBookingSettings(

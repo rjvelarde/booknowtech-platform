@@ -259,7 +259,7 @@ export function registerAppointmentRoutes(
               request.body.customer_address_public_id,
             );
             const now = new Date();
-            return store.insertAppointment(
+            const appointment = await store.insertAppointment(
               {
                 tenant_id: tenantId,
                 customer_id: subject.customer._id,
@@ -304,6 +304,16 @@ export function registerAppointmentRoutes(
               },
               session,
             );
+            await store.enqueueAppointmentEmail({
+              tenant: context.tenant!,
+              appointment,
+              customer: subject.customer,
+              provider: subject.provider,
+              type: 'appointment_confirmation',
+              requestId: request.id,
+              session,
+            });
+            return appointment;
           },
         );
         await appointmentAudit(store, context, request.id, 'appointment_created', item, {
@@ -405,7 +415,16 @@ export function registerAppointmentRoutes(
               session,
             });
             if (result !== 'updated') throw new AppointmentRuleError(409, 'version_conflict');
-            return (await store.getAppointment(tenantId, current.public_id, session))!;
+            const updated = (await store.getAppointment(tenantId, current.public_id, session))!;
+            await enqueueLifecycleEmail(
+              store,
+              context.tenant!,
+              updated,
+              'appointment_rescheduled',
+              request.id,
+              session,
+            );
+            return updated;
           },
         );
         await appointmentAudit(store, context, request.id, 'appointment_rescheduled', updated, {
@@ -529,8 +548,18 @@ async function transitionRoute(
           session,
         });
         if (result !== 'updated') throw new AppointmentRuleError(409, 'version_conflict');
+        const item = (await store.getAppointment(tenantId, current.public_id, session))!;
+        if (status === 'cancelled')
+          await enqueueLifecycleEmail(
+            store,
+            context.tenant!,
+            item,
+            'appointment_cancelled',
+            request.id,
+            session,
+          );
         return {
-          item: (await store.getAppointment(tenantId, current.public_id, session))!,
+          item,
           changed: true,
         };
       },
@@ -842,10 +871,11 @@ async function appointmentDetailView(
   tenantId: ObjectId,
   item: AppointmentDocument,
 ) {
-  const [customer, provider, service] = await Promise.all([
+  const [customer, provider, service, notifications] = await Promise.all([
     store.getCustomerById(tenantId, item.customer_id),
     store.getProviderById(tenantId, item.provider_id),
     store.getServiceById(tenantId, item.service_id),
+    store.listAppointmentNotifications(tenantId, item._id),
   ]);
   return {
     ...appointmentSummaryView(item),
@@ -870,7 +900,38 @@ async function appointmentDetailView(
     no_show_at: item.no_show_at?.toISOString() ?? null,
     created_at: item.created_at.toISOString(),
     updated_at: item.updated_at.toISOString(),
+    email_notifications: notifications.map((notification) => ({
+      public_id: notification.public_id,
+      type: notification.type,
+      status: notification.status === 'delivered' ? 'sent' : notification.status,
+      created_at: notification.created_at.toISOString(),
+      sent_at: notification.delivered_at?.toISOString() ?? null,
+    })),
   };
+}
+
+async function enqueueLifecycleEmail(
+  store: AdminStore,
+  tenant: NonNullable<VerifiedAdminContext['tenant']>,
+  appointment: AppointmentDocument,
+  type: 'appointment_rescheduled' | 'appointment_cancelled',
+  requestId: string,
+  session: ClientSession,
+) {
+  const [customer, provider] = await Promise.all([
+    store.getCustomerById(tenant._id, appointment.customer_id, session),
+    store.getProviderById(tenant._id, appointment.provider_id, session),
+  ]);
+  if (customer && provider)
+    await store.enqueueAppointmentEmail({
+      tenant,
+      appointment,
+      customer,
+      provider,
+      type,
+      requestId,
+      session,
+    });
 }
 
 function customerDisplayName(customer: Awaited<ReturnType<AdminStore['getCustomer']>> & {}) {

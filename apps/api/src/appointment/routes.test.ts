@@ -95,6 +95,7 @@ function contextFixture(role: RoleDocument['role']): VerifiedAdminContext {
       legal_name: null,
       contact: { email_normalized: null, phone_e164: null, website_url: null },
       public_booking_enabled: false,
+      appointment_email_settings: { enabled: false, sender_name: 'Tenant', reply_to_email: null },
       public_profile: {
         business_name: 'Tenant A',
         description: null,

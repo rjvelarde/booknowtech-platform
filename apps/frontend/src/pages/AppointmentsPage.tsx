@@ -440,6 +440,18 @@ function AppointmentDetail({
           <p className="pre-wrap">{item.snapshot.customer_note}</p>
         </div>
       ) : null}
+      {item.email_notifications?.length ? (
+        <div className="form-card">
+          <h3>Customer emails</h3>
+          <ul>
+            {item.email_notifications.map((notification) => (
+              <li key={notification.public_id}>
+                {notification.type.replaceAll('_', ' ')} — <strong>{notification.status}</strong>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {item.status === 'scheduled' ? (
         <>
           <div className="form-card stack-form">

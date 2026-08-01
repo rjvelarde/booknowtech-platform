@@ -1,7 +1,9 @@
 import pino from 'pino';
+import { MongoClient } from 'mongodb';
 
 import { loadWorkerEnvironment } from './config.js';
 import { createWorkerLifecycle } from './lifecycle.js';
+import { startNotificationWorker } from './notification-worker.js';
 
 async function start(): Promise<void> {
   const environment = loadWorkerEnvironment();
@@ -18,10 +20,19 @@ async function start(): Promise<void> {
     },
   });
   const lifecycle = createWorkerLifecycle(logger);
+  const mongo = new MongoClient(environment.MONGODB_URI);
+  await mongo.connect();
+  const notificationWorker = startNotificationWorker(
+    mongo.db(environment.MONGODB_DATABASE),
+    environment,
+    logger,
+  );
 
   logger.info({ event: 'service.started' });
   const signal = await lifecycle.waitForShutdown();
   logger.info({ event: 'service.stopping', signal });
+  await notificationWorker.stop();
+  await mongo.close();
   lifecycle.dispose();
   logger.info({ event: 'service.stopped' });
 }

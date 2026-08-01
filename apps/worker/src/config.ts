@@ -8,6 +8,11 @@ const environmentSchema = z.object({
     .min(1)
     .max(128)
     .regex(/^[a-zA-Z0-9._/-]+$/u),
+  MONGODB_URI: z.string().min(1),
+  MONGODB_DATABASE: z.string().min(1),
+  TRANSACTIONAL_EMAIL_PROVIDER: z.literal('postmark'),
+  TRANSACTIONAL_EMAIL_TOKEN: z.string().min(1),
+  TRANSACTIONAL_EMAIL_FROM: z.string().email(),
 });
 
 export type WorkerEnvironment = z.infer<typeof environmentSchema>;

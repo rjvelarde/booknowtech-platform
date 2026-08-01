@@ -95,6 +95,11 @@ async function main(): Promise<void> {
               acknowledgment_label: 'I agree to the booking terms for this appointment.',
               terms_url: null,
             },
+            appointment_email_settings: {
+              enabled: false,
+              sender_name: tenant.display_name,
+              reply_to_email: null,
+            },
             status: 'active',
             updated_at: now,
           },
