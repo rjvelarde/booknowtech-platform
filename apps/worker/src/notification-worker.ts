@@ -41,6 +41,10 @@ interface TenantEmailDocument {
 const MAX_ATTEMPTS = 5;
 const POLL_MILLISECONDS = 2_000;
 
+export function buildPostmarkMetadata(notificationPublicId: string): Record<string, string> {
+  return { notification_id: notificationPublicId };
+}
+
 export function startNotificationWorker(
   db: Db,
   environment: WorkerEnvironment,
@@ -130,7 +134,7 @@ async function processOne(
         HtmlBody: rendered.html,
         TextBody: rendered.text,
         MessageStream: 'outbound',
-        Metadata: { notification_public_id: item.public_id },
+        Metadata: buildPostmarkMetadata(item.public_id),
       }),
     });
     if (!response.ok) throw new Error(`provider_${response.status}`);
