@@ -2,8 +2,11 @@ import { useEffect, useState } from 'react';
 import type { InputHTMLAttributes } from 'react';
 
 import {
+  type AppointmentEmailSettingsView,
   type PublicBookingSettingsView,
+  getAppointmentEmailSettings,
   getPublicBookingSettings,
+  updateAppointmentEmailSettings,
   updatePublicBookingSettings,
 } from '../api/client.js';
 
@@ -15,15 +18,20 @@ export function PublicBookingSettingsPage({
   canManage: boolean;
 }) {
   const [settings, setSettings] = useState<PublicBookingSettingsView | null>(null);
+  const [emailSettings, setEmailSettings] = useState<AppointmentEmailSettingsView | null>(null);
   const [error, setError] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [emailSaved, setEmailSaved] = useState(false);
   useEffect(() => {
-    void getPublicBookingSettings()
-      .then(setSettings)
+    void Promise.all([getPublicBookingSettings(), getAppointmentEmailSettings()])
+      .then(([publicSettings, appointmentEmailSettings]) => {
+        setSettings(publicSettings);
+        setEmailSettings(appointmentEmailSettings);
+      })
       .catch(() => setError(true));
   }, []);
   if (error) return <p role="alert">Unable to load public booking settings.</p>;
-  if (!settings) return <p>Loading public booking settings…</p>;
+  if (!settings || !emailSettings) return <p>Loading public booking settings…</p>;
   return (
     <section aria-labelledby="public-booking-settings-title">
       <p className="eyebrow">Public discovery</p>
@@ -66,6 +74,9 @@ export function PublicBookingSettingsPage({
           )
             .then((next) => {
               setSettings(next);
+              setEmailSettings((current) =>
+                current ? { ...current, version: next.version } : current,
+              );
               setSaved(true);
             })
             .catch(() => setError(true));
@@ -177,6 +188,62 @@ export function PublicBookingSettingsPage({
         {saved ? (
           <p className="save-feedback success" role="status">
             Public booking settings saved.
+          </p>
+        ) : null}
+      </form>
+      <h2>Appointment emails</h2>
+      <p className="form-note">
+        Send branded appointment confirmations and lifecycle updates when a customer has an email
+        address.
+      </p>
+      <form
+        className="catalog-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setEmailSaved(false);
+          const values = new FormData(event.currentTarget);
+          void updateAppointmentEmailSettings(
+            {
+              expected_version: emailSettings.version,
+              enabled: values.get('email_enabled') === 'on',
+              sender_name: text(values, 'sender_name'),
+              reply_to_email: nullable(values, 'reply_to_email'),
+            },
+            csrfToken,
+          )
+            .then((next) => {
+              setEmailSettings(next);
+              setSettings((current) => (current ? { ...current, version: next.version } : current));
+              setEmailSaved(true);
+            })
+            .catch(() => setError(true));
+        }}
+      >
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            name="email_enabled"
+            defaultChecked={emailSettings.enabled}
+            disabled={!canManage}
+          />
+          <span>Send transactional appointment emails</span>
+        </label>
+        <Field
+          name="sender_name"
+          label="Sender name"
+          defaultValue={emailSettings.sender_name}
+          required
+        />
+        <Field
+          name="reply_to_email"
+          label="Reply-to email"
+          type="email"
+          defaultValue={emailSettings.reply_to_email ?? ''}
+        />
+        {canManage ? <button type="submit">Save appointment email settings</button> : null}
+        {emailSaved ? (
+          <p className="save-feedback success" role="status">
+            Appointment email settings saved.
           </p>
         ) : null}
       </form>

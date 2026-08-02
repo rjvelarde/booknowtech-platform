@@ -537,7 +537,16 @@ export function registerPublicBookingRoutes(
               },
               session,
             );
-            return { appointment, provider, replayed: false };
+            const confirmationEmailQueued = await store.enqueueAppointmentEmail({
+              tenant: currentTenant,
+              appointment,
+              customer,
+              provider,
+              type: 'appointment_confirmation',
+              requestId: request.id,
+              session,
+            });
+            return { appointment, provider, replayed: false, confirmationEmailQueued };
           },
         );
         if (!result.replayed) {
@@ -558,7 +567,13 @@ export function registerPublicBookingRoutes(
           .status(result.replayed ? 200 : 201)
           .send(
             envelope(
-              publicConfirmation(result.appointment, tenant, result.provider, result.replayed),
+              publicConfirmation(
+                result.appointment,
+                tenant,
+                result.provider,
+                result.replayed,
+                'confirmationEmailQueued' in result ? result.confirmationEmailQueued : false,
+              ),
               request.id,
             ),
           );
@@ -961,6 +976,7 @@ function publicConfirmation(
   tenant: TenantDocument,
   provider: ProviderDocument | null,
   replayed: boolean,
+  confirmationEmailQueued = false,
 ) {
   return {
     appointment_reference: item.reference,
@@ -980,6 +996,7 @@ function publicConfirmation(
     timezone: item.timezone,
     location_mode: item.location.mode,
     replayed,
+    confirmation_email_queued: confirmationEmailQueued,
   };
 }
 

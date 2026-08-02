@@ -245,6 +245,7 @@ function tenantFixture(): TenantDocument {
       website_url: 'https://private.example.test',
     },
     public_booking_enabled: true,
+    appointment_email_settings: { enabled: false, sender_name: 'Tenant', reply_to_email: null },
     public_profile: {
       business_name: 'Brazilian Wax Demo',
       description: 'Appointment-based waxing services.',

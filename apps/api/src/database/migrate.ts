@@ -18,6 +18,7 @@ const validators: Record<string, Document> = {
         'public_profile',
         'booking_policy',
         'public_booking_terms',
+        'appointment_email_settings',
         'version',
         'updated_by',
         'status',
@@ -69,6 +70,15 @@ const validators: Record<string, Document> = {
             version: { bsonType: 'string', minLength: 1, maxLength: 64 },
             acknowledgment_label: { bsonType: 'string', minLength: 1, maxLength: 300 },
             terms_url: { bsonType: ['string', 'null'], maxLength: 2048, pattern: '^https://' },
+          },
+        },
+        appointment_email_settings: {
+          bsonType: 'object',
+          required: ['enabled', 'sender_name', 'reply_to_email'],
+          properties: {
+            enabled: { bsonType: 'bool' },
+            sender_name: { bsonType: 'string', minLength: 1, maxLength: 120 },
+            reply_to_email: { bsonType: ['string', 'null'], maxLength: 320 },
           },
         },
         default_slot_cadence_minutes: { enum: [5, 10, 15, 20, 30, 60] },
@@ -125,6 +135,65 @@ const validators: Record<string, Document> = {
       bsonType: 'object',
       required: ['public_id', 'event', 'outcome', 'request_id', 'metadata', 'created_at'],
       properties: { outcome: { enum: ['success', 'failure'] } },
+    },
+  },
+  notification_outbox: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: [
+        'public_id',
+        'tenant_id',
+        'appointment_id',
+        'appointment_public_id',
+        'appointment_reference',
+        'type',
+        'channel',
+        'recipient',
+        'template_data',
+        'status',
+        'attempt_count',
+        'next_attempt_at',
+        'processing_started_at',
+        'delivered_at',
+        'failed_at',
+        'provider_message_id',
+        'last_error_code',
+        'request_id',
+        'created_at',
+        'updated_at',
+      ],
+      properties: {
+        type: {
+          enum: ['appointment_confirmation', 'appointment_rescheduled', 'appointment_cancelled'],
+        },
+        channel: { enum: ['email'] },
+        status: { enum: ['pending', 'processing', 'delivered', 'failed'] },
+        recipient: { bsonType: 'string', minLength: 3, maxLength: 320 },
+        attempt_count: { bsonType: ['int', 'long'], minimum: 0 },
+        template_data: {
+          bsonType: 'object',
+          required: [
+            'business_name',
+            'business_logo_url',
+            'business_phone',
+            'business_email',
+            'business_website',
+            'customer_name',
+            'provider_name',
+            'provider_photo_url',
+            'service_name',
+            'starts_at',
+            'ends_at',
+            'timezone',
+            'location_mode',
+          ],
+          properties: {
+            starts_at: { bsonType: 'date' },
+            ends_at: { bsonType: 'date' },
+            location_mode: { enum: ['provider_location', 'customer_location', 'virtual'] },
+          },
+        },
+      },
     },
   },
   services: {
@@ -613,7 +682,7 @@ const validators: Record<string, Document> = {
             public_submission: { bsonType: 'object' },
             booking_terms: { bsonType: 'object' },
             created_by: { bsonType: 'null' },
-            updated_by: { bsonType: 'null' },
+            updated_by: { bsonType: ['objectId', 'null'] },
           },
         },
       ],
@@ -679,6 +748,12 @@ export async function migrateDatabase(db: Db): Promise<void> {
                 acknowledgment_label: 'I agree to the booking and cancellation terms.',
                 terms_url: null,
               },
+            ],
+          },
+          appointment_email_settings: {
+            $ifNull: [
+              '$appointment_email_settings',
+              { enabled: false, sender_name: '$display_name', reply_to_email: null },
             ],
           },
         },
@@ -990,5 +1065,16 @@ export async function migrateDatabase(db: Db): Promise<void> {
       unique: true,
     },
     { key: { updated_at: 1 }, name: 'appointment_schedule_locks_updated' },
+  ]);
+  await db.collection('notification_outbox').createIndexes([
+    { key: { public_id: 1 }, name: 'notification_outbox_public_id_unique', unique: true },
+    {
+      key: { status: 1, next_attempt_at: 1, created_at: 1 },
+      name: 'notification_outbox_worker_poll',
+    },
+    {
+      key: { tenant_id: 1, appointment_id: 1, created_at: -1 },
+      name: 'notification_outbox_appointment_history',
+    },
   ]);
 }

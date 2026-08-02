@@ -39,6 +39,11 @@ export interface TenantDocument {
     acknowledgment_label: string;
     terms_url: string | null;
   };
+  appointment_email_settings: {
+    enabled: boolean;
+    sender_name: string;
+    reply_to_email: string | null;
+  };
   version: number;
   updated_by: ObjectId | null;
   status: 'active' | 'suspended';
@@ -260,6 +265,47 @@ export interface AppointmentDocument {
   updated_by: ObjectId | null;
 }
 
+export type AppointmentEmailType =
+  'appointment_confirmation' | 'appointment_rescheduled' | 'appointment_cancelled';
+
+export interface NotificationOutboxDocument {
+  _id: ObjectId;
+  public_id: string;
+  tenant_id: ObjectId;
+  appointment_id: ObjectId;
+  appointment_public_id: string;
+  appointment_reference: string;
+  type: AppointmentEmailType;
+  channel: 'email';
+  recipient: string;
+  template_data: {
+    business_name: string;
+    business_logo_url: string | null;
+    business_phone: string | null;
+    business_email: string | null;
+    business_website: string | null;
+    customer_name: string;
+    provider_name: string;
+    provider_photo_url: string | null;
+    service_name: string;
+    starts_at: Date;
+    ends_at: Date;
+    timezone: string;
+    location_mode: DeliveryMode;
+  };
+  status: 'pending' | 'processing' | 'delivered' | 'failed';
+  attempt_count: number;
+  next_attempt_at: Date;
+  processing_started_at: Date | null;
+  delivered_at: Date | null;
+  failed_at: Date | null;
+  provider_message_id: string | null;
+  last_error_code: string | null;
+  request_id: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
 export interface AppointmentCursor {
   startsAt: Date;
   publicId: string;
@@ -365,6 +411,7 @@ export class AdminStore {
   private readonly customers: Collection<CustomerDocument>;
   private readonly appointments: Collection<AppointmentDocument>;
   private readonly appointmentScheduleLocks: Collection<AppointmentScheduleLockDocument>;
+  private readonly notificationOutbox: Collection<NotificationOutboxDocument>;
 
   public constructor(private readonly database: Db) {
     const db = database;
@@ -385,6 +432,7 @@ export class AdminStore {
     this.appointmentScheduleLocks = db.collection<AppointmentScheduleLockDocument>(
       'appointment_schedule_locks',
     );
+    this.notificationOutbox = db.collection<NotificationOutboxDocument>('notification_outbox');
   }
 
   public findUserByEmail(email: string): Promise<UserDocument | null> {
@@ -556,6 +604,95 @@ export class AdminStore {
       },
     );
     return result.modifiedCount === 1 ? 'updated' : 'version_conflict';
+  }
+
+  public async updateAppointmentEmailSettings(input: {
+    tenantId: ObjectId;
+    userId: ObjectId;
+    expectedVersion: number;
+    settings: TenantDocument['appointment_email_settings'];
+  }): Promise<'updated' | 'unchanged' | 'version_conflict' | 'not_found'> {
+    const current = await this.getBusinessProfile(input.tenantId);
+    if (!current) return 'not_found';
+    if (JSON.stringify(current.appointment_email_settings) === JSON.stringify(input.settings))
+      return 'unchanged';
+    const result = await this.tenants.updateOne(
+      { _id: input.tenantId, status: 'active', version: input.expectedVersion },
+      {
+        $set: {
+          appointment_email_settings: input.settings,
+          updated_by: input.userId,
+          updated_at: new Date(),
+        },
+        $inc: { version: 1 },
+      },
+    );
+    return result.modifiedCount === 1 ? 'updated' : 'version_conflict';
+  }
+
+  public async enqueueAppointmentEmail(input: {
+    tenant: TenantDocument;
+    appointment: AppointmentDocument;
+    customer: CustomerDocument;
+    provider: ProviderDocument;
+    type: AppointmentEmailType;
+    requestId: string;
+    session: ClientSession;
+  }): Promise<boolean> {
+    if (!input.tenant.appointment_email_settings.enabled || !input.customer.email_normalized)
+      return false;
+    const now = new Date();
+    await this.notificationOutbox.insertOne(
+      {
+        _id: new ObjectId(),
+        public_id: randomUUID(),
+        tenant_id: input.tenant._id,
+        appointment_id: input.appointment._id,
+        appointment_public_id: input.appointment.public_id,
+        appointment_reference: input.appointment.reference,
+        type: input.type,
+        channel: 'email',
+        recipient: input.customer.email_normalized,
+        template_data: {
+          business_name: input.tenant.public_profile.business_name,
+          business_logo_url: input.tenant.public_profile.logo_url,
+          business_phone: input.tenant.public_profile.phone_e164,
+          business_email: input.tenant.public_profile.email_normalized,
+          business_website: input.tenant.public_profile.website_url,
+          customer_name: input.appointment.snapshot.customer_display_name,
+          provider_name: input.appointment.snapshot.provider_display_name,
+          provider_photo_url: input.provider.photo_url,
+          service_name: input.appointment.snapshot.service_name,
+          starts_at: input.appointment.starts_at,
+          ends_at: input.appointment.ends_at,
+          timezone: input.appointment.timezone,
+          location_mode: input.appointment.location.mode,
+        },
+        status: 'pending',
+        attempt_count: 0,
+        next_attempt_at: now,
+        processing_started_at: null,
+        delivered_at: null,
+        failed_at: null,
+        provider_message_id: null,
+        last_error_code: null,
+        request_id: input.requestId,
+        created_at: now,
+        updated_at: now,
+      },
+      { session: input.session },
+    );
+    return true;
+  }
+
+  public listAppointmentNotifications(
+    tenantId: ObjectId,
+    appointmentId: ObjectId,
+  ): Promise<NotificationOutboxDocument[]> {
+    return this.notificationOutbox
+      .find({ tenant_id: tenantId, appointment_id: appointmentId })
+      .sort({ created_at: -1, public_id: -1 })
+      .toArray();
   }
 
   public async updateBusinessProfile(input: {

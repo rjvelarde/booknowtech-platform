@@ -519,8 +519,9 @@ function ConfirmationCard({ confirmation }: { confirmation: PublicAppointmentCon
         Reference: <strong>{confirmation.appointment_reference}</strong>
       </p>
       <p>
-        Email and text confirmations are not available yet. Please save this reference or take a
-        screenshot.
+        {confirmation.confirmation_email_queued
+          ? 'We’ll send your appointment details to the email address you provided.'
+          : 'Please save this reference or take a screenshot.'}
       </p>
     </section>
   );
