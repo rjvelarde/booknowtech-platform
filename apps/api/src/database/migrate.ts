@@ -682,7 +682,7 @@ const validators: Record<string, Document> = {
             public_submission: { bsonType: 'object' },
             booking_terms: { bsonType: 'object' },
             created_by: { bsonType: 'null' },
-            updated_by: { bsonType: 'null' },
+            updated_by: { bsonType: ['objectId', 'null'] },
           },
         },
       ],

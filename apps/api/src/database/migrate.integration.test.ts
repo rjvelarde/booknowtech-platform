@@ -244,4 +244,84 @@ suite('administrative foundation migration', () => {
       ]),
     );
   });
+
+  it('permits authenticated staff to update an appointment created through public booking', async () => {
+    await migrateDatabase(db);
+
+    const now = new Date();
+    const appointmentId = new ObjectId();
+
+    await db.collection('appointments').insertOne({
+      _id: appointmentId,
+      public_id: randomUUID(),
+      reference: `BNT-${randomUUID().replaceAll('-', '').slice(0, 8).toUpperCase()}`,
+      tenant_id: new ObjectId(),
+      customer_id: new ObjectId(),
+      provider_id: new ObjectId(),
+      service_id: new ObjectId(),
+      provider_service_assignment_id: new ObjectId(),
+      starts_at: new Date('2026-08-20T14:00:00.000Z'),
+      ends_at: new Date('2026-08-20T14:30:00.000Z'),
+      blocked_starts_at: new Date('2026-08-20T14:00:00.000Z'),
+      blocked_ends_at: new Date('2026-08-20T14:30:00.000Z'),
+      timezone: 'America/New_York',
+      local_start_date: '2026-08-20',
+      snapshot: {
+        customer_display_name: 'Public Customer',
+        provider_display_name: 'Lisa',
+        service_name: 'Brazilian Wax',
+        service_duration_minutes: 30,
+        slot_cadence_minutes: 15,
+        buffer_before_minutes: 0,
+        buffer_after_minutes: 0,
+        delivery_mode: 'provider_location',
+        base_price_minor: 5500,
+        booking_fee_minor: 125,
+        currency: 'USD',
+        customer_note: null,
+      },
+      location: { mode: 'provider_location', customer_address: null },
+      status: 'scheduled',
+      source: 'public_booking',
+      public_submission: {
+        idempotency_key_hash: 'a'.repeat(64),
+        request_fingerprint: 'b'.repeat(64),
+      },
+      booking_terms: { version: 'staging-v1', accepted_at: now },
+      cancelled_at: null,
+      cancelled_by: null,
+      cancellation_reason: null,
+      cancellation_detail: null,
+      completed_at: null,
+      completed_by: null,
+      no_show_at: null,
+      no_show_by: null,
+      version: 1,
+      created_at: now,
+      updated_at: now,
+      created_by: null,
+      updated_by: null,
+    });
+
+    const staffUserId = new ObjectId();
+    await expect(
+      db.collection('appointments').updateOne(
+        { _id: appointmentId, version: 1 },
+        {
+          $set: { updated_by: staffUserId, updated_at: new Date() },
+          $inc: { version: 1 },
+        },
+      ),
+    ).resolves.toMatchObject({ modifiedCount: 1 });
+
+    const updatedAppointment = await db.collection('appointments').findOne({
+      _id: appointmentId,
+    });
+    expect(updatedAppointment).toMatchObject({
+      source: 'public_booking',
+      created_by: null,
+      version: 2,
+    });
+    expect(updatedAppointment?.updated_by).toEqual(staffUserId);
+  });
 });
