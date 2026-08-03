@@ -130,7 +130,7 @@ describe('public appointment management routes', () => {
     const response = await app.inject({
       method: 'GET',
       url: `/api/v1/public/appointments/manage/${publicId}`,
-      headers: { host: 'tenant.example.test', authorization: `AppointmentToken ${credential}` },
+      headers: { host: 'tenant.booknowtech.com', authorization: `AppointmentToken ${credential}` },
     });
     expect(response.statusCode).toBe(200);
     expect(response.body).toContain('Safe Business');

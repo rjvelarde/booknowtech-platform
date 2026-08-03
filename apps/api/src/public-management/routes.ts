@@ -546,7 +546,8 @@ function appointmentCredential(value: string | undefined) {
 }
 function hostnameSlug(hostname: string) {
   const host = hostname.toLowerCase().split(':')[0]!;
-  if (host.endsWith('.booknowtech.com')) return host.slice(0, -18);
+  const productionSuffix = '.booknowtech.com';
+  if (host.endsWith(productionSuffix)) return host.slice(0, -productionSuffix.length);
   if (host.endsWith('.example.test')) return host.split('.')[0] ?? null;
   if (host.endsWith('.localhost')) return host.split('.')[0] ?? null;
   return null;
