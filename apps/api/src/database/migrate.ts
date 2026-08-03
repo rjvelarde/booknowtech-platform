@@ -19,6 +19,7 @@ const validators: Record<string, Document> = {
         'booking_policy',
         'public_booking_terms',
         'appointment_email_settings',
+        'appointment_self_service',
         'version',
         'updated_by',
         'status',
@@ -79,6 +80,15 @@ const validators: Record<string, Document> = {
             enabled: { bsonType: 'bool' },
             sender_name: { bsonType: 'string', minLength: 1, maxLength: 120 },
             reply_to_email: { bsonType: ['string', 'null'], maxLength: 320 },
+          },
+        },
+        appointment_self_service: {
+          bsonType: 'object',
+          required: ['enabled', 'cancellation_cutoff_minutes', 'reschedule_cutoff_minutes'],
+          properties: {
+            enabled: { bsonType: 'bool' },
+            cancellation_cutoff_minutes: { bsonType: ['int', 'long'], minimum: 0, maximum: 10080 },
+            reschedule_cutoff_minutes: { bsonType: ['int', 'long'], minimum: 0, maximum: 10080 },
           },
         },
         default_slot_cadence_minutes: { enum: [5, 10, 15, 20, 30, 60] },
@@ -150,6 +160,7 @@ const validators: Record<string, Document> = {
         'channel',
         'recipient',
         'template_data',
+        'appointment_access',
         'status',
         'attempt_count',
         'next_attempt_at',
@@ -163,6 +174,14 @@ const validators: Record<string, Document> = {
         'updated_at',
       ],
       properties: {
+        appointment_access: {
+          bsonType: ['object', 'null'],
+          required: ['token_public_id', 'generation'],
+          properties: {
+            token_public_id: { bsonType: 'string', minLength: 1 },
+            generation: { bsonType: ['int', 'long'], minimum: 1 },
+          },
+        },
         type: {
           enum: ['appointment_confirmation', 'appointment_rescheduled', 'appointment_cancelled'],
         },
@@ -214,6 +233,7 @@ const validators: Record<string, Document> = {
         'publicly_bookable',
         'public_display_order',
         'public_booking_policy',
+        'public_self_service_policy',
         'status',
         'version',
         'created_by',
@@ -222,6 +242,22 @@ const validators: Record<string, Document> = {
         'updated_at',
       ],
       properties: {
+        public_self_service_policy: {
+          bsonType: 'object',
+          required: ['cancellation_cutoff_minutes', 'reschedule_cutoff_minutes'],
+          properties: {
+            cancellation_cutoff_minutes: {
+              bsonType: ['int', 'long', 'null'],
+              minimum: 0,
+              maximum: 10080,
+            },
+            reschedule_cutoff_minutes: {
+              bsonType: ['int', 'long', 'null'],
+              minimum: 0,
+              maximum: 10080,
+            },
+          },
+        },
         tenant_id: { bsonType: 'objectId' },
         internal_code: {
           bsonType: ['string', 'null'],
@@ -688,6 +724,65 @@ const validators: Record<string, Document> = {
       ],
     },
   },
+  appointment_public_access_tokens: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: [
+        'public_id',
+        'tenant_id',
+        'tenant_public_id',
+        'appointment_id',
+        'appointment_public_id',
+        'purpose',
+        'generation',
+        'token_hash',
+        'status',
+        'issued_at',
+        'expires_at',
+        'consumed_at',
+        'revoked_at',
+        'created_at',
+        'updated_at',
+        'purge_at',
+        'mutation',
+      ],
+      properties: {
+        public_id: { bsonType: 'string', minLength: 1 },
+        tenant_id: { bsonType: 'objectId' },
+        tenant_public_id: { bsonType: 'string', minLength: 1 },
+        appointment_id: { bsonType: 'objectId' },
+        appointment_public_id: { bsonType: 'string', minLength: 1 },
+        purpose: { enum: ['appointment_manage'] },
+        generation: { bsonType: ['int', 'long'], minimum: 1 },
+        token_hash: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+        status: { enum: ['active', 'consumed', 'revoked', 'expired'] },
+        issued_at: { bsonType: 'date' },
+        expires_at: { bsonType: 'date' },
+        consumed_at: { bsonType: ['date', 'null'] },
+        revoked_at: { bsonType: ['date', 'null'] },
+        created_at: { bsonType: 'date' },
+        updated_at: { bsonType: 'date' },
+        purge_at: { bsonType: 'date' },
+        mutation: {
+          bsonType: ['object', 'null'],
+          required: [
+            'type',
+            'idempotency_key_hash',
+            'request_fingerprint',
+            'result_appointment_version',
+            'replacement_token_public_id',
+          ],
+          properties: {
+            type: { enum: ['reschedule', 'cancel'] },
+            idempotency_key_hash: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+            request_fingerprint: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+            result_appointment_version: { bsonType: ['int', 'long'], minimum: 1 },
+            replacement_token_public_id: { bsonType: ['string', 'null'] },
+          },
+        },
+      },
+    },
+  },
   appointment_schedule_locks: {
     $jsonSchema: {
       bsonType: 'object',
@@ -756,6 +851,16 @@ export async function migrateDatabase(db: Db): Promise<void> {
               { enabled: false, sender_name: '$display_name', reply_to_email: null },
             ],
           },
+          appointment_self_service: {
+            $ifNull: [
+              '$appointment_self_service',
+              {
+                enabled: false,
+                cancellation_cutoff_minutes: 1440,
+                reschedule_cutoff_minutes: 1440,
+              },
+            ],
+          },
         },
       },
     ]);
@@ -773,6 +878,12 @@ export async function migrateDatabase(db: Db): Promise<void> {
               { minimum_lead_minutes: null, maximum_advance_days: null },
             ],
           },
+          public_self_service_policy: {
+            $ifNull: [
+              '$public_self_service_policy',
+              { cancellation_cutoff_minutes: null, reschedule_cutoff_minutes: null },
+            ],
+          },
         },
       },
     ]);
@@ -787,6 +898,14 @@ export async function migrateDatabase(db: Db): Promise<void> {
         },
       },
     ]);
+  }
+  if (existing.has('notification_outbox')) {
+    await db
+      .collection('notification_outbox')
+      .updateMany(
+        { appointment_access: { $exists: false } },
+        { $set: { appointment_access: null } },
+      );
   }
   if (existing.has('provider_service_assignments')) {
     await db.collection('provider_service_assignments').updateMany(
@@ -1065,6 +1184,21 @@ export async function migrateDatabase(db: Db): Promise<void> {
       unique: true,
     },
     { key: { updated_at: 1 }, name: 'appointment_schedule_locks_updated' },
+  ]);
+  await db.collection('appointment_public_access_tokens').createIndexes([
+    { key: { public_id: 1 }, name: 'appointment_access_public_id_unique', unique: true },
+    { key: { token_hash: 1 }, name: 'appointment_access_token_hash_unique', unique: true },
+    {
+      key: { tenant_id: 1, appointment_id: 1, purpose: 1, status: 1 },
+      name: 'appointment_access_lookup',
+    },
+    {
+      key: { tenant_id: 1, appointment_id: 1, purpose: 1 },
+      name: 'appointment_access_one_active',
+      unique: true,
+      partialFilterExpression: { status: 'active' },
+    },
+    { key: { purge_at: 1 }, name: 'appointment_access_purge_ttl', expireAfterSeconds: 0 },
   ]);
   await db.collection('notification_outbox').createIndexes([
     { key: { public_id: 1 }, name: 'notification_outbox_public_id_unique', unique: true },

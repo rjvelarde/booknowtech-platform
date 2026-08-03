@@ -5,7 +5,8 @@
     "noEmit": false,
     "outDir": "dist",
     "rootDir": "src",
-    "sourceMap": true
+    "sourceMap": true,
+    "paths": {}
   },
   "exclude": ["src/**/*.test.ts", "src/**/*.integration.test.ts"]
 }

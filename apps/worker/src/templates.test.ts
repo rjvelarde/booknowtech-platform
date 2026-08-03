@@ -32,4 +32,14 @@ describe('renderAppointmentEmail', () => {
     expect(result.html).toContain('Avery &amp; Co');
     expect(result.text).toContain('Brazilian Wax with Lisa');
   });
+
+  it('adds the management CTA and plaintext URL only when supplied', () => {
+    const url = 'https://tenant.booknowtech.com/appointments/manage/token#token=secret';
+    const linked = renderAppointmentEmail('appointment_confirmation', 'BNT-ABC12345', data, url);
+    const unlinked = renderAppointmentEmail('appointment_confirmation', 'BNT-ABC12345', data);
+    expect(linked.html).toContain('Manage appointment');
+    expect(linked.text).toContain(url);
+    expect(unlinked.html).not.toContain('Manage appointment');
+    expect(unlinked.text).not.toContain('/appointments/manage/');
+  });
 });

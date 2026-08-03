@@ -246,6 +246,11 @@ function tenantFixture(): TenantDocument {
     },
     public_booking_enabled: true,
     appointment_email_settings: { enabled: false, sender_name: 'Tenant', reply_to_email: null },
+    appointment_self_service: {
+      enabled: false,
+      cancellation_cutoff_minutes: 1440,
+      reschedule_cutoff_minutes: 1440,
+    },
     public_profile: {
       business_name: 'Brazilian Wax Demo',
       description: 'Appointment-based waxing services.',
@@ -294,6 +299,10 @@ function serviceFixture(tenantId: ObjectId): ServiceDocument {
     publicly_bookable: true,
     public_display_order: 10,
     public_booking_policy: { minimum_lead_minutes: null, maximum_advance_days: null },
+    public_self_service_policy: {
+      cancellation_cutoff_minutes: null,
+      reschedule_cutoff_minutes: null,
+    },
     version: 2,
     created_by: actor,
     updated_by: actor,

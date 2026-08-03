@@ -312,6 +312,7 @@ export function registerAppointmentRoutes(
               type: 'appointment_confirmation',
               requestId: request.id,
               session,
+              tokenSecret: environment.PUBLIC_APPOINTMENT_TOKEN_SECRET,
             });
             return appointment;
           },
@@ -423,6 +424,7 @@ export function registerAppointmentRoutes(
               'appointment_rescheduled',
               request.id,
               session,
+              environment.PUBLIC_APPOINTMENT_TOKEN_SECRET,
             );
             return updated;
           },
@@ -557,6 +559,7 @@ async function transitionRoute(
             'appointment_cancelled',
             request.id,
             session,
+            environment.PUBLIC_APPOINTMENT_TOKEN_SECRET,
           );
         return {
           item,
@@ -917,6 +920,7 @@ async function enqueueLifecycleEmail(
   type: 'appointment_rescheduled' | 'appointment_cancelled',
   requestId: string,
   session: ClientSession,
+  tokenSecret: string,
 ) {
   const [customer, provider] = await Promise.all([
     store.getCustomerById(tenant._id, appointment.customer_id, session),
@@ -931,6 +935,7 @@ async function enqueueLifecycleEmail(
       type,
       requestId,
       session,
+      tokenSecret,
     });
 }
 

@@ -105,6 +105,7 @@ interface PublicSettingsBody {
   public_profile: TenantDocument['public_profile'];
   booking_policy: TenantDocument['booking_policy'];
   public_booking_terms: TenantDocument['public_booking_terms'];
+  appointment_self_service: TenantDocument['appointment_self_service'];
 }
 
 interface ServicePublicSettingsBody {
@@ -112,6 +113,7 @@ interface ServicePublicSettingsBody {
   publicly_bookable: boolean;
   public_display_order: number;
   public_booking_policy: ServiceDocument['public_booking_policy'];
+  public_self_service_policy: ServiceDocument['public_self_service_policy'];
 }
 
 interface PublicAppointmentBody {
@@ -545,6 +547,7 @@ export function registerPublicBookingRoutes(
               type: 'appointment_confirmation',
               requestId: request.id,
               session,
+              tokenSecret: environment.PUBLIC_APPOINTMENT_TOKEN_SECRET,
             });
             return { appointment, provider, replayed: false, confirmationEmailQueued };
           },
@@ -681,7 +684,9 @@ function registerAdministrativeConfiguration(
         service.publicly_bookable === request.body.publicly_bookable &&
         service.public_display_order === request.body.public_display_order &&
         JSON.stringify(service.public_booking_policy) ===
-          JSON.stringify(request.body.public_booking_policy)
+          JSON.stringify(request.body.public_booking_policy) &&
+        JSON.stringify(service.public_self_service_policy) ===
+          JSON.stringify(request.body.public_self_service_policy)
       )
         return reply.send(envelope({ ...adminServiceView(service), changed: false }, request.id));
       const result = await store.updateService({
@@ -693,6 +698,7 @@ function registerAdministrativeConfiguration(
           publicly_bookable: request.body.publicly_bookable,
           public_display_order: request.body.public_display_order,
           public_booking_policy: request.body.public_booking_policy,
+          public_self_service_policy: request.body.public_self_service_policy,
         },
       });
       if (result === 'not_found') return adminNotFound(reply, request.id);
@@ -1246,6 +1252,7 @@ function adminSettingsView(tenant: TenantDocument) {
     public_profile: tenant.public_profile,
     booking_policy: tenant.booking_policy,
     public_booking_terms: tenant.public_booking_terms,
+    appointment_self_service: tenant.appointment_self_service,
     version: tenant.version,
   };
 }
@@ -1260,6 +1267,7 @@ function normalizePublicSettings(body: PublicSettingsBody, tenant: TenantDocumen
     !businessName ||
     businessName.length > 120 ||
     !validPolicy(body.booking_policy) ||
+    !validSelfServicePolicy(body.appointment_self_service, false) ||
     !validTerms(body.public_booking_terms) ||
     !validNullable(profile.description, 1000) ||
     !validNullable(profile.tagline, 160) ||
@@ -1296,6 +1304,7 @@ function normalizePublicSettings(body: PublicSettingsBody, tenant: TenantDocumen
       acknowledgment_label: body.public_booking_terms.acknowledgment_label.trim(),
       terms_url: normalizeNullable(body.public_booking_terms.terms_url),
     },
+    appointment_self_service: body.appointment_self_service,
   };
 }
 
@@ -1319,7 +1328,25 @@ function validServiceSettings(body: ServicePublicSettingsBody) {
     Number.isInteger(body.public_display_order) &&
     body.public_display_order >= 0 &&
     body.public_display_order <= 100000 &&
-    validNullablePolicy(body.public_booking_policy)
+    validNullablePolicy(body.public_booking_policy) &&
+    validSelfServicePolicy(body.public_self_service_policy, true)
+  );
+}
+
+function validSelfServicePolicy(
+  policy:
+    TenantDocument['appointment_self_service'] | ServiceDocument['public_self_service_policy'],
+  nullable: boolean,
+) {
+  const valid = (value: number | null) =>
+    (nullable && value === null) ||
+    (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 10080);
+  return (
+    Boolean(policy && typeof policy === 'object') &&
+    valid(policy.cancellation_cutoff_minutes) &&
+    valid(policy.reschedule_cutoff_minutes) &&
+    (nullable ||
+      typeof (policy as TenantDocument['appointment_self_service']).enabled === 'boolean')
   );
 }
 
@@ -1412,6 +1439,7 @@ function adminServiceView(service: ServiceDocument) {
     publicly_bookable: service.publicly_bookable,
     public_display_order: service.public_display_order,
     public_booking_policy: service.public_booking_policy,
+    public_self_service_policy: service.public_self_service_policy,
     version: service.version,
   };
 }

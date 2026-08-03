@@ -245,6 +245,134 @@ suite('administrative foundation migration', () => {
     );
   });
 
+  it('creates public appointment access token uniqueness, lookup, and TTL indexes', async () => {
+    expect(
+      (await db.collection('appointment_public_access_tokens').indexes()).map(({ name }) => name),
+    ).toEqual(
+      expect.arrayContaining([
+        'appointment_access_public_id_unique',
+        'appointment_access_token_hash_unique',
+        'appointment_access_lookup',
+        'appointment_access_one_active',
+        'appointment_access_purge_ttl',
+      ]),
+    );
+  });
+
+  it('rolls back token and outbox issuance together when the transaction fails', async () => {
+    const session = client.startSession();
+    const tokenId = randomUUID();
+    const noticeId = randomUUID();
+    const now = new Date();
+    await expect(
+      session.withTransaction(async () => {
+        await db.collection('appointment_public_access_tokens').insertOne(
+          {
+            public_id: tokenId,
+            tenant_id: new ObjectId(),
+            tenant_public_id: randomUUID(),
+            appointment_id: new ObjectId(),
+            appointment_public_id: randomUUID(),
+            purpose: 'appointment_manage',
+            generation: 1,
+            token_hash: 'a'.repeat(64),
+            status: 'active',
+            issued_at: now,
+            expires_at: new Date(now.valueOf() + 86_400_000),
+            consumed_at: null,
+            revoked_at: null,
+            created_at: now,
+            updated_at: now,
+            purge_at: new Date(now.valueOf() + 100 * 86_400_000),
+            mutation: null,
+          },
+          { session },
+        );
+        await db.collection('notification_outbox').insertOne(
+          {
+            public_id: noticeId,
+            tenant_id: new ObjectId(),
+            appointment_id: new ObjectId(),
+            appointment_public_id: randomUUID(),
+            appointment_reference: 'BNT-1234ABCD',
+            type: 'appointment_confirmation',
+            channel: 'email',
+            recipient: 'customer@example.test',
+            template_data: {
+              business_name: 'Business',
+              business_logo_url: null,
+              business_phone: null,
+              business_email: null,
+              business_website: null,
+              customer_name: 'Customer',
+              provider_name: 'Provider',
+              provider_photo_url: null,
+              service_name: 'Service',
+              starts_at: now,
+              ends_at: new Date(now.valueOf() + 3_600_000),
+              timezone: 'UTC',
+              location_mode: 'provider_location',
+            },
+            appointment_access: { token_public_id: tokenId, generation: 1 },
+            status: 'pending',
+            attempt_count: 0,
+            next_attempt_at: now,
+            processing_started_at: null,
+            delivered_at: null,
+            failed_at: null,
+            provider_message_id: null,
+            last_error_code: null,
+            request_id: randomUUID(),
+            created_at: now,
+            updated_at: now,
+          },
+          { session },
+        );
+        throw new Error('force rollback');
+      }),
+    ).rejects.toThrow('force rollback');
+    await session.endSession();
+    expect(
+      await db
+        .collection('appointment_public_access_tokens')
+        .countDocuments({ public_id: tokenId }),
+    ).toBe(0);
+    expect(await db.collection('notification_outbox').countDocuments({ public_id: noticeId })).toBe(
+      0,
+    );
+  });
+
+  it('enforces one active management token per appointment under concurrent issuance', async () => {
+    const tenantId = new ObjectId();
+    const appointmentId = new ObjectId();
+    const now = new Date();
+    const token = (suffix: string) => ({
+      public_id: randomUUID(),
+      tenant_id: tenantId,
+      tenant_public_id: randomUUID(),
+      appointment_id: appointmentId,
+      appointment_public_id: randomUUID(),
+      purpose: 'appointment_manage',
+      generation: 1,
+      token_hash: suffix.repeat(64),
+      status: 'active',
+      issued_at: now,
+      expires_at: new Date(now.valueOf() + 86_400_000),
+      consumed_at: null,
+      revoked_at: null,
+      created_at: now,
+      updated_at: now,
+      purge_at: new Date(now.valueOf() + 100 * 86_400_000),
+      mutation: null,
+    });
+    const results = await Promise.allSettled([
+      db.collection('appointment_public_access_tokens').insertOne(token('b')),
+      db.collection('appointment_public_access_tokens').insertOne(token('c')),
+    ]);
+    expect(results.filter((item) => item.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((item) => item.status === 'rejected')).toHaveLength(1);
+  });
+
   it('permits authenticated staff to update an appointment created through public booking', async () => {
     await migrateDatabase(db);
 

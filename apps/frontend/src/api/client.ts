@@ -46,6 +46,11 @@ export interface PublicBookingSettingsView {
     acknowledgment_label: string;
     terms_url: string | null;
   };
+  appointment_self_service: {
+    enabled: boolean;
+    cancellation_cutoff_minutes: number;
+    reschedule_cutoff_minutes: number;
+  };
   version: number;
 }
 
@@ -73,6 +78,10 @@ export interface ServiceView {
   public_booking_policy: {
     minimum_lead_minutes: number | null;
     maximum_advance_days: number | null;
+  };
+  public_self_service_policy: {
+    cancellation_cutoff_minutes: number | null;
+    reschedule_cutoff_minutes: number | null;
   };
   version: number;
 }
@@ -134,6 +143,38 @@ export interface PublicAppointmentConfirmationView {
   location_mode: ServiceView['delivery_mode'];
   replayed: boolean;
   confirmation_email_queued: boolean;
+}
+
+export interface PublicManagedAppointmentView {
+  business: {
+    name: string;
+    logo_url: string | null;
+    primary_color: string | null;
+    phone: string | null;
+    email: string | null;
+    website: string | null;
+  };
+  appointment: {
+    reference: string;
+    status: 'scheduled' | 'cancelled' | 'completed' | 'no_show';
+    service_name: string;
+    duration_minutes: number;
+    provider_name: string;
+    provider_photo_url: string | null;
+    starts_at: string;
+    ends_at: string;
+    local_start: string;
+    timezone: string;
+    version: number;
+  };
+  actions: {
+    can_reschedule: boolean;
+    can_cancel: boolean;
+    reschedule_until: string;
+    cancel_until: string;
+  };
+  replayed?: boolean;
+  replacement?: { token_public_id: string; credential: string } | null;
 }
 
 export interface ProviderView {
@@ -549,7 +590,13 @@ export function updatePublicBookingSettings(
 
 export function updateServicePublicBooking(
   service: ServiceView,
-  input: Pick<ServiceView, 'publicly_bookable' | 'public_display_order' | 'public_booking_policy'>,
+  input: Pick<
+    ServiceView,
+    | 'publicly_bookable'
+    | 'public_display_order'
+    | 'public_booking_policy'
+    | 'public_self_service_policy'
+  >,
   csrfToken: string,
 ): Promise<ServiceView> {
   return request(`/v1/admin/services/${service.public_id}/public-booking`, {
@@ -593,6 +640,50 @@ export function createPublicAppointment(
     method: 'POST',
     body: JSON.stringify(input),
     headers: { 'Idempotency-Key': idempotencyKey },
+  });
+}
+
+export function getManagedAppointment(
+  tokenPublicId: string,
+  credential: string,
+): Promise<PublicManagedAppointmentView> {
+  return managedRequest(tokenPublicId, credential);
+}
+
+export function listManagedReplacementStarts(
+  tokenPublicId: string,
+  credential: string,
+  startDate: string,
+  endDate: string,
+): Promise<{ timezone: string; items: PublicStartView[] }> {
+  const query = new URLSearchParams({ start_date: startDate, end_date: endDate });
+  return managedRequest(tokenPublicId, credential, `/available-starts?${query.toString()}`);
+}
+
+export function rescheduleManagedAppointment(
+  tokenPublicId: string,
+  credential: string,
+  expectedVersion: number,
+  startsAt: string,
+  idempotencyKey: string,
+): Promise<PublicManagedAppointmentView> {
+  return managedRequest(tokenPublicId, credential, '/reschedule', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({ expected_version: expectedVersion, starts_at: startsAt }),
+  });
+}
+
+export function cancelManagedAppointment(
+  tokenPublicId: string,
+  credential: string,
+  expectedVersion: number,
+  idempotencyKey: string,
+): Promise<PublicManagedAppointmentView> {
+  return managedRequest(tokenPublicId, credential, '/cancel', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({ expected_version: expectedVersion, confirmation: 'CANCEL' }),
   });
 }
 
@@ -846,6 +937,18 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (response.status === 204) return undefined as T;
   const body = (await response.json()) as { data: T };
   return body.data;
+}
+
+function managedRequest<T = PublicManagedAppointmentView>(
+  tokenPublicId: string,
+  credential: string,
+  suffix = '',
+  init: RequestInit = {},
+): Promise<T> {
+  return request(`/v1/public/appointments/manage/${encodeURIComponent(tokenPublicId)}${suffix}`, {
+    ...init,
+    headers: { Authorization: `AppointmentToken ${credential}`, ...init.headers },
+  });
 }
 
 async function requestWithMeta<T>(path: string): Promise<{ data: T; next_cursor: string | null }> {

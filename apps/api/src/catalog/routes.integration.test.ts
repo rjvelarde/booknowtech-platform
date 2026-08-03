@@ -99,6 +99,11 @@ function contextFixture(
     contact: { email_normalized: null, phone_e164: null, website_url: null },
     public_booking_enabled: false,
     appointment_email_settings: { enabled: false, sender_name: 'Tenant', reply_to_email: null },
+    appointment_self_service: {
+      enabled: false,
+      cancellation_cutoff_minutes: 1440,
+      reschedule_cutoff_minutes: 1440,
+    },
     public_profile: {
       business_name: 'Tenant A',
       description: null,
@@ -189,6 +194,10 @@ function serviceFixture(status: 'active' | 'inactive'): ServiceDocument {
     publicly_bookable: false,
     public_display_order: 0,
     public_booking_policy: { minimum_lead_minutes: null, maximum_advance_days: null },
+    public_self_service_policy: {
+      cancellation_cutoff_minutes: null,
+      reschedule_cutoff_minutes: null,
+    },
     version: 2,
     created_by: userId,
     updated_by: userId,

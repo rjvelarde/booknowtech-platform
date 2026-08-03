@@ -15,6 +15,7 @@ const environmentSchema = z.object({
   ADMIN_ORIGIN: z.url(),
   TENANT_ADMIN_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true'),
   OPENAPI_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true'),
+  PUBLIC_APPOINTMENT_TOKEN_SECRET: z.string().min(32),
 });
 
 export type Environment = z.infer<typeof environmentSchema>;

@@ -11,7 +11,13 @@ import {
 } from '../api/client.js';
 
 type ServiceFormInput = ServiceInput &
-  Pick<ServiceView, 'publicly_bookable' | 'public_display_order' | 'public_booking_policy'>;
+  Pick<
+    ServiceView,
+    | 'publicly_bookable'
+    | 'public_display_order'
+    | 'public_booking_policy'
+    | 'public_self_service_policy'
+  >;
 
 export function ServicesPage({
   csrfToken,
@@ -87,6 +93,7 @@ export function ServicesPage({
                 publicly_bookable: input.publicly_bookable,
                 public_display_order: input.public_display_order,
                 public_booking_policy: input.public_booking_policy,
+                public_self_service_policy: input.public_self_service_policy,
               },
               csrfToken,
             );
@@ -191,6 +198,12 @@ function ServiceForm({
             minimum_lead_minutes: nullableNumber(values.get('public_minimum_lead_minutes')),
             maximum_advance_days: nullableNumber(values.get('public_maximum_advance_days')),
           },
+          public_self_service_policy: {
+            cancellation_cutoff_minutes: nullableNumber(
+              values.get('self_service_cancellation_cutoff'),
+            ),
+            reschedule_cutoff_minutes: nullableNumber(values.get('self_service_reschedule_cutoff')),
+          },
         });
       }}
     >
@@ -247,6 +260,28 @@ function ServiceForm({
             min={1}
             max={365}
             defaultValue={service?.public_booking_policy.maximum_advance_days ?? ''}
+            placeholder="Use business default"
+          />
+        </label>
+        <label>
+          <span>Reschedule cutoff override (minutes)</span>
+          <input
+            name="self_service_reschedule_cutoff"
+            type="number"
+            min={0}
+            max={10080}
+            defaultValue={service?.public_self_service_policy?.reschedule_cutoff_minutes ?? ''}
+            placeholder="Use business default"
+          />
+        </label>
+        <label>
+          <span>Cancellation cutoff override (minutes)</span>
+          <input
+            name="self_service_cancellation_cutoff"
+            type="number"
+            min={0}
+            max={10080}
+            defaultValue={service?.public_self_service_policy?.cancellation_cutoff_minutes ?? ''}
             placeholder="Use business default"
           />
         </label>

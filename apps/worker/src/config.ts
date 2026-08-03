@@ -13,6 +13,7 @@ const environmentSchema = z.object({
   TRANSACTIONAL_EMAIL_PROVIDER: z.literal('postmark'),
   TRANSACTIONAL_EMAIL_TOKEN: z.string().min(1),
   TRANSACTIONAL_EMAIL_FROM: z.string().email(),
+  PUBLIC_APPOINTMENT_TOKEN_SECRET: z.string().min(32),
 });
 
 export type WorkerEnvironment = z.infer<typeof environmentSchema>;

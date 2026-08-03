@@ -1,5 +1,9 @@
 import type { Collection, Db, ObjectId } from 'mongodb';
 import type { Logger } from 'pino';
+import {
+  buildPublicAppointmentManagementUrl,
+  derivePublicAppointmentCredential,
+} from '@booknowtech/shared';
 
 import type { WorkerEnvironment } from './config.js';
 import {
@@ -16,6 +20,7 @@ interface OutboxDocument {
   type: AppointmentEmailType;
   recipient: string;
   template_data: AppointmentEmailTemplateData;
+  appointment_access: { token_public_id: string; generation: number } | null;
   status: 'pending' | 'processing' | 'delivered' | 'failed';
   attempt_count: number;
   next_attempt_at: Date;
@@ -30,19 +35,22 @@ interface OutboxDocument {
 
 interface TenantEmailDocument {
   _id: ObjectId;
+  public_id: string;
+  slug: string;
   status: 'active' | 'inactive';
   appointment_email_settings: {
     enabled: boolean;
     sender_name: string;
     reply_to_email: string | null;
   };
+  appointment_self_service?: { enabled: boolean };
 }
 
 const MAX_ATTEMPTS = 5;
 const POLL_MILLISECONDS = 2_000;
 
 export function buildPostmarkMetadata(notificationPublicId: string): Record<string, string> {
-  return { notification_id: notificationPublicId };
+  return { notice_id: notificationPublicId };
 }
 
 export function startNotificationWorker(
@@ -114,10 +122,44 @@ async function processOne(
     return;
   }
   try {
+    let managementUrl: string | null = null;
+    if (item.appointment_access && tenant.appointment_self_service?.enabled) {
+      const token = await db
+        .collection<{
+          public_id: string;
+          appointment_public_id: string;
+          generation: number;
+          status: string;
+        }>('appointment_public_access_tokens')
+        .findOne({
+          tenant_id: item.tenant_id,
+          public_id: item.appointment_access.token_public_id,
+          generation: item.appointment_access.generation,
+          status: 'active',
+        });
+      if (token) {
+        const credential = derivePublicAppointmentCredential(
+          environment.PUBLIC_APPOINTMENT_TOKEN_SECRET,
+          {
+            version: 1,
+            tokenPublicId: token.public_id,
+            appointmentPublicId: token.appointment_public_id,
+            generation: token.generation,
+            purpose: 'appointment_management',
+          },
+        );
+        managementUrl = buildPublicAppointmentManagementUrl(
+          `https://${tenant.slug}.booknowtech.com`,
+          token.public_id,
+          credential,
+        );
+      }
+    }
     const rendered = renderAppointmentEmail(
       item.type,
       item.appointment_reference,
       item.template_data,
+      managementUrl,
     );
     const response = await fetch('https://api.postmarkapp.com/email', {
       method: 'POST',
