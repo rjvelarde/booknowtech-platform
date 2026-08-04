@@ -12,6 +12,7 @@
     },
     "./hostname": {
       "types": "./src/hostname.ts",
+      "browser": "./src/hostname.ts",
       "import": "./dist/hostname.js"
     }
   },
