@@ -161,7 +161,12 @@ describe('public appointment management', () => {
     fireEvent.keyDown(cancel, { key: 'Enter' });
     fireEvent.click(cancel);
     expect(screen.getByRole('heading', { name: 'Cancel appointment' })).toHaveFocus();
-    expect(screen.getByRole('button', { name: 'Cancel this appointment' })).toBeDisabled();
+    const confirmation = screen.getByLabelText('Confirmation');
+    const destructiveAction = screen.getByRole('button', { name: 'Cancel this appointment' });
+    expect(destructiveAction).toBeDisabled();
+    fireEvent.change(confirmation, { target: { value: 'cancel' } });
+    expect(confirmation).toHaveValue('CANCEL');
+    expect(destructiveAction).toBeEnabled();
     expect(document.querySelector('.management-page')).toBeInTheDocument();
   });
 });

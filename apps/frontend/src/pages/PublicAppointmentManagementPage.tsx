@@ -292,8 +292,10 @@ export function PublicAppointmentManagementPage() {
                 <span>Confirmation</span>
                 <input
                   value={confirmation}
-                  onChange={(event) => setConfirmation(event.target.value)}
+                  onChange={(event) => setConfirmation(event.target.value.toUpperCase())}
                   autoComplete="off"
+                  autoCapitalize="characters"
+                  spellCheck={false}
                 />
               </label>
               <div className="management-actions">
