@@ -70,7 +70,10 @@ jobs:
         run: pnpm verify:frontend-env
 
       - name: Build same-origin frontend container
-        run: docker build --file Dockerfile.frontend --build-arg VITE_API_BASE_URL=/api .
+        run: docker build --tag booknowtech-frontend-security-test --file Dockerfile.frontend --build-arg VITE_API_BASE_URL=/api .
+
+      - name: Verify frontend security headers
+        run: pnpm test:security-headers
 
       - name: Build API
         run: pnpm build:api
