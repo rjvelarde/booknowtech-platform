@@ -23,6 +23,7 @@
     "test": "pnpm --filter @booknowtech/shared build && pnpm --recursive --if-present run test",
     "test:unit": "pnpm --filter @booknowtech/shared build && pnpm --recursive --if-present run test:unit",
     "test:integration": "pnpm --filter @booknowtech/shared build && pnpm --recursive --if-present run test:integration",
+    "test:security-headers": "node scripts/check-frontend-security-headers.mjs",
     "audit": "pnpm audit --audit-level=high",
     "verify:frontend-env": "node scripts/check-frontend-bundle.mjs",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
