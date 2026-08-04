@@ -21,11 +21,17 @@ import { CustomersPage } from './pages/CustomersPage.js';
 import { AppointmentsPage } from './pages/AppointmentsPage.js';
 import { PublicBookingPage } from './pages/PublicBookingPage.js';
 import { PublicBookingSettingsPage } from './pages/PublicBookingSettingsPage.js';
+import { PublicAppointmentManagementPage } from './pages/PublicAppointmentManagementPage.js';
 
 type View = 'loading' | 'placeholder' | 'login' | 'select' | 'hub' | 'denied';
 
 export function App() {
-  if (isPublicBookingHost(window.location.hostname)) return <PublicBookingPage />;
+  if (isPublicBookingHost(window.location.hostname))
+    return window.location.pathname.startsWith('/appointments/manage/') ? (
+      <PublicAppointmentManagementPage />
+    ) : (
+      <PublicBookingPage />
+    );
   const [view, setView] = useState<View>('loading');
   const [session, setSession] = useState<AdminSessionView | null>(null);
   const [busy, setBusy] = useState(false);

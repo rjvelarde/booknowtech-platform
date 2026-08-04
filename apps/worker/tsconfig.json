@@ -1,6 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "paths": { "@booknowtech/shared": ["../shared/src/index.ts"] },
     "lib": ["ES2024"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",

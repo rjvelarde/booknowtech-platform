@@ -69,6 +69,11 @@ export function PublicBookingSettingsPage({
                 acknowledgment_label: text(values, 'terms_label'),
                 terms_url: nullable(values, 'terms_url'),
               },
+              appointment_self_service: {
+                enabled: values.get('self_service_enabled') === 'on',
+                cancellation_cutoff_minutes: Number(values.get('cancellation_cutoff_minutes')),
+                reschedule_cutoff_minutes: Number(values.get('reschedule_cutoff_minutes')),
+              },
             },
             csrfToken,
           )
@@ -179,6 +184,34 @@ export function PublicBookingSettingsPage({
           label="Booking terms URL (HTTPS)"
           type="url"
           defaultValue={settings.public_booking_terms.terms_url ?? ''}
+        />
+        <h2>Appointment self-service</h2>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            name="self_service_enabled"
+            defaultChecked={settings.appointment_self_service.enabled}
+            disabled={!canManage}
+          />
+          <span>Allow customers to reschedule or cancel from secure email links</span>
+        </label>
+        <Field
+          name="reschedule_cutoff_minutes"
+          label="Reschedule cutoff (minutes before start)"
+          type="number"
+          min={0}
+          max={10080}
+          defaultValue={settings.appointment_self_service.reschedule_cutoff_minutes}
+          required
+        />
+        <Field
+          name="cancellation_cutoff_minutes"
+          label="Cancellation cutoff (minutes before start)"
+          type="number"
+          min={0}
+          max={10080}
+          defaultValue={settings.appointment_self_service.cancellation_cutoff_minutes}
+          required
         />
         {canManage ? (
           <button type="submit">Save public booking settings</button>

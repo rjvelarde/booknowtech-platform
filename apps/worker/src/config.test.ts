@@ -12,6 +12,7 @@ describe('loadWorkerEnvironment', () => {
     TRANSACTIONAL_EMAIL_PROVIDER: 'postmark',
     TRANSACTIONAL_EMAIL_TOKEN: 'test-token',
     TRANSACTIONAL_EMAIL_FROM: 'appointments@example.com',
+    PUBLIC_APPOINTMENT_TOKEN_SECRET: 'test-secret-that-is-at-least-thirty-two-bytes-long',
   } as const;
 
   it('loads valid worker settings', () => {

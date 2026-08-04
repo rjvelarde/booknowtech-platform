@@ -12,6 +12,7 @@ export const testEnvironment: Environment = {
   ADMIN_ORIGIN: 'https://admin.example.test',
   TENANT_ADMIN_ENABLED: false,
   OPENAPI_ENABLED: true,
+  PUBLIC_APPOINTMENT_TOKEN_SECRET: 'test-secret-that-is-at-least-thirty-two-bytes-long',
 };
 
 export class StubReadinessProbe implements ReadinessProbe {

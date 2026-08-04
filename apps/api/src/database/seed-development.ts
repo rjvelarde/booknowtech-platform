@@ -100,6 +100,11 @@ async function main(): Promise<void> {
               sender_name: tenant.display_name,
               reply_to_email: null,
             },
+            appointment_self_service: {
+              enabled: false,
+              cancellation_cutoff_minutes: 1440,
+              reschedule_cutoff_minutes: 1440,
+            },
             status: 'active',
             updated_at: now,
           },
@@ -157,6 +162,10 @@ async function main(): Promise<void> {
               public_booking_policy: {
                 minimum_lead_minutes: null,
                 maximum_advance_days: null,
+              },
+              public_self_service_policy: {
+                cancellation_cutoff_minutes: null,
+                reschedule_cutoff_minutes: null,
               },
               updated_by: userResult._id,
               updated_at: now,

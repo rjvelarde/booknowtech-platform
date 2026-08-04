@@ -1,5 +1,9 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { type ClientSession, type Collection, type Db, type Filter, ObjectId } from 'mongodb';
+import {
+  derivePublicAppointmentCredential,
+  hashPublicAppointmentCredential,
+} from '@booknowtech/shared';
 
 export const ADMIN_ROLES = ['tenant_owner', 'tenant_admin', 'provider', 'front_desk'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
@@ -44,6 +48,11 @@ export interface TenantDocument {
     sender_name: string;
     reply_to_email: string | null;
   };
+  appointment_self_service: {
+    enabled: boolean;
+    cancellation_cutoff_minutes: number;
+    reschedule_cutoff_minutes: number;
+  };
   version: number;
   updated_by: ObjectId | null;
   status: 'active' | 'suspended';
@@ -72,6 +81,10 @@ export interface ServiceDocument {
   public_booking_policy: {
     minimum_lead_minutes: number | null;
     maximum_advance_days: number | null;
+  };
+  public_self_service_policy: {
+    cancellation_cutoff_minutes: number | null;
+    reschedule_cutoff_minutes: number | null;
   };
   status: 'active' | 'inactive';
   version: number;
@@ -293,6 +306,7 @@ export interface NotificationOutboxDocument {
     timezone: string;
     location_mode: DeliveryMode;
   };
+  appointment_access: { token_public_id: string; generation: number } | null;
   status: 'pending' | 'processing' | 'delivered' | 'failed';
   attempt_count: number;
   next_attempt_at: Date;
@@ -304,6 +318,33 @@ export interface NotificationOutboxDocument {
   request_id: string;
   created_at: Date;
   updated_at: Date;
+}
+
+export interface AppointmentPublicAccessTokenDocument {
+  _id: ObjectId;
+  public_id: string;
+  tenant_id: ObjectId;
+  tenant_public_id: string;
+  appointment_id: ObjectId;
+  appointment_public_id: string;
+  purpose: 'appointment_manage';
+  generation: number;
+  token_hash: string;
+  status: 'active' | 'consumed' | 'revoked' | 'expired';
+  issued_at: Date;
+  expires_at: Date;
+  consumed_at: Date | null;
+  revoked_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+  purge_at: Date;
+  mutation: {
+    type: 'reschedule' | 'cancel';
+    idempotency_key_hash: string;
+    request_fingerprint: string;
+    result_appointment_version: number;
+    replacement_token_public_id: string | null;
+  } | null;
 }
 
 export interface AppointmentCursor {
@@ -412,6 +453,7 @@ export class AdminStore {
   private readonly appointments: Collection<AppointmentDocument>;
   private readonly appointmentScheduleLocks: Collection<AppointmentScheduleLockDocument>;
   private readonly notificationOutbox: Collection<NotificationOutboxDocument>;
+  private readonly appointmentAccessTokens: Collection<AppointmentPublicAccessTokenDocument>;
 
   public constructor(private readonly database: Db) {
     const db = database;
@@ -433,6 +475,9 @@ export class AdminStore {
       'appointment_schedule_locks',
     );
     this.notificationOutbox = db.collection<NotificationOutboxDocument>('notification_outbox');
+    this.appointmentAccessTokens = db.collection<AppointmentPublicAccessTokenDocument>(
+      'appointment_public_access_tokens',
+    );
   }
 
   public findUserByEmail(email: string): Promise<UserDocument | null> {
@@ -518,17 +563,21 @@ export class AdminStore {
     tenantId?: ObjectId | null;
     requestId: string;
     metadata?: Record<string, string | null>;
+    session?: ClientSession;
   }): Promise<void> {
-    await this.auditLogs.insertOne({
-      public_id: randomUUID(),
-      event: input.event,
-      outcome: input.outcome,
-      actor_user_id: input.actorUserId ?? null,
-      tenant_id: input.tenantId ?? null,
-      request_id: input.requestId,
-      metadata: input.metadata ?? {},
-      created_at: new Date(),
-    });
+    await this.auditLogs.insertOne(
+      {
+        public_id: randomUUID(),
+        event: input.event,
+        outcome: input.outcome,
+        actor_user_id: input.actorUserId ?? null,
+        tenant_id: input.tenantId ?? null,
+        request_id: input.requestId,
+        metadata: input.metadata ?? {},
+        created_at: new Date(),
+      },
+      input.session ? { session: input.session } : undefined,
+    );
   }
 
   public getBusinessProfile(tenantId: ObjectId): Promise<TenantDocument | null> {
@@ -543,6 +592,13 @@ export class AdminStore {
       { slug, status: 'active', public_booking_enabled: true },
       session ? { session } : undefined,
     );
+  }
+
+  public getActiveTenantBySlug(
+    slug: string,
+    session?: ClientSession,
+  ): Promise<TenantDocument | null> {
+    return this.tenants.findOne({ slug, status: 'active' }, session ? { session } : undefined);
   }
 
   public listPublicServices(tenantId: ObjectId): Promise<ServiceDocument[]> {
@@ -583,7 +639,11 @@ export class AdminStore {
     expectedVersion: number;
     changes: Pick<
       TenantDocument,
-      'public_booking_enabled' | 'public_profile' | 'booking_policy' | 'public_booking_terms'
+      | 'public_booking_enabled'
+      | 'public_profile'
+      | 'booking_policy'
+      | 'public_booking_terms'
+      | 'appointment_self_service'
     >;
   }): Promise<'updated' | 'unchanged' | 'version_conflict' | 'not_found'> {
     const current = await this.getBusinessProfile(input.tenantId);
@@ -593,7 +653,9 @@ export class AdminStore {
       JSON.stringify(current.public_profile) === JSON.stringify(input.changes.public_profile) &&
       JSON.stringify(current.booking_policy) === JSON.stringify(input.changes.booking_policy) &&
       JSON.stringify(current.public_booking_terms) ===
-        JSON.stringify(input.changes.public_booking_terms)
+        JSON.stringify(input.changes.public_booking_terms) &&
+      JSON.stringify(current.appointment_self_service) ===
+        JSON.stringify(input.changes.appointment_self_service)
     )
       return 'unchanged';
     const result = await this.tenants.updateOne(
@@ -638,10 +700,41 @@ export class AdminStore {
     type: AppointmentEmailType;
     requestId: string;
     session: ClientSession;
+    appointmentAccess?: NotificationOutboxDocument['appointment_access'];
+    tokenSecret?: string;
   }): Promise<boolean> {
     if (!input.tenant.appointment_email_settings.enabled || !input.customer.email_normalized)
       return false;
     const now = new Date();
+    let appointmentAccess = input.appointmentAccess ?? null;
+    if (
+      !appointmentAccess &&
+      input.tokenSecret &&
+      input.type !== 'appointment_cancelled' &&
+      input.tenant.appointment_self_service.enabled &&
+      input.appointment.status === 'scheduled' &&
+      input.appointment.starts_at > now
+    ) {
+      const active = await this.appointmentAccessTokens.findOne(
+        {
+          tenant_id: input.tenant._id,
+          appointment_id: input.appointment._id,
+          purpose: 'appointment_manage',
+          status: 'active',
+        },
+        { session: input.session },
+      );
+      const token =
+        active ??
+        (await this.insertAppointmentAccessToken({
+          tenant: input.tenant,
+          appointment: input.appointment,
+          generation: 1,
+          tokenSecret: input.tokenSecret,
+          session: input.session,
+        }));
+      appointmentAccess = { token_public_id: token.public_id, generation: token.generation };
+    }
     await this.notificationOutbox.insertOne(
       {
         _id: new ObjectId(),
@@ -668,6 +761,7 @@ export class AdminStore {
           timezone: input.appointment.timezone,
           location_mode: input.appointment.location.mode,
         },
+        appointment_access: appointmentAccess,
         status: 'pending',
         attempt_count: 0,
         next_attempt_at: now,
@@ -693,6 +787,82 @@ export class AdminStore {
       .find({ tenant_id: tenantId, appointment_id: appointmentId })
       .sort({ created_at: -1, public_id: -1 })
       .toArray();
+  }
+
+  public getAppointmentAccessToken(
+    tenantId: ObjectId,
+    publicId: string,
+    session?: ClientSession,
+  ): Promise<AppointmentPublicAccessTokenDocument | null> {
+    return this.appointmentAccessTokens.findOne(
+      { tenant_id: tenantId, public_id: publicId, purpose: 'appointment_manage' },
+      session ? { session } : undefined,
+    );
+  }
+
+  public async insertAppointmentAccessToken(input: {
+    tenant: TenantDocument;
+    appointment: AppointmentDocument;
+    generation: number;
+    tokenSecret: string;
+    session: ClientSession;
+    publicId?: string;
+  }): Promise<AppointmentPublicAccessTokenDocument> {
+    const now = new Date();
+    const expiresAt = new Date(
+      Math.min(input.appointment.starts_at.valueOf(), now.valueOf() + 180 * 86_400_000),
+    );
+    const publicId = input.publicId ?? randomUUID();
+    const rawCredential = derivePublicAppointmentCredential(input.tokenSecret, {
+      version: 1,
+      tokenPublicId: publicId,
+      appointmentPublicId: input.appointment.public_id,
+      generation: input.generation,
+      purpose: 'appointment_management',
+    });
+    const document: AppointmentPublicAccessTokenDocument = {
+      _id: new ObjectId(),
+      public_id: publicId,
+      tenant_id: input.tenant._id,
+      tenant_public_id: input.tenant.public_id,
+      appointment_id: input.appointment._id,
+      appointment_public_id: input.appointment.public_id,
+      purpose: 'appointment_manage',
+      generation: input.generation,
+      token_hash: hashPublicAppointmentCredential(rawCredential),
+      status: 'active',
+      issued_at: now,
+      expires_at: expiresAt,
+      consumed_at: null,
+      revoked_at: null,
+      created_at: now,
+      updated_at: now,
+      purge_at: new Date(expiresAt.valueOf() + 90 * 86_400_000),
+      mutation: null,
+    };
+    await this.appointmentAccessTokens.insertOne(document, { session: input.session });
+    return document;
+  }
+
+  public consumeAppointmentAccessToken(input: {
+    token: AppointmentPublicAccessTokenDocument;
+    mutation: NonNullable<AppointmentPublicAccessTokenDocument['mutation']>;
+    session: ClientSession;
+  }): Promise<unknown> {
+    const now = new Date();
+    return this.appointmentAccessTokens.updateOne(
+      { _id: input.token._id, status: 'active' },
+      {
+        $set: {
+          status: 'consumed',
+          consumed_at: now,
+          updated_at: now,
+          purge_at: new Date(now.valueOf() + 90 * 86_400_000),
+          mutation: input.mutation,
+        },
+      },
+      { session: input.session },
+    );
   }
 
   public async updateBusinessProfile(input: {
@@ -772,6 +942,7 @@ export class AdminStore {
       | 'publicly_bookable'
       | 'public_display_order'
       | 'public_booking_policy'
+      | 'public_self_service_policy'
     >,
   ): Promise<ServiceDocument> {
     const now = new Date();
@@ -790,6 +961,10 @@ export class AdminStore {
       public_booking_policy: {
         minimum_lead_minutes: null,
         maximum_advance_days: null,
+      },
+      public_self_service_policy: {
+        cancellation_cutoff_minutes: null,
+        reschedule_cutoff_minutes: null,
       },
       ...input,
     };
@@ -816,6 +991,7 @@ export class AdminStore {
         | 'publicly_bookable'
         | 'public_display_order'
         | 'public_booking_policy'
+        | 'public_self_service_policy'
       >
     >;
   }): Promise<'updated' | 'version_conflict' | 'not_found'> {
@@ -1757,7 +1933,7 @@ export class AdminStore {
   public async updateAppointmentSchedule(input: {
     appointment: AppointmentDocument;
     tenantId: ObjectId;
-    userId: ObjectId;
+    userId: ObjectId | null;
     expectedVersion: number;
     startsAt: Date;
     endsAt: Date;
@@ -1793,7 +1969,7 @@ export class AdminStore {
   public async transitionAppointment(input: {
     appointment: AppointmentDocument;
     tenantId: ObjectId;
-    userId: ObjectId;
+    userId: ObjectId | null;
     expectedVersion: number;
     status: Exclude<AppointmentStatus, 'scheduled'>;
     reason?: AppointmentDocument['cancellation_reason'];
