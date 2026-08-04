@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { fallbackTenantSlug } from '@booknowtech/shared/hostname';
 
 import {
   type AdminSessionView,
@@ -175,12 +176,7 @@ export function App() {
 }
 
 export function isPublicBookingHost(hostname: string): boolean {
-  const normalized = hostname.toLowerCase().replace(/\.$/, '');
-  if (normalized.endsWith('.localhost')) return normalized.split('.').length === 2;
-  if (normalized.endsWith('.example.test')) return normalized.split('.').length === 3;
-  if (!normalized.endsWith('.booknowtech.com')) return false;
-  const label = normalized.slice(0, -'.booknowtech.com'.length);
-  return Boolean(label && !label.includes('.') && !['admin', 'www', 'api'].includes(label));
+  return fallbackTenantSlug(hostname) !== null;
 }
 
 function navigate(path: string, setPath: (path: string) => void): void {

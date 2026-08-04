@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { ClientSession, ObjectId } from 'mongodb';
+import { fallbackBookingHostname, fallbackTenantSlug } from '@booknowtech/shared';
 
 import type {
   AdminStore,
@@ -16,10 +17,9 @@ import type {
 import { dateRange, generateSlots, localToUtc, previewDay } from '../availability/routes.js';
 import { authenticateAdminMutation, authenticateAdminRequest } from '../auth/routes.js';
 import type { Environment } from '../config.js';
+import { TenantHostResolver } from './tenant-host-resolver.js';
 
 const managers = new Set(['tenant_owner', 'tenant_admin']);
-const reservedLabels = new Set(['admin', 'api', 'www']);
-const PUBLIC_SUFFIX = '.booknowtech.com';
 const PLATFORM_MINIMUM_LEAD_MINUTES = 120;
 const PLATFORM_MAXIMUM_ADVANCE_DAYS = 90;
 const MAXIMUM_RANGE_DAYS = 14;
@@ -147,11 +147,12 @@ export function registerPublicBookingRoutes(
   environment: Environment,
   store: AdminStore,
 ): void {
+  const hostResolver = new TenantHostResolver(store);
   const limiter = createPublicRateLimiter();
   const submissionLimiter = createPublicRateLimiter();
   app.addHook('onRequest', async (request, reply) => {
     if (!request.url.startsWith('/api/v1/public/')) return;
-    const hostname = normalizePublicHostname(request.hostname) ?? 'invalid';
+    const hostname = fallbackTenantSlug(request.hostname) ?? 'invalid';
     const route = request.routeOptions.url ?? request.url.split('?')[0]!;
     const maximum = route.endsWith('/available-starts') ? 30 : 120;
     if (!limiter.allow(`${request.ip}:${hostname}:${route}`, maximum, 60_000)) {
@@ -176,7 +177,7 @@ export function registerPublicBookingRoutes(
     '/api/v1/public/booking-context',
     publicSchema('getPublicBookingContext'),
     async (request, reply) => {
-      const tenant = await resolvePublicTenant(request, reply, store);
+      const tenant = await resolvePublicTenant(request, reply, hostResolver);
       if (!tenant) return;
       return cacheablePublicReply(request, reply, bookingContextView(tenant));
     },
@@ -186,7 +187,7 @@ export function registerPublicBookingRoutes(
     '/api/v1/public/services',
     publicSchema('listPublicBookingServices'),
     async (request, reply) => {
-      const tenant = await resolvePublicTenant(request, reply, store);
+      const tenant = await resolvePublicTenant(request, reply, hostResolver);
       if (!tenant) return;
       const services = await store.listPublicServices(tenant._id);
       return cacheablePublicReply(request, reply, {
@@ -199,7 +200,7 @@ export function registerPublicBookingRoutes(
     '/api/v1/public/services/:servicePublicId/providers',
     publicSchema('listPublicBookingProviders'),
     async (request, reply) => {
-      const tenant = await resolvePublicTenant(request, reply, store);
+      const tenant = await resolvePublicTenant(request, reply, hostResolver);
       if (!tenant) return;
       const service = await publicService(store, tenant, request.params.servicePublicId);
       if (!service) return safeResourceNotFound(reply, request.id);
@@ -234,7 +235,7 @@ export function registerPublicBookingRoutes(
     }),
     async (request, reply) => {
       const started = performance.now();
-      const tenant = await resolvePublicTenant(request, reply, store);
+      const tenant = await resolvePublicTenant(request, reply, hostResolver);
       if (!tenant) return;
       const service = await publicService(store, tenant, request.params.servicePublicId);
       if (!service) return safeResourceNotFound(reply, request.id);
@@ -363,7 +364,7 @@ export function registerPublicBookingRoutes(
     async (request, reply) => {
       if (!isPublicJsonRequest(request) || !isSamePublicOrigin(request))
         return safeError(reply, 403, 'invalid_public_booking_request', request.id);
-      const tenant = await resolvePublicTenant(request, reply, store);
+      const tenant = await resolvePublicTenant(request, reply, hostResolver);
       if (!tenant) return;
       if (request.body.website)
         return safeError(reply, 400, 'invalid_public_booking_request', request.id);
@@ -722,27 +723,11 @@ function registerAdministrativeConfiguration(
 async function resolvePublicTenant(
   request: FastifyRequest,
   reply: FastifyReply,
-  store: AdminStore,
+  resolver: TenantHostResolver,
 ) {
-  const slug = normalizePublicHostname(request.hostname);
-  if (!slug) {
-    await safeNotFound(reply, request.id);
-    return null;
-  }
-  const tenant = await store.getPublicTenantBySlug(slug);
+  const tenant = await resolver.resolvePublicTenant(request.hostname, 'public_booking');
   if (!tenant) await safeNotFound(reply, request.id);
   return tenant;
-}
-
-export function normalizePublicHostname(hostname: string): string | null {
-  const normalized = hostname.trim().toLowerCase().replace(/\.$/, '').replace(/:\d+$/, '');
-  let label: string | undefined;
-  if (normalized.endsWith(PUBLIC_SUFFIX)) label = normalized.slice(0, -PUBLIC_SUFFIX.length);
-  else if (normalized.endsWith('.localhost')) label = normalized.slice(0, -'.localhost'.length);
-  else if (normalized.endsWith('.example.test'))
-    label = normalized.slice(0, -'.example.test'.length);
-  if (!label || label.includes('.') || reservedLabels.has(label)) return null;
-  return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label) ? label : null;
 }
 
 export function publicRequestFingerprint(value: unknown) {
@@ -1248,7 +1233,7 @@ async function requireAdmin(
 function adminSettingsView(tenant: TenantDocument) {
   return {
     public_booking_enabled: tenant.public_booking_enabled,
-    fallback_hostname: `${tenant.slug}.booknowtech.com`,
+    fallback_hostname: fallbackBookingHostname(tenant.slug),
     public_profile: tenant.public_profile,
     booking_policy: tenant.booking_policy,
     public_booking_terms: tenant.public_booking_terms,
@@ -1283,7 +1268,7 @@ function normalizePublicSettings(body: PublicSettingsBody, tenant: TenantDocumen
     (!tenant.default_timezone ||
       !tenant.locale ||
       !tenant.currency ||
-      normalizePublicHostname(`${tenant.slug}.booknowtech.com`) !== tenant.slug)
+      fallbackTenantSlug(fallbackBookingHostname(tenant.slug) ?? '') !== tenant.slug)
   )
     return null;
   return {

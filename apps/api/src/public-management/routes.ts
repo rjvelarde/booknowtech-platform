@@ -17,6 +17,7 @@ import type {
 } from '../admin/store.js';
 import { dateRange, generateSlots, localToUtc, previewDay } from '../availability/routes.js';
 import type { Environment } from '../config.js';
+import { TenantHostResolver } from '../public/tenant-host-resolver.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -25,10 +26,11 @@ export function registerPublicAppointmentManagementRoutes(
   environment: Environment,
   store: AdminStore,
 ): void {
+  const hostResolver = new TenantHostResolver(store);
   app.get<{ Params: { tokenPublicId: string } }>(
     '/api/v1/public/appointments/manage/:tokenPublicId',
     async (request, reply) => {
-      const resolved = await resolve(request, reply, environment, store);
+      const resolved = await resolve(request, reply, environment, store, hostResolver);
       if (!resolved) return;
       return noStore(
         reply,
@@ -44,7 +46,7 @@ export function registerPublicAppointmentManagementRoutes(
   }>(
     '/api/v1/public/appointments/manage/:tokenPublicId/available-starts',
     async (request, reply) => {
-      const resolved = await resolve(request, reply, environment, store);
+      const resolved = await resolve(request, reply, environment, store, hostResolver);
       if (!resolved) return;
       if (!canAct(resolved.appointment, cutoff(resolved.tenant, resolved.service, 'reschedule')))
         return safe(reply, 409, 'action_unavailable', request.id);
@@ -66,13 +68,13 @@ export function registerPublicAppointmentManagementRoutes(
     Params: { tokenPublicId: string };
     Body: { expected_version: number; starts_at: string };
   }>('/api/v1/public/appointments/manage/:tokenPublicId/reschedule', async (request, reply) =>
-    mutate(request, reply, environment, store, 'reschedule'),
+    mutate(request, reply, environment, store, hostResolver, 'reschedule'),
   );
   app.post<{
     Params: { tokenPublicId: string };
     Body: { expected_version: number; confirmation: string };
   }>('/api/v1/public/appointments/manage/:tokenPublicId/cancel', async (request, reply) =>
-    mutate(request, reply, environment, store, 'cancel'),
+    mutate(request, reply, environment, store, hostResolver, 'cancel'),
   );
 }
 
@@ -89,14 +91,17 @@ async function resolve(
   reply: FastifyReply,
   environment: Environment,
   store: AdminStore,
+  hostResolver: TenantHostResolver,
   allowConsumed = false,
 ): Promise<Resolved | null> {
-  const slug = hostnameSlug(request.hostname);
   const credential = appointmentCredential(request.headers.authorization);
-  if (!slug || !credential || !UUID.test(request.params.tokenPublicId))
+  if (!credential || !UUID.test(request.params.tokenPublicId))
     return unavailable(reply, request.id);
-  const tenant = await store.getActiveTenantBySlug(slug);
-  if (!tenant?.appointment_self_service.enabled) return unavailable(reply, request.id);
+  const tenant = await hostResolver.resolvePublicTenant(
+    request.hostname,
+    'appointment_self_service',
+  );
+  if (!tenant) return unavailable(reply, request.id);
   const token = await store.getAppointmentAccessToken(tenant._id, request.params.tokenPublicId);
   if (!token || (!allowConsumed && token.status !== 'active') || token.expires_at <= new Date())
     return unavailable(reply, request.id);
@@ -128,12 +133,13 @@ async function mutate(
   reply: FastifyReply,
   environment: Environment,
   store: AdminStore,
+  hostResolver: TenantHostResolver,
   kind: 'reschedule' | 'cancel',
 ) {
   const idempotency = request.headers['idempotency-key'];
   if (typeof idempotency !== 'string' || !UUID.test(idempotency))
     return safe(reply, 400, 'invalid_idempotency_key', request.id);
-  const resolved = await resolve(request, reply, environment, store, true);
+  const resolved = await resolve(request, reply, environment, store, hostResolver, true);
   if (!resolved) return;
   const fingerprint = sha(JSON.stringify({ kind, body: request.body }));
   const keyHash = sha(idempotency);
@@ -543,14 +549,6 @@ function canAct(appointment: AppointmentDocument, minutes: number) {
 function appointmentCredential(value: string | undefined) {
   const match = /^AppointmentToken ([A-Za-z0-9_-]+)$/.exec(value ?? '');
   return match?.[1] ?? null;
-}
-function hostnameSlug(hostname: string) {
-  const host = hostname.toLowerCase().split(':')[0]!;
-  const productionSuffix = '.booknowtech.com';
-  if (host.endsWith(productionSuffix)) return host.slice(0, -productionSuffix.length);
-  if (host.endsWith('.example.test')) return host.split('.')[0] ?? null;
-  if (host.endsWith('.localhost')) return host.split('.')[0] ?? null;
-  return null;
 }
 function sha(value: string) {
   return createHash('sha256').update(value).digest('hex');

@@ -9,3 +9,11 @@ export type {
   PublicAppointmentCredentialInput,
   PublicAppointmentCredentialPurpose,
 } from './public-appointment-token.js';
+
+export {
+  fallbackBookingHostname,
+  fallbackBookingOrigin,
+  fallbackTenantSlug,
+  isAdministrativeHostname,
+  normalizeHostname,
+} from './hostname.js';

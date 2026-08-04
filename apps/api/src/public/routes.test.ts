@@ -1,5 +1,6 @@
 import { ObjectId } from 'mongodb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fallbackTenantSlug } from '@booknowtech/shared';
 
 import {
   AdminStore,
@@ -10,17 +11,38 @@ import {
 } from '../admin/store.js';
 import { buildApplication } from '../app.js';
 import { StubReadinessProbe, testEnvironment } from '../test-fixtures.js';
-import { normalizePublicHostname, publicRequestFingerprint } from './routes.js';
+import { publicRequestFingerprint } from './routes.js';
 
 describe('public booking discovery', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('normalizes only an exact supported tenant hostname', () => {
-    expect(normalizePublicHostname('BRAZILIAN-WAX.booknowtech.com.')).toBe('brazilian-wax');
-    expect(normalizePublicHostname('brazilian-wax.localhost:8080')).toBe('brazilian-wax');
-    expect(normalizePublicHostname('admin.booknowtech.com')).toBeNull();
-    expect(normalizePublicHostname('tenant.attacker.booknowtech.com')).toBeNull();
-    expect(normalizePublicHostname('booknowtech.com.attacker.test')).toBeNull();
+    expect(fallbackTenantSlug('BRAZILIAN-WAX.booknowtech.com.')).toBe('brazilian-wax');
+    expect(fallbackTenantSlug('brazilian-wax.localhost:8080')).toBe('brazilian-wax');
+    expect(fallbackTenantSlug('admin.booknowtech.com')).toBeNull();
+    expect(fallbackTenantSlug('tenant.attacker.booknowtech.com')).toBeNull();
+    expect(fallbackTenantSlug('booknowtech.com.attacker.test')).toBeNull();
+  });
+
+  it.each([
+    'admin.booknowtech.com',
+    'booknowtech.com',
+    'tenant.attacker.booknowtech.com',
+    'tenant_booknowtech.com',
+  ])('returns the same safe 404 for unsupported public host %s', async (host) => {
+    const { app, store } = await testApp();
+    const lookup = vi.spyOn(store, 'getPublicTenantBySlug');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/booking-context',
+      headers: { host },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe('public_business_not_found');
+    expect(lookup).not.toHaveBeenCalled();
+    await app.close();
   });
 
   it('creates a deterministic validator-compatible public request fingerprint', () => {
