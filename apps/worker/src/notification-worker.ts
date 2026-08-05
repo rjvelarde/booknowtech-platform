@@ -3,6 +3,7 @@ import type { Logger } from 'pino';
 import {
   buildPublicAppointmentManagementUrl,
   derivePublicAppointmentCredential,
+  fallbackBookingOrigin,
 } from '@booknowtech/shared';
 
 import type { WorkerEnvironment } from './config.js';
@@ -51,6 +52,15 @@ const POLL_MILLISECONDS = 2_000;
 
 export function buildPostmarkMetadata(notificationPublicId: string): Record<string, string> {
   return { notice_id: notificationPublicId };
+}
+
+export function buildFallbackAppointmentManagementUrl(
+  tenantSlug: string,
+  tokenPublicId: string,
+  credential: string,
+): string | null {
+  const origin = fallbackBookingOrigin(tenantSlug);
+  return origin ? buildPublicAppointmentManagementUrl(origin, tokenPublicId, credential) : null;
 }
 
 export function startNotificationWorker(
@@ -148,8 +158,8 @@ async function processOne(
             purpose: 'appointment_management',
           },
         );
-        managementUrl = buildPublicAppointmentManagementUrl(
-          `https://${tenant.slug}.booknowtech.com`,
+        managementUrl = buildFallbackAppointmentManagementUrl(
+          tenant.slug,
           token.public_id,
           credential,
         );

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildPostmarkMetadata } from './notification-worker.js';
+import {
+  buildFallbackAppointmentManagementUrl,
+  buildPostmarkMetadata,
+} from './notification-worker.js';
 
 describe('buildPostmarkMetadata', () => {
   it('uses a Postmark-compatible metadata field name', () => {
@@ -11,5 +14,13 @@ describe('buildPostmarkMetadata', () => {
     });
     expect(Object.keys(metadata).every((fieldName) => fieldName.length <= 20)).toBe(true);
     expect(Object.values(metadata).every((value) => value.length <= 80)).toBe(true);
+  });
+
+  it('generates management links from the canonical fallback origin', () => {
+    expect(
+      buildFallbackAppointmentManagementUrl('Tenant-Slug', 'token-id', 'credential_value'),
+    ).toBe(
+      'https://tenant-slug.booknowtech.com/appointments/manage/token-id#token=credential_value',
+    );
   });
 });

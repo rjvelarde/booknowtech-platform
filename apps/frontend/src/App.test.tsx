@@ -13,10 +13,15 @@ describe('Business Hub', () => {
 
   it('selects public booking only for supported tenant hosts', () => {
     expect(isPublicBookingHost('brazilian-wax.booknowtech.com')).toBe(true);
+    expect(isPublicBookingHost('BRAZILIAN-WAX.booknowtech.com.')).toBe(true);
     expect(isPublicBookingHost('brazilian-wax.localhost')).toBe(true);
+    expect(isPublicBookingHost('brazilian-wax.localhost:8080')).toBe(true);
     expect(isPublicBookingHost('brazilian-wax.example.test')).toBe(true);
     expect(isPublicBookingHost('admin.booknowtech.com')).toBe(false);
+    expect(isPublicBookingHost('booknowtech.com')).toBe(false);
+    expect(isPublicBookingHost('www.booknowtech.com')).toBe(false);
     expect(isPublicBookingHost('tenant.attacker.booknowtech.com')).toBe(false);
+    expect(isPublicBookingHost('tenant_booknowtech.com')).toBe(false);
   });
 
   it('preserves the launch placeholder while the rollout flag is disabled', async () => {
