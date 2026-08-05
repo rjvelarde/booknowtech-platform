@@ -22,6 +22,7 @@ export function renderAppointmentEmail(
   reference: string,
   data: AppointmentEmailTemplateData,
   managementUrl: string | null = null,
+  replyToEmail: string | null = null,
 ) {
   const heading =
     type === 'appointment_confirmation'
@@ -37,6 +38,20 @@ export function renderAppointmentEmail(
   const contact = [data.business_phone, data.business_email, data.business_website]
     .filter(Boolean)
     .join(' · ');
+  const contactHtml = replyToEmail
+    ? contact
+      ? `Questions? Reply to this email or contact us at ${escapeHtml(contact)}.`
+      : 'Questions? Reply to this email.'
+    : contact
+      ? `Questions? Contact us at ${escapeHtml(contact)}.`
+      : '';
+  const contactText = replyToEmail
+    ? contact
+      ? `Questions? Reply to this email or contact us at ${contact}.`
+      : 'Questions? Reply to this email.'
+    : contact
+      ? `Questions? Contact us at ${contact}.`
+      : '';
   const logo = data.business_logo_url
     ? `<img src="${escapeAttribute(data.business_logo_url)}" alt="${escapeAttribute(data.business_name)}" style="max-height:72px;max-width:220px">`
     : '';
@@ -44,8 +59,8 @@ export function renderAppointmentEmail(
   const action = managementUrl
     ? `<p><a href="${escapeAttribute(managementUrl)}" style="display:inline-block;padding:12px 18px;background:#1261a0;color:#fff;text-decoration:none;border-radius:6px">Manage appointment</a></p>`
     : '';
-  const html = `<!doctype html><html><body style="margin:0;background:#f4f7fb;font-family:Arial,sans-serif;color:#12203d"><table role="presentation" width="100%"><tr><td align="center" style="padding:24px"><table role="presentation" width="100%" style="max-width:620px;background:#fff;border:1px solid #dbe4f0;border-radius:12px"><tr><td style="padding:32px">${logo}<h1>${escapeHtml(data.business_name)}</h1><h2>${escapeHtml(heading)}</h2><p>Hello ${escapeHtml(data.customer_name)},</p><p>${escapeHtml(summary)}.</p><table role="presentation" width="100%" style="background:#eef4fb;border-radius:8px"><tr><td style="padding:18px"><strong>${escapeHtml(data.service_name)}</strong><br>${escapeHtml(when)}<br>Provider: ${escapeHtml(data.provider_name)}<br>Reference: <strong>${escapeHtml(reference)}</strong></td></tr></table>${action}${contact ? `<p style="color:#50617d">Questions? ${escapeHtml(contact)}</p>` : ''}</td></tr></table></td></tr></table></body></html>`;
-  const text = `${data.business_name}\n\n${heading}\n\nHello ${data.customer_name},\n\n${summary}.\nReference: ${reference}${managementUrl ? `\n\nManage appointment: ${managementUrl}` : ''}${contact ? `\n\nQuestions? ${contact}` : ''}`;
+  const html = `<!doctype html><html><body style="margin:0;background:#f4f7fb;font-family:Arial,sans-serif;color:#12203d"><table role="presentation" width="100%"><tr><td align="center" style="padding:24px"><table role="presentation" width="100%" style="max-width:620px;background:#fff;border:1px solid #dbe4f0;border-radius:12px"><tr><td style="padding:32px">${logo}<h1>${escapeHtml(data.business_name)}</h1><h2>${escapeHtml(heading)}</h2><p>Hello ${escapeHtml(data.customer_name)},</p><p>${escapeHtml(summary)}.</p><table role="presentation" width="100%" style="background:#eef4fb;border-radius:8px"><tr><td style="padding:18px"><strong>${escapeHtml(data.service_name)}</strong><br>${escapeHtml(when)}<br>Provider: ${escapeHtml(data.provider_name)}<br>Reference: <strong>${escapeHtml(reference)}</strong></td></tr></table>${action}${contactHtml ? `<p style="color:#50617d">${contactHtml}</p>` : ''}</td></tr></table></td></tr></table></body></html>`;
+  const text = `${data.business_name}\n\n${heading}\n\nHello ${data.customer_name},\n\n${summary}.\nReference: ${reference}${managementUrl ? `\n\nManage appointment: ${managementUrl}` : ''}${contactText ? `\n\n${contactText}` : ''}`;
   return { subject: `${heading} — ${data.business_name}`, html, text };
 }
 

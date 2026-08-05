@@ -35,7 +35,7 @@ export function PublicAppointmentManagementPage() {
   const [data, setData] = useState<PublicManagedAppointmentView | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [unavailableMessage, setUnavailableMessage] = useState(
-    'The link may be expired, already used, or invalid. Open the most recent appointment email and try again.',
+    'It may have expired or already been replaced. Please open the most recent appointment email or contact the business for assistance.',
   );
   const [mode, setMode] = useState<'summary' | 'reschedule' | 'cancel'>('summary');
   const [date, setDate] = useState('');
@@ -59,7 +59,7 @@ export function PublicAppointmentManagementPage() {
       setUnavailableMessage(
         reason instanceof ApiError && reason.status === 429
           ? 'Too many requests. Wait a moment and try again.'
-          : 'The link may be expired, already used, or invalid. Open the most recent appointment email and try again.',
+          : 'It may have expired or already been replaced. Please open the most recent appointment email or contact the business for assistance.',
       );
       setState('unavailable');
     }
@@ -74,7 +74,7 @@ export function PublicAppointmentManagementPage() {
     return (
       <ManagementStatus
         headingRef={headingRef}
-        title="This appointment link is unavailable"
+        title="This appointment link is no longer available"
         message={unavailableMessage}
         retry={() => void load()}
         alert
@@ -136,7 +136,9 @@ export function PublicAppointmentManagementPage() {
       }
       setData(result);
       setMode('summary');
-      setMessage('Your appointment was rescheduled. A new management link was also sent by email.');
+      setMessage(
+        "Your appointment has been successfully rescheduled.\n\nWe've emailed you an updated appointment confirmation with a new management link.",
+      );
     } catch (reason) {
       setMessage(errorMessage(reason, 'That time is no longer available. Choose another time.'));
     } finally {
@@ -183,7 +185,7 @@ export function PublicAppointmentManagementPage() {
           </h1>
           {message ? (
             <>
-              <p
+              <div
                 className={
                   message.includes('cancelled') || message.includes('rescheduled')
                     ? 'form-success'
@@ -191,8 +193,10 @@ export function PublicAppointmentManagementPage() {
                 }
                 role="status"
               >
-                {message}
-              </p>
+                {message.split('\n\n').map((paragraph) => (
+                  <p key={paragraph}>{paragraph}</p>
+                ))}
+              </div>
               {!message.includes('cancelled') && !message.includes('rescheduled') ? (
                 <button
                   type="button"
@@ -234,6 +238,7 @@ export function PublicAppointmentManagementPage() {
                 </p>
               )}
               <CutoffMessage data={data} />
+              <BusinessHelp business={data.business} />
             </>
           ) : mode === 'reschedule' ? (
             <fieldset className="management-flow" disabled={busy}>
@@ -335,11 +340,11 @@ function Brand({ business }: { business: PublicManagedAppointmentView['business'
       )}
       <div>
         <strong>{business.name}</strong>
-        <div className="management-contact">
-          {business.phone ? <a href={`tel:${business.phone}`}>{business.phone}</a> : null}
-          {business.email ? <a href={`mailto:${business.email}`}>{business.email}</a> : null}
-          {business.website ? <a href={business.website}>Website</a> : null}
-        </div>
+        {business.website ? (
+          <div className="management-website">
+            <a href={business.website}>Website</a>
+          </div>
+        ) : null}
       </div>
     </header>
   );
@@ -365,9 +370,23 @@ function AppointmentSummary({ data }: { data: PublicManagedAppointmentView }) {
       </div>
       <div>
         <dt>Timezone</dt>
-        <dd>{data.appointment.timezone}</dd>
+        <dd>{formatTimezone(data.appointment.timezone)}</dd>
       </div>
     </dl>
+  );
+}
+function BusinessHelp({ business }: { business: PublicManagedAppointmentView['business'] }) {
+  if (!business.phone && !business.email) return null;
+  return (
+    <aside className="management-help" aria-labelledby="management-help-title">
+      <h2 id="management-help-title">Need help?</h2>
+      <div className="management-contact">
+        {business.phone ? (
+          <a href={`tel:${business.phone}`}>{formatPhone(business.phone)}</a>
+        ) : null}
+        {business.email ? <a href={`mailto:${business.email}`}>{business.email}</a> : null}
+      </div>
+    </aside>
   );
 }
 function CutoffMessage({ data }: { data: PublicManagedAppointmentView }) {
@@ -434,6 +453,29 @@ function formatInstant(value: string, timezone: string) {
     timeStyle: 'short',
     timeZone: timezone,
   }).format(new Date(value));
+}
+export function formatTimezone(timezone: string) {
+  const value = new Date('2026-01-15T12:00:00.000Z');
+  const longName = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    timeZoneName: 'longGeneric',
+  })
+    .formatToParts(value)
+    .find((part) => part.type === 'timeZoneName')?.value;
+  const shortName = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    timeZoneName: 'shortGeneric',
+  })
+    .formatToParts(value)
+    .find((part) => part.type === 'timeZoneName')?.value;
+  if (!longName) return timezone;
+  return shortName && shortName !== longName ? `${longName} (${shortName})` : longName;
+}
+function formatPhone(phone: string) {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('1'))
+    return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+  return phone;
 }
 function addDays(date: string, count: number) {
   const value = new Date(`${date}T12:00:00Z`);

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   PublicAppointmentManagementPage,
   captureManagementCredential,
+  formatTimezone,
 } from './PublicAppointmentManagementPage.js';
 
 const tokenId = '11111111-1111-4111-8111-111111111111';
@@ -42,6 +43,16 @@ describe('public appointment management', () => {
     expect(screen.getByText('BNT-12345678')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reschedule' })).toBeEnabled();
     expect(screen.getByText(/Rescheduling is available until/)).toBeInTheDocument();
+    expect(screen.getByText('Eastern Time (ET)')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Need help?' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '(843) 555-0100' })).toHaveAttribute(
+      'href',
+      'tel:+18435550100',
+    );
+    expect(screen.getByRole('link', { name: 'help@example.test' })).toHaveAttribute(
+      'href',
+      'mailto:help@example.test',
+    );
     expect(document.body.textContent).not.toContain(credential);
     expect(window.location.hash).toBe('');
   });
@@ -89,7 +100,14 @@ describe('public appointment management', () => {
     });
     fireEvent.click(await screen.findByRole('button', { name: /September 5/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm new time' }));
-    expect(await screen.findByText(/was rescheduled/)).toBeInTheDocument();
+    expect(
+      await screen.findByText('Your appointment has been successfully rescheduled.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "We've emailed you an updated appointment confirmation with a new management link.",
+      ),
+    ).toBeInTheDocument();
     expect(window.location.pathname).toBe(`/appointments/manage/${replacementId}`);
     expect(window.location.hash).toBe('');
     expect(storageSet).not.toHaveBeenCalled();
@@ -111,6 +129,34 @@ describe('public appointment management', () => {
     render(<PublicAppointmentManagementPage />);
     expect(await screen.findByRole('alert')).toHaveTextContent(text);
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('gives clear next steps when a management link is unavailable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(jsonResponse(404, { error: { code: 'appointment_link_unavailable' } })),
+    );
+    render(<PublicAppointmentManagementPage />);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('This appointment link is no longer available');
+    expect(alert).toHaveTextContent('expired or already been replaced');
+    expect(alert).toHaveTextContent('contact the business for assistance');
+  });
+
+  it('omits the help section when no public contact details are configured', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(200, {
+          data: managedAppointment({ business: { phone: null, email: null } }),
+        }),
+      ),
+    );
+    render(<PublicAppointmentManagementPage />);
+    await screen.findByRole('heading', { name: 'Harbor Service' });
+    expect(screen.queryByRole('heading', { name: 'Need help?' })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -171,8 +217,16 @@ describe('public appointment management', () => {
   });
 });
 
+describe('formatTimezone', () => {
+  it('presents IANA timezones with customer-friendly generic names', () => {
+    expect(formatTimezone('America/New_York')).toBe('Eastern Time (ET)');
+    expect(formatTimezone('America/Chicago')).toBe('Central Time (CT)');
+  });
+});
+
 function managedAppointment(overrides: Record<string, unknown> = {}) {
   const replacement = overrides.replacement;
+  const business = (overrides.business as Record<string, unknown> | undefined) ?? {};
   return {
     business: {
       name: 'Safe Business',
@@ -181,6 +235,7 @@ function managedAppointment(overrides: Record<string, unknown> = {}) {
       phone: '+18435550100',
       email: 'help@example.test',
       website: 'https://example.test',
+      ...business,
     },
     appointment: {
       reference: 'BNT-12345678',
