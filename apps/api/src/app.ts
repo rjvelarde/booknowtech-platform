@@ -16,6 +16,8 @@ import { registerPublicBookingRoutes } from './public/routes.js';
 import { registerNotificationRoutes } from './notification/routes.js';
 import { registerPublicAppointmentManagementRoutes } from './public-management/routes.js';
 import type { ReadinessProbe } from './readiness.js';
+import { type RateLimiter, allowAllRateLimiter } from './rate-limit/limiter.js';
+import { registerRateLimitHook } from './rate-limit/routes.js';
 
 interface BuildApplicationOptions {
   environment: Environment;
@@ -23,6 +25,7 @@ interface BuildApplicationOptions {
   logger?: boolean;
   adminStore?: AdminStore;
   closeAdmin?: () => Promise<void>;
+  rateLimiter?: RateLimiter;
 }
 
 const dataEnvelopeSchema = {
@@ -39,6 +42,7 @@ export async function buildApplication({
   logger = true,
   adminStore,
   closeAdmin,
+  rateLimiter,
 }: BuildApplicationOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger ? createLoggerOptions(environment) : false,
@@ -146,7 +150,17 @@ export async function buildApplication({
 
   if (environment.TENANT_ADMIN_ENABLED) {
     if (!adminStore) throw new Error('Administrative persistence is required when enabled');
-    registerAdminRoutes(app, environment, adminStore);
+    const effectiveRateLimiter =
+      rateLimiter ??
+      (environment.NODE_ENV === 'test'
+        ? allowAllRateLimiter
+        : (() => {
+            throw new Error(
+              'Shared rate limiting is required when administrative routes are enabled',
+            );
+          })());
+    registerRateLimitHook(app, environment, effectiveRateLimiter);
+    registerAdminRoutes(app, environment, adminStore, effectiveRateLimiter);
     registerCatalogRoutes(app, environment, adminStore);
     registerProviderRoutes(app, environment, adminStore);
     registerAvailabilityRoutes(app, environment, adminStore);

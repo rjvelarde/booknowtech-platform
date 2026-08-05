@@ -51,6 +51,33 @@ suite('administrative foundation migration', () => {
     ).rejects.toThrow();
   });
 
+  it('creates strict shared rate-limit storage and named indexes', async () => {
+    await migrateDatabase(db);
+    const indexes = await db.collection('request_rate_limits').indexes();
+    expect(indexes.map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        'request_rate_limits_bucket_unique',
+        'request_rate_limits_expiry_ttl',
+      ]),
+    );
+    expect(indexes.find(({ name }) => name === 'request_rate_limits_expiry_ttl')).toMatchObject({
+      expireAfterSeconds: 0,
+    });
+    await expect(
+      db.collection('request_rate_limits').insertOne({
+        scope: 'public_discovery',
+        tenant_key: 'platform',
+        subject_hash: 'a'.repeat(64),
+        bucket_started_at: new Date(),
+        count: 1,
+        expires_at: new Date(),
+        created_at: new Date(),
+        updated_at: new Date(),
+        raw_ip: '203.0.113.8',
+      }),
+    ).rejects.toThrow();
+  });
+
   it('creates tenant-scoped catalog indexes and rejects invalid delivery modes', async () => {
     await migrateDatabase(db);
     const indexes = await db.collection('services').indexes();

@@ -17,7 +17,6 @@ import type {
 import { dateRange, generateSlots, localToUtc, previewDay } from '../availability/routes.js';
 import { authenticateAdminMutation, authenticateAdminRequest } from '../auth/routes.js';
 import type { Environment } from '../config.js';
-import { clientIp } from '../client-ip.js';
 import { TenantHostResolver } from './tenant-host-resolver.js';
 
 const managers = new Set(['tenant_owner', 'tenant_admin']);
@@ -149,31 +148,6 @@ export function registerPublicBookingRoutes(
   store: AdminStore,
 ): void {
   const hostResolver = new TenantHostResolver(store);
-  const limiter = createPublicRateLimiter();
-  const submissionLimiter = createPublicRateLimiter();
-  app.addHook('onRequest', async (request, reply) => {
-    if (!request.url.startsWith('/api/v1/public/')) return;
-    const hostname = fallbackTenantSlug(request.hostname) ?? 'invalid';
-    const route = request.routeOptions.url ?? request.url.split('?')[0]!;
-    const maximum = route.endsWith('/available-starts') ? 30 : 120;
-    const requesterIp = clientIp(request, environment);
-    if (!limiter.allow(`${requesterIp}:${hostname}:${route}`, maximum, 60_000)) {
-      void reply.header('Retry-After', '60');
-      return safeError(reply, 429, 'public_rate_limit_exceeded', request.id);
-    }
-    if (request.method === 'POST' && route === '/api/v1/public/appointments') {
-      const actor = `${requesterIp}:${hostname}:public-appointment`;
-      const tenant = `${hostname}:public-appointment`;
-      if (
-        !submissionLimiter.allow(`${actor}:10m`, 5, 10 * 60_000) ||
-        !submissionLimiter.allow(`${actor}:24h`, 20, 24 * 60 * 60_000) ||
-        !submissionLimiter.allow(`${tenant}:10m`, 120, 10 * 60_000)
-      ) {
-        void reply.header('Retry-After', '600');
-        return safeError(reply, 429, 'public_rate_limit_exceeded', request.id);
-      }
-    }
-  });
 
   app.get(
     '/api/v1/public/booking-context',
@@ -1186,25 +1160,6 @@ function addLocalDays(date: string, count: number) {
   const marker = new Date(`${date}T12:00:00Z`);
   marker.setUTCDate(marker.getUTCDate() + count);
   return marker.toISOString().slice(0, 10);
-}
-
-function createPublicRateLimiter() {
-  const counters = new Map<string, { count: number; resetsAt: number }>();
-  return {
-    allow(key: string, maximum: number, windowMilliseconds: number) {
-      const now = Date.now();
-      const current = counters.get(key);
-      if (!current || current.resetsAt <= now) {
-        counters.set(key, { count: 1, resetsAt: now + windowMilliseconds });
-        if (counters.size > 10_000)
-          for (const [itemKey, value] of counters)
-            if (value.resetsAt <= now) counters.delete(itemKey);
-        return true;
-      }
-      current.count += 1;
-      return current.count <= maximum;
-    },
-  };
 }
 
 async function requireAdmin(

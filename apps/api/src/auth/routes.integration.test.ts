@@ -5,8 +5,51 @@ import { AdminStore, type VerifiedAdminContext } from '../admin/store.js';
 import { buildApplication } from '../app.js';
 import { hashPassword } from './password.js';
 import { StubReadinessProbe, testEnvironment } from '../test-fixtures.js';
+import type { RateLimiter } from '../rate-limit/limiter.js';
 
 describe('administrative authentication routes', () => {
+  it('applies shared IP and failed-account login limits with the generic envelope', async () => {
+    const store = Object.create(AdminStore.prototype) as AdminStore;
+    vi.spyOn(store, 'findUserByEmail').mockResolvedValue(null);
+    vi.spyOn(store, 'audit').mockResolvedValue();
+    const scopes: string[] = [];
+    const limiter: RateLimiter = {
+      tenantKey: () => 'platform',
+      consume: (request) => {
+        scopes.push(request.scope);
+        const rejected = request.scope === 'admin_login_account';
+        return Promise.resolve({
+          allowed: !rejected,
+          count: rejected ? 6 : 1,
+          limit: request.limit,
+          retryAfterSeconds: 321,
+          bucketStartedAt: new Date(0),
+        });
+      },
+    };
+    const app = await buildApplication({
+      environment: { ...testEnvironment, TENANT_ADMIN_ENABLED: true },
+      readiness: new StubReadinessProbe(),
+      adminStore: store,
+      rateLimiter: limiter,
+      logger: false,
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: { origin: testEnvironment.ADMIN_ORIGIN },
+      payload: { email: 'missing@example.test', password: 'wrong' },
+    });
+    expect(response.statusCode).toBe(429);
+    expect(response.headers['retry-after']).toBe('321');
+    expect(response.json().error).toMatchObject({
+      code: 'rate_limited',
+      message: 'The request could not be authorized.',
+    });
+    expect(scopes).toEqual(['admin_login_ip', 'admin_login_account']);
+    await app.close();
+  });
+
   it('logs in with a host-only secure session and returns verified membership context', async () => {
     const store = Object.create(AdminStore.prototype) as AdminStore;
     const userId = new ObjectId();

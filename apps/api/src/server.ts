@@ -1,6 +1,7 @@
 import { buildApplication } from './app.js';
 import { loadEnvironment } from './config.js';
 import { AtlasReadinessProbe } from './readiness.js';
+import { MongoRateLimiter } from './rate-limit/limiter.js';
 
 async function start(): Promise<void> {
   const environment = loadEnvironment();
@@ -14,6 +15,10 @@ async function start(): Promise<void> {
         environment,
         readiness,
         adminStore: new AdminStore(adminClient.db(environment.MONGODB_DATABASE)),
+        rateLimiter: new MongoRateLimiter(
+          adminClient.db(environment.MONGODB_DATABASE),
+          environment.RATE_LIMIT_KEY_SECRET,
+        ),
         closeAdmin: async () => adminClient.close(),
       })
     : await buildApplication({ environment, readiness });
