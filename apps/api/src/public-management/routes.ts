@@ -26,7 +26,7 @@ export function registerPublicAppointmentManagementRoutes(
   environment: Environment,
   store: AdminStore,
 ): void {
-  const hostResolver = new TenantHostResolver(store);
+  const hostResolver = new TenantHostResolver(store, environment.BOOKING_ROOT_DOMAIN);
   app.get<{ Params: { tokenPublicId: string } }>(
     '/api/v1/public/appointments/manage/:tokenPublicId',
     async (request, reply) => {

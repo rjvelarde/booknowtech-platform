@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx --env-file-if-exists=../../.env watch src/server.ts",
     "db:migrate": "tsx --env-file-if-exists=../../.env src/database/migrate-command.ts",
-    "db:seed:development": "tsx --env-file-if-exists=../../.env src/database/seed-development.ts",
+    "db:seed:staging": "tsx --env-file-if-exists=../../.env src/database/seed-development.ts",
     "start": "node --env-file-if-exists=../../.env dist/server.js",
     "test": "vitest run",
     "test:unit": "vitest run --exclude '**/*.integration.test.ts'",

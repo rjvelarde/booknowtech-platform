@@ -4,12 +4,14 @@ import { loadEnvironment } from './config.js';
 
 const valid = {
   NODE_ENV: 'test',
+  ENVIRONMENT_ID: 'test',
   HOST: '127.0.0.1',
   PORT: '3000',
   LOG_LEVEL: 'info',
   MONGODB_URI: 'mongodb://user:password@localhost:27017',
   MONGODB_DATABASE: 'booknowtech_test',
   BUILD_VERSION: 'commit-abc123',
+  BOOKING_ROOT_DOMAIN: 'booknowtech.com',
   ADMIN_ORIGIN: 'https://admin.example.test',
   TENANT_ADMIN_ENABLED: 'false',
   OPENAPI_ENABLED: 'true',
@@ -31,6 +33,63 @@ describe('loadEnvironment', () => {
   });
 
   it('disables OpenAPI in production', () => {
-    expect(() => loadEnvironment({ ...valid, NODE_ENV: 'production' })).toThrow('OPENAPI_ENABLED');
+    expect(() =>
+      loadEnvironment({
+        ...valid,
+        NODE_ENV: 'production',
+        ENVIRONMENT_ID: 'production',
+        MONGODB_DATABASE: 'booknowtech_production',
+      }),
+    ).toThrow('OPENAPI_ENABLED');
+  });
+
+  it('enforces environment, Railway, database, and hostname pairings', () => {
+    expect(() => loadEnvironment({ ...valid, ENVIRONMENT_ID: 'staging' })).toThrow('NODE_ENV');
+    expect(() => loadEnvironment({ ...valid, RAILWAY_ENVIRONMENT_NAME: 'production' })).toThrow(
+      'RAILWAY_ENVIRONMENT_NAME',
+    );
+    expect(() =>
+      loadEnvironment({
+        ...valid,
+        NODE_ENV: 'staging',
+        ENVIRONMENT_ID: 'staging',
+        MONGODB_DATABASE: 'booknowtech_production',
+        BOOKING_ROOT_DOMAIN: 'staging.booknowtech.com',
+      }),
+    ).toThrow('MONGODB_DATABASE');
+  });
+
+  it('derives Railway build identity from the immutable commit SHA', () => {
+    const environment = loadEnvironment({
+      ...valid,
+      NODE_ENV: 'staging',
+      ENVIRONMENT_ID: 'staging',
+      RAILWAY_ENVIRONMENT_NAME: 'staging',
+      RAILWAY_GIT_COMMIT_SHA: 'a'.repeat(40),
+      MONGODB_DATABASE: 'booknowtech_staging',
+      BOOKING_ROOT_DOMAIN: 'staging.booknowtech.com',
+      BUILD_VERSION: 'operator-value-is-ignored',
+    });
+    expect(environment.BUILD_VERSION).toBe('a'.repeat(40));
+  });
+
+  it('accepts the exact production matrix and rejects production seed variables', () => {
+    const production = {
+      ...valid,
+      NODE_ENV: 'production',
+      ENVIRONMENT_ID: 'production',
+      RAILWAY_ENVIRONMENT_NAME: 'production',
+      RAILWAY_GIT_COMMIT_SHA: 'c'.repeat(40),
+      MONGODB_DATABASE: 'booknowtech_production',
+      OPENAPI_ENABLED: 'false',
+    };
+    expect(loadEnvironment(production)).toMatchObject({
+      NODE_ENV: 'production',
+      MONGODB_DATABASE: 'booknowtech_production',
+      BUILD_VERSION: 'c'.repeat(40),
+    });
+    expect(() => loadEnvironment({ ...production, ALLOW_DEVELOPMENT_SEED: 'true' })).toThrow(
+      'production seed variables',
+    );
   });
 });

@@ -1,4 +1,7 @@
-const FALLBACK_SUFFIX = '.booknowtech.com';
+export const PRODUCTION_BOOKING_ROOT_DOMAIN = 'booknowtech.com';
+export const STAGING_BOOKING_ROOT_DOMAIN = 'staging.booknowtech.com';
+export type BookingRootDomain =
+  typeof PRODUCTION_BOOKING_ROOT_DOMAIN | typeof STAGING_BOOKING_ROOT_DOMAIN;
 const DEVELOPMENT_SUFFIXES = ['.localhost', '.example.test'] as const;
 const RESERVED_TENANT_LABELS = new Set(['admin', 'api', 'book', 'status', 'support', 'www']);
 const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -39,39 +42,52 @@ export function normalizeHostname(input: string): string | null {
   return ascii;
 }
 
-export function fallbackTenantSlug(hostname: string): string | null {
+export function fallbackTenantSlug(
+  hostname: string,
+  rootDomain: BookingRootDomain = PRODUCTION_BOOKING_ROOT_DOMAIN,
+): string | null {
   const normalized = normalizeHostname(hostname);
   if (!normalized) return null;
 
-  const suffix = fallbackSuffix(normalized);
+  const suffix = fallbackSuffix(normalized, rootDomain);
   if (!suffix) return null;
   const label = normalized.slice(0, -suffix.length);
   if (!label || label.includes('.') || RESERVED_TENANT_LABELS.has(label)) return null;
   return DNS_LABEL.test(label) ? label : null;
 }
 
-export function fallbackBookingHostname(slug: string): string | null {
+export function fallbackBookingHostname(
+  slug: string,
+  rootDomain: BookingRootDomain = PRODUCTION_BOOKING_ROOT_DOMAIN,
+): string | null {
   const normalized = normalizeTenantLabel(slug);
-  return normalized ? `${normalized}${FALLBACK_SUFFIX}` : null;
+  return normalized ? `${normalized}.${rootDomain}` : null;
 }
 
-export function fallbackBookingOrigin(slug: string): string | null {
-  const hostname = fallbackBookingHostname(slug);
+export function fallbackBookingOrigin(
+  slug: string,
+  rootDomain: BookingRootDomain = PRODUCTION_BOOKING_ROOT_DOMAIN,
+): string | null {
+  const hostname = fallbackBookingHostname(slug, rootDomain);
   return hostname ? `https://${hostname}` : null;
 }
 
-export function isAdministrativeHostname(hostname: string): boolean {
+export function isAdministrativeHostname(
+  hostname: string,
+  rootDomain: BookingRootDomain = PRODUCTION_BOOKING_ROOT_DOMAIN,
+): boolean {
   const normalized = normalizeHostname(hostname);
   return (
-    normalized === 'admin.booknowtech.com' ||
+    normalized === `admin.${rootDomain}` ||
     normalized === 'admin.example.test' ||
     normalized === 'admin.localhost' ||
     normalized === 'localhost'
   );
 }
 
-function fallbackSuffix(hostname: string): string | null {
-  if (hostname.endsWith(FALLBACK_SUFFIX)) return FALLBACK_SUFFIX;
+function fallbackSuffix(hostname: string, rootDomain: BookingRootDomain): string | null {
+  const fallbackSuffix = `.${rootDomain}`;
+  if (hostname.endsWith(fallbackSuffix)) return fallbackSuffix;
   return DEVELOPMENT_SUFFIXES.find((suffix) => hostname.endsWith(suffix)) ?? null;
 }
 

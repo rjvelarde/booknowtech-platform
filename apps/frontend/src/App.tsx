@@ -23,11 +23,21 @@ import { AppointmentsPage } from './pages/AppointmentsPage.js';
 import { PublicBookingPage } from './pages/PublicBookingPage.js';
 import { PublicBookingSettingsPage } from './pages/PublicBookingSettingsPage.js';
 import { PublicAppointmentManagementPage } from './pages/PublicAppointmentManagementPage.js';
+import { loadPublicEnvironment } from './config.js';
 
 type View = 'loading' | 'placeholder' | 'login' | 'select' | 'hub' | 'denied';
 
 export function App() {
-  if (isPublicBookingHost(window.location.hostname))
+  const publicEnvironment = loadPublicEnvironment(
+    import.meta.env.MODE === 'test'
+      ? {
+          VITE_API_BASE_URL: '/api',
+          VITE_BOOKING_ROOT_DOMAIN: 'booknowtech.com',
+          VITE_BUILD_VERSION: '0'.repeat(40),
+        }
+      : import.meta.env,
+  );
+  if (isPublicBookingHost(window.location.hostname, publicEnvironment.VITE_BOOKING_ROOT_DOMAIN))
     return window.location.pathname.startsWith('/appointments/manage/') ? (
       <PublicAppointmentManagementPage />
     ) : (
@@ -175,8 +185,11 @@ export function App() {
   );
 }
 
-export function isPublicBookingHost(hostname: string): boolean {
-  return fallbackTenantSlug(hostname) !== null;
+export function isPublicBookingHost(
+  hostname: string,
+  bookingRootDomain: 'booknowtech.com' | 'staging.booknowtech.com' = 'booknowtech.com',
+): boolean {
+  return fallbackTenantSlug(hostname, bookingRootDomain) !== null;
 }
 
 function navigate(path: string, setPath: (path: string) => void): void {

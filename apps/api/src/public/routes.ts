@@ -147,7 +147,7 @@ export function registerPublicBookingRoutes(
   environment: Environment,
   store: AdminStore,
 ): void {
-  const hostResolver = new TenantHostResolver(store);
+  const hostResolver = new TenantHostResolver(store, environment.BOOKING_ROOT_DOMAIN);
 
   app.get(
     '/api/v1/public/booking-context',
@@ -610,14 +610,20 @@ function registerAdministrativeConfiguration(
   app.get('/api/v1/admin/public-booking-settings', async (request, reply) => {
     const context = await requireAdmin(request, reply, store, false, environment);
     if (!context) return;
-    return reply.send(envelope(adminSettingsView(context.tenant!), request.id));
+    return reply.send(
+      envelope(adminSettingsView(context.tenant!, environment.BOOKING_ROOT_DOMAIN), request.id),
+    );
   });
   app.patch<{ Body: PublicSettingsBody }>(
     '/api/v1/admin/public-booking-settings',
     async (request, reply) => {
       const context = await requireAdmin(request, reply, store, true, environment);
       if (!context) return;
-      const changes = normalizePublicSettings(request.body, context.tenant!);
+      const changes = normalizePublicSettings(
+        request.body,
+        context.tenant!,
+        environment.BOOKING_ROOT_DOMAIN,
+      );
       if (!changes) return safeError(reply, 400, 'validation_failed', request.id);
       const result = await store.updatePublicBookingSettings({
         tenantId: context.tenant!._id,
@@ -641,7 +647,13 @@ function registerAdministrativeConfiguration(
           metadata: { public_booking_enabled: String(changes.public_booking_enabled) },
         });
       return reply.send(
-        envelope({ ...adminSettingsView(updated!), changed: result === 'updated' }, request.id),
+        envelope(
+          {
+            ...adminSettingsView(updated!, environment.BOOKING_ROOT_DOMAIN),
+            changed: result === 'updated',
+          },
+          request.id,
+        ),
       );
     },
   );
@@ -1187,10 +1199,13 @@ async function requireAdmin(
   return context;
 }
 
-function adminSettingsView(tenant: TenantDocument) {
+function adminSettingsView(
+  tenant: TenantDocument,
+  bookingRootDomain: Environment['BOOKING_ROOT_DOMAIN'],
+) {
   return {
     public_booking_enabled: tenant.public_booking_enabled,
-    fallback_hostname: fallbackBookingHostname(tenant.slug),
+    fallback_hostname: fallbackBookingHostname(tenant.slug, bookingRootDomain),
     public_profile: tenant.public_profile,
     booking_policy: tenant.booking_policy,
     public_booking_terms: tenant.public_booking_terms,
@@ -1199,7 +1214,11 @@ function adminSettingsView(tenant: TenantDocument) {
   };
 }
 
-function normalizePublicSettings(body: PublicSettingsBody, tenant: TenantDocument) {
+function normalizePublicSettings(
+  body: PublicSettingsBody,
+  tenant: TenantDocument,
+  bookingRootDomain: Environment['BOOKING_ROOT_DOMAIN'],
+) {
   if (!body || typeof body !== 'object') return null;
   const profile = body.public_profile;
   if (!profile || typeof profile !== 'object') return null;
@@ -1225,7 +1244,10 @@ function normalizePublicSettings(body: PublicSettingsBody, tenant: TenantDocumen
     (!tenant.default_timezone ||
       !tenant.locale ||
       !tenant.currency ||
-      fallbackTenantSlug(fallbackBookingHostname(tenant.slug) ?? '') !== tenant.slug)
+      fallbackTenantSlug(
+        fallbackBookingHostname(tenant.slug, bookingRootDomain) ?? '',
+        bookingRootDomain,
+      ) !== tenant.slug)
   )
     return null;
   return {

@@ -15,7 +15,7 @@
     "build:worker": "pnpm --filter @booknowtech/shared build && pnpm --filter @booknowtech/worker build",
     "dev": "concurrently -n frontend,api,worker -c blue,green,magenta \"pnpm --filter @booknowtech/frontend dev\" \"pnpm --filter @booknowtech/api dev\" \"pnpm --filter @booknowtech/worker dev\"",
     "db:migrate": "pnpm --filter @booknowtech/api db:migrate",
-    "db:seed:development": "pnpm --filter @booknowtech/api db:seed:development",
+    "db:seed:staging": "pnpm --filter @booknowtech/api db:seed:staging",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings=0",

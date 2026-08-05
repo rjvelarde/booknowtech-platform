@@ -106,6 +106,27 @@ describe('public booking discovery', () => {
     await app.close();
   });
 
+  it('serves the configured staging suffix and rejects the production suffix', async () => {
+    const { app, store, tenant } = await testApp({
+      ...testEnvironment,
+      BOOKING_ROOT_DOMAIN: 'staging.booknowtech.com',
+    });
+    vi.spyOn(store, 'getPublicTenantBySlug').mockResolvedValue(tenant);
+    const staging = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/booking-context',
+      headers: { host: 'brazilian-wax.staging.booknowtech.com' },
+    });
+    const production = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/booking-context',
+      headers: { host: 'brazilian-wax.booknowtech.com' },
+    });
+    expect(staging.statusCode).toBe(200);
+    expect(production.statusCode).toBe(404);
+    await app.close();
+  });
+
   it('uses safe indistinguishable errors for unpublished businesses and private resources', async () => {
     const { app, store, tenant } = await testApp();
     vi.spyOn(store, 'getPublicTenantBySlug')
@@ -227,11 +248,11 @@ describe('public booking discovery', () => {
   });
 });
 
-async function testApp() {
+async function testApp(environment = testEnvironment) {
   const store = Object.create(AdminStore.prototype) as AdminStore;
   const tenant = tenantFixture();
   const app = await buildApplication({
-    environment: { ...testEnvironment, TENANT_ADMIN_ENABLED: true },
+    environment: { ...environment, TENANT_ADMIN_ENABLED: true },
     readiness: new StubReadinessProbe(),
     adminStore: store,
     logger: false,

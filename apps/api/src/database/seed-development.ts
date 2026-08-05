@@ -9,16 +9,15 @@ import type {
   ServiceDocument,
 } from '../admin/store.js';
 import { loadEnvironment } from '../config.js';
+import { assertStagingSeedAllowed } from './seed-guard.js';
 
 async function main(): Promise<void> {
+  assertStagingSeedAllowed(process.env);
   const environment = loadEnvironment();
-  if (!['development', 'test', 'staging'].includes(environment.NODE_ENV)) {
-    throw new Error('Administrative seed is prohibited outside development, test, and staging');
-  }
   const email = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase();
   const password = process.env.SEED_ADMIN_PASSWORD;
   if (!email || !password || password.length < 12) {
-    throw new Error('SEED_ADMIN_EMAIL and a 12+ character SEED_ADMIN_PASSWORD are required');
+    throw new Error('Staging seed credentials are required and must meet policy');
   }
 
   const client = new MongoClient(environment.MONGODB_URI);

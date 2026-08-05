@@ -1,3 +1,4 @@
+import type { BookingRootDomain } from '@booknowtech/shared';
 import { fallbackBookingOrigin, fallbackTenantSlug } from '@booknowtech/shared';
 
 import type { AdminStore, TenantDocument } from '../admin/store.js';
@@ -7,13 +8,16 @@ export type PublicTenantCapability = 'appointment_self_service' | 'public_bookin
 type TenantHostStore = Pick<AdminStore, 'getActiveTenantBySlug' | 'getPublicTenantBySlug'>;
 
 export class TenantHostResolver {
-  public constructor(private readonly store: TenantHostStore) {}
+  public constructor(
+    private readonly store: TenantHostStore,
+    private readonly bookingRootDomain: BookingRootDomain = 'booknowtech.com',
+  ) {}
 
   public async resolvePublicTenant(
     host: string,
     requiredCapability: PublicTenantCapability,
   ): Promise<TenantDocument | null> {
-    const slug = fallbackTenantSlug(host);
+    const slug = fallbackTenantSlug(host, this.bookingRootDomain);
     if (!slug) return null;
 
     if (requiredCapability === 'public_booking') {
@@ -25,6 +29,6 @@ export class TenantHostResolver {
   }
 
   public publicBookingOrigin(tenant: Pick<TenantDocument, 'slug'>): string | null {
-    return fallbackBookingOrigin(tenant.slug);
+    return fallbackBookingOrigin(tenant.slug, this.bookingRootDomain);
   }
 }
