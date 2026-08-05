@@ -10,7 +10,8 @@ browser -> Railway public ingress -> frontend/Caddy -> Railway private network -
 
 The required staging contract is that Railway appends the connecting client address to
 `X-Forwarded-For`; the evidence table below must confirm that behavior before production. Caddy
-accepts forwarding metadata only when its immediate peer is loopback, link-local, RFC1918, or IPv6 ULA, parses
+accepts forwarding metadata only when its immediate peer is loopback, link-local, RFC1918,
+Railway's observed `100.64.0.0/10` shared-address space, or IPv6 ULA, parses
 `X-Forwarded-For` from right to left, removes all `X-Forwarded-*`, `X-Real-IP`, and inbound
 `X-BookNowTech-Client-IP` values, and sends one `X-BookNowTech-Client-IP` value to the API.
 
@@ -21,6 +22,11 @@ spoofable forwarding header.
 
 The API service must not have a public Railway domain. A public API domain would violate this
 contract because the Railway edge could become an alternate trusted private path around Caddy.
+
+The first staging probe on 2026-08-05 reported API socket peers in `100.64.0.0/10` instead of the
+external client address. Railway was therefore confirmed to use this shared-address range on the
+private frontend-to-API path. The range is trusted only as an immediate infrastructure peer; client
+identity must still come from Caddy's sanitized canonical header.
 
 ## Staging forwarding-chain evidence
 

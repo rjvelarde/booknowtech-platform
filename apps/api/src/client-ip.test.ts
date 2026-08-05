@@ -13,6 +13,9 @@ describe('canonical client IP', () => {
     ['172.31.255.254', true],
     ['192.168.10.4', true],
     ['169.254.4.2', true],
+    ['100.64.0.5', true],
+    ['100.127.255.254', true],
+    ['100.128.0.1', false],
     ['::1', true],
     ['fd12:3456:789a::1', true],
     ['fe80::1', true],
@@ -50,6 +53,15 @@ describe('canonical client IP', () => {
       ).toBe('2001:db8::25');
     },
   );
+
+  it('accepts the canonical header from the Railway shared-address peer observed in staging', () => {
+    expect(
+      clientIp(
+        request('100.64.0.5', { 'x-booknowtech-client-ip': '203.0.113.25' }),
+        environment('staging'),
+      ),
+    ).toBe('203.0.113.25');
+  });
 
   it('ignores spoofed forwarding headers on direct API access', () => {
     expect(

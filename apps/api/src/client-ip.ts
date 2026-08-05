@@ -12,6 +12,7 @@ trustedProxyAddresses.addSubnet('10.0.0.0', 8, 'ipv4');
 trustedProxyAddresses.addSubnet('172.16.0.0', 12, 'ipv4');
 trustedProxyAddresses.addSubnet('192.168.0.0', 16, 'ipv4');
 trustedProxyAddresses.addSubnet('169.254.0.0', 16, 'ipv4');
+trustedProxyAddresses.addSubnet('100.64.0.0', 10, 'ipv4');
 trustedProxyAddresses.addAddress('::1', 'ipv6');
 trustedProxyAddresses.addSubnet('fc00::', 7, 'ipv6');
 trustedProxyAddresses.addSubnet('fe80::', 10, 'ipv6');

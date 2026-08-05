@@ -113,7 +113,7 @@ describe('operational API', () => {
     const trustedPath = await app.inject({
       method: 'GET',
       url: '/test/client-ip',
-      remoteAddress: '10.20.30.40',
+      remoteAddress: '100.64.0.5',
       headers: {
         'x-booknowtech-client-ip': '203.0.113.55',
         'x-forwarded-for': '198.51.100.55',
