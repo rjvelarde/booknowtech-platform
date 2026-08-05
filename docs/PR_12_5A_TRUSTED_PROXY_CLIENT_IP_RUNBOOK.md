@@ -39,14 +39,14 @@ Complete this table before production promotion and attach the corresponding Rai
 to the pull request. Use unique `X-Request-ID` UUIDs so requests can be correlated without logging
 credentials or appointment tokens.
 
-| Probe                                                                     | Expected Caddy/API result                                                   | Observed                   |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------- | -------------------------- |
-| Normal request from a known IPv4 network                                  | API `http.request.started.client_ip` equals the probe's public IPv4 address | Pending staging deployment |
-| Normal request from an IPv6 network                                       | API client IP is one normalized IPv6 address                                | Pending staging deployment |
-| Request with fake `X-Forwarded-For`                                       | API client IP remains the real probe address                                | Pending staging deployment |
-| Request with fake `X-Real-IP`                                             | Railway overwrites it; API client IP remains the real probe address         | Pending staging deployment |
-| Request with fake `X-BookNowTech-Client-IP`                               | API client IP remains the real probe address                                | Pending staging deployment |
-| Direct request to the API private hostname from an approved private shell | Missing canonical header resolves to `unknown`                              | Pending staging deployment |
+| Probe                                                                     | Expected Caddy/API result                                                   | Observed                                                   |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Normal request from a known IPv4 network                                  | API `http.request.started.client_ip` equals the probe's public IPv4 address | Pass 2026-08-05: Wi-Fi `65.187.x.x`; cellular `172.59.x.x` |
+| Normal request from an IPv6 network                                       | API client IP is one normalized IPv6 address                                | Not available from staging tester's networks               |
+| Request with fake `X-Forwarded-For`                                       | API client IP remains the real probe address                                | Pass 2026-08-05; HTTP 200 and Wi-Fi IP unchanged           |
+| Request with fake `X-Real-IP`                                             | Railway overwrites it; API client IP remains the real probe address         | Pass 2026-08-05; HTTP 200 and Wi-Fi IP unchanged           |
+| Request with fake `X-BookNowTech-Client-IP`                               | API client IP remains the real probe address                                | Pass 2026-08-05; HTTP 200 and Wi-Fi IP unchanged           |
+| Direct request to the API private hostname from an approved private shell | Missing canonical header resolves to `unknown`                              | Pass 2026-08-05; API console request resolved to `unknown` |
 
 If the public probes do not resolve to the known external client address, stop rollout. Do not
 broaden trusted ranges and do not select an `X-Forwarded-For` value. Capture the Caddy container's
