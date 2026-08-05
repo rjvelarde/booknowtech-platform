@@ -170,6 +170,7 @@ async function processOne(
       item.appointment_reference,
       item.template_data,
       managementUrl,
+      tenant.appointment_email_settings.reply_to_email,
     );
     const response = await fetch('https://api.postmarkapp.com/email', {
       method: 'POST',

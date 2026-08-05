@@ -468,6 +468,9 @@ button:disabled {
 .management-brand strong {
   font-size: 1.2rem;
 }
+.management-website {
+  margin-top: 0.3rem;
+}
 .management-contact {
   display: flex;
   flex-wrap: wrap;
@@ -484,6 +487,12 @@ button:disabled {
 .management-content h1,
 .management-status h1 {
   font-size: clamp(2rem, 8vw, 3.25rem);
+}
+.form-success p {
+  margin: 0;
+}
+.form-success p + p {
+  margin-top: 0.65rem;
 }
 .management-summary {
   display: grid;
@@ -531,6 +540,15 @@ button:disabled {
   padding: 0.85rem;
   border-left: 0.3rem solid #b26a00;
   background: #fff7e8;
+}
+.management-help {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #d6e0ed;
+}
+.management-help h2 {
+  margin: 0;
+  font-size: 1.15rem;
 }
 .management-flow {
   display: grid;

@@ -42,4 +42,35 @@ describe('renderAppointmentEmail', () => {
     expect(unlinked.html).not.toContain('Manage appointment');
     expect(unlinked.text).not.toContain('/appointments/manage/');
   });
+
+  it('invites replies and includes configured public contact details', () => {
+    const result = renderAppointmentEmail(
+      'appointment_confirmation',
+      'BNT-ABC12345',
+      data,
+      null,
+      'appointments@example.com',
+    );
+    const wording =
+      'Questions? Reply to this email or contact us at +18435551212 · hello@example.com · https://example.com.';
+    expect(result.html).toContain(wording);
+    expect(result.text).toContain(wording);
+  });
+
+  it('uses contact-only wording when replies are not configured', () => {
+    const result = renderAppointmentEmail('appointment_confirmation', 'BNT-ABC12345', data);
+    expect(result.text).toContain('Questions? Contact us at +18435551212');
+    expect(result.text).not.toContain('Reply to this email');
+  });
+
+  it('omits contact guidance when neither replies nor public contact details are configured', () => {
+    const result = renderAppointmentEmail('appointment_confirmation', 'BNT-ABC12345', {
+      ...data,
+      business_phone: null,
+      business_email: null,
+      business_website: null,
+    });
+    expect(result.html).not.toContain('Questions?');
+    expect(result.text).not.toContain('Questions?');
+  });
 });
