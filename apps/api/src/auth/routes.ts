@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import type { AdminStore, SessionCredential, VerifiedAdminContext } from '../admin/store.js';
 import type { Environment } from '../config.js';
+import { clientIp } from '../client-ip.js';
 import { verifyPassword } from './password.js';
 
 const SESSION_COOKIE = '__Host-bnt_admin_session';
@@ -37,7 +38,7 @@ export function registerAdminRoutes(
       },
     },
     async (request, reply) => {
-      if (!allowLoginAttempt(request.ip)) {
+      if (!allowLoginAttempt(clientIp(request, environment))) {
         return reply.status(429).send(authError('rate_limited', request.id));
       }
       if (!validOrigin(request, environment.ADMIN_ORIGIN)) {

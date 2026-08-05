@@ -75,6 +75,9 @@ jobs:
       - name: Verify frontend security headers
         run: pnpm test:security-headers
 
+      - name: Verify Caddy trusted-proxy contract
+        run: pnpm test:proxy-contract
+
       - name: Build API
         run: pnpm build:api
 

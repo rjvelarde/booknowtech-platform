@@ -2,6 +2,7 @@ import swagger from '@fastify/swagger';
 import Fastify, { type FastifyInstance, LogController } from 'fastify';
 
 import type { AdminStore } from './admin/store.js';
+import { clientIp, isTrustedProxyAddress } from './client-ip.js';
 import { registerAdminRoutes } from './auth/routes.js';
 import { registerCatalogRoutes } from './catalog/routes.js';
 import type { Environment } from './config.js';
@@ -43,6 +44,7 @@ export async function buildApplication({
     logger: logger ? createLoggerOptions(environment) : false,
     genReqId: (request) => resolveCorrelationId(request.headers['x-request-id']),
     logController: new LogController({ disableRequestLogging: true }),
+    trustProxy: isTrustedProxyAddress,
   });
 
   if (environment.OPENAPI_ENABLED) {
@@ -59,7 +61,11 @@ export async function buildApplication({
 
   app.addHook('onRequest', async (request, reply) => {
     void reply.header('x-request-id', request.id);
-    request.log.info({ event: 'http.request.started', request_id: request.id });
+    request.log.info({
+      event: 'http.request.started',
+      request_id: request.id,
+      client_ip: clientIp(request, environment),
+    });
   });
 
   app.addHook('onResponse', async (request, reply) => {
