@@ -78,6 +78,26 @@ describe('canonical fallback hostname model', () => {
     expect(fallbackBookingOrigin('nested.slug')).toBeNull();
   });
 
+  it('isolates staging and production fallback hosts', () => {
+    expect(fallbackTenantSlug('tenant.staging.booknowtech.com', 'staging.booknowtech.com')).toBe(
+      'tenant',
+    );
+    expect(fallbackTenantSlug('tenant.booknowtech.com', 'staging.booknowtech.com')).toBeNull();
+    expect(fallbackTenantSlug('tenant.staging.booknowtech.com', 'booknowtech.com')).toBeNull();
+    expect(fallbackBookingHostname('Tenant', 'staging.booknowtech.com')).toBe(
+      'tenant.staging.booknowtech.com',
+    );
+    expect(fallbackBookingOrigin('Tenant', 'staging.booknowtech.com')).toBe(
+      'https://tenant.staging.booknowtech.com',
+    );
+    expect(
+      isAdministrativeHostname('admin.staging.booknowtech.com', 'staging.booknowtech.com'),
+    ).toBe(true);
+    expect(isAdministrativeHostname('admin.booknowtech.com', 'staging.booknowtech.com')).toBe(
+      false,
+    );
+  });
+
   it.each([
     ['admin.booknowtech.com', true],
     ['ADMIN.booknowtech.com.', true],

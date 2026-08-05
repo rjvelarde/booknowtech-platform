@@ -33,12 +33,14 @@ Use Railway variables or secret references. Never paste values into source, buil
 ### API
 
 - `NODE_ENV=staging`
+- `ENVIRONMENT_ID=staging`
 - `HOST=0.0.0.0`
 - `PORT` — supplied by Railway.
 - `LOG_LEVEL=info`
 - `MONGODB_URI` — secret reference for the isolated non-production Atlas user.
 - `MONGODB_DATABASE=booknowtech_staging`
-- `BUILD_VERSION` — immutable Git commit SHA or Railway deployment identifier.
+- `BOOKING_ROOT_DOMAIN=staging.booknowtech.com`
+- `BUILD_VERSION` is derived automatically from Railway's `RAILWAY_GIT_COMMIT_SHA`; do not set it.
 - `ADMIN_ORIGIN=https://booknowtechfrontend-production.up.railway.app`
 - `TENANT_ADMIN_ENABLED=false` — temporary PR 2 rollout control.
 - `OPENAPI_ENABLED=true`
@@ -46,8 +48,11 @@ Use Railway variables or secret references. Never paste values into source, buil
 ### Worker
 
 - `NODE_ENV=staging`
+- `ENVIRONMENT_ID=staging`
 - `LOG_LEVEL=info`
-- `BUILD_VERSION` — the same immutable build identifier as the API.
+- `MONGODB_DATABASE=booknowtech_staging`
+- `BOOKING_ROOT_DOMAIN=staging.booknowtech.com`
+- `BUILD_VERSION` is derived automatically from Railway's `RAILWAY_GIT_COMMIT_SHA`; do not set it.
 
 The worker intentionally has no Atlas setting in PR 1 because it performs no database work.
 

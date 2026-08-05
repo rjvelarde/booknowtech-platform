@@ -7,6 +7,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx --env-file-if-exists=../../.env watch src/index.ts",
     "start": "node --env-file-if-exists=../../.env dist/index.js",
+    "verify:postmark": "tsx --env-file-if-exists=../../.env src/verify-postmark-command.ts",
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:integration": "vitest run integration --passWithNoTests",

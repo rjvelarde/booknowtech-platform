@@ -58,8 +58,9 @@ export function buildFallbackAppointmentManagementUrl(
   tenantSlug: string,
   tokenPublicId: string,
   credential: string,
+  bookingRootDomain: WorkerEnvironment['BOOKING_ROOT_DOMAIN'] = 'booknowtech.com',
 ): string | null {
-  const origin = fallbackBookingOrigin(tenantSlug);
+  const origin = fallbackBookingOrigin(tenantSlug, bookingRootDomain);
   return origin ? buildPublicAppointmentManagementUrl(origin, tokenPublicId, credential) : null;
 }
 
@@ -162,6 +163,7 @@ async function processOne(
           tenant.slug,
           token.public_id,
           credential,
+          environment.BOOKING_ROOT_DOMAIN,
         );
       }
     }

@@ -510,7 +510,13 @@ export function setCustomerActive(
 }
 
 const baseUrl = loadPublicEnvironment(
-  import.meta.env.MODE === 'test' ? { VITE_API_BASE_URL: '/api' } : import.meta.env,
+  import.meta.env.MODE === 'test'
+    ? {
+        VITE_API_BASE_URL: '/api',
+        VITE_BOOKING_ROOT_DOMAIN: 'booknowtech.com',
+        VITE_BUILD_VERSION: '0'.repeat(40),
+      }
+    : import.meta.env,
 ).VITE_API_BASE_URL;
 
 export async function hydrateSession(): Promise<AdminSessionView> {

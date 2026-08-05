@@ -79,6 +79,21 @@ describe('TenantHostResolver', () => {
       'https://published.booknowtech.com',
     );
   });
+
+  it('resolves only the configured staging suffix', async () => {
+    const store = storeFixture();
+    store.getPublicTenantBySlug.mockResolvedValue(publishedTenant);
+    const stagingResolver = new TenantHostResolver(store, 'staging.booknowtech.com');
+    await expect(
+      stagingResolver.resolvePublicTenant('published.staging.booknowtech.com', 'public_booking'),
+    ).resolves.toBe(publishedTenant);
+    await expect(
+      stagingResolver.resolvePublicTenant('published.booknowtech.com', 'public_booking'),
+    ).resolves.toBeNull();
+    expect(stagingResolver.publicBookingOrigin(publishedTenant)).toBe(
+      'https://published.staging.booknowtech.com',
+    );
+  });
 });
 
 function resolver(store: ReturnType<typeof storeFixture>) {

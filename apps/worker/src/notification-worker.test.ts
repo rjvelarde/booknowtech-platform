@@ -23,4 +23,17 @@ describe('buildPostmarkMetadata', () => {
       'https://tenant-slug.booknowtech.com/appointments/manage/token-id#token=credential_value',
     );
   });
+
+  it('generates staging management links only when staging is configured', () => {
+    expect(
+      buildFallbackAppointmentManagementUrl(
+        'Tenant-Slug',
+        'token-id',
+        'credential_value',
+        'staging.booknowtech.com',
+      ),
+    ).toBe(
+      'https://tenant-slug.staging.booknowtech.com/appointments/manage/token-id#token=credential_value',
+    );
+  });
 });
