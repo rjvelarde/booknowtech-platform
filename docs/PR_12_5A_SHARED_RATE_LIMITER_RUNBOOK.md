@@ -36,6 +36,7 @@ addresses, phone numbers, credentials, appointment tokens, or token hashes.
 | Public discovery/catalog      |   120 | 1 minute   | `public_rate_limit_exceeded` |
 | Public availability           |    60 | 1 minute   | `public_rate_limit_exceeded` |
 | Public appointment creation   |    10 | 10 minutes | `public_rate_limit_exceeded` |
+| Public appointment contact    |    10 | 1 hour     | `public_rate_limit_exceeded` |
 | Management read               |    30 | 1 minute   | `rate_limit_exceeded`        |
 | Management availability       |    30 | 1 minute   | `rate_limit_exceeded`        |
 | Management mutation           |    10 | 10 minutes | `rate_limit_exceeded`        |
@@ -68,6 +69,21 @@ Mongo evaluation failures return a safe `503`; anonymous traffic never bypasses 
 - [ ] Mongo documents contain only HMAC subject hashes and bounded tenant keys.
 - [ ] No raw IP, email, phone, credential, token, cookie, or authorization value appears in limiter
       documents, metrics, or application logs.
+
+## Completed Atlas validation evidence (2026-08-05)
+
+- Railway API deployment and the MongoDB migration completed successfully.
+- Normal admin login, public discovery, availability, appointment creation, appointment management,
+  reschedule, and cancellation flows passed staging QA.
+- Atlas contains `request_rate_limits` with the compound unique bucket index and TTL cleanup index.
+- The strict collection validator was inspected and rejected an intentionally invalid insert through
+  its required-field `$jsonSchema` enforcement.
+- Stored limiter documents were inspected and contain only HMAC `subject_hash` values; no raw IPs,
+  emails, phones, credentials, or appointment tokens were present.
+- Restart persistence is covered by the Mongo-backed automated test, which creates a fresh limiter
+  instance against a live bucket and verifies that the next increment continues the stored count.
+- Retry behavior is covered at both boundaries: the Mongo-backed test verifies the remaining-window
+  calculation and the route test verifies that the same integer value is returned in `Retry-After`.
 
 ## Failure and rollback
 

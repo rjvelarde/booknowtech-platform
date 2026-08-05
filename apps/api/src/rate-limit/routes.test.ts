@@ -19,6 +19,17 @@ class CapturingLimiter implements RateLimiter {
   }
 }
 
+class SequencedLimiter implements RateLimiter {
+  public readonly requests: RateLimitRequest[] = [];
+  public tenantKey(): string {
+    return 'h:0123456789abcdef0123456789abcdef';
+  }
+  public consume(request: RateLimitRequest): Promise<RateLimitDecision> {
+    this.requests.push(request);
+    return Promise.resolve({ ...rejected, allowed: true, count: 1 });
+  }
+}
+
 const rejected: RateLimitDecision = {
   allowed: false,
   count: 31,
@@ -104,6 +115,32 @@ describe('shared route limiter', () => {
       code: 'service_unavailable',
       message: 'The request could not be completed.',
     });
+    await app.close();
+  });
+
+  it('applies tenant-scoped IP and canonical contact limits to appointment creation', async () => {
+    const limiter = new SequencedLimiter();
+    const app = Fastify();
+    registerRateLimitHook(app, testEnvironment, limiter);
+    app.post('/api/v1/public/appointments', () => ({ data: {} }));
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/public/appointments',
+      headers: { host: 'tenant.booknowtech.com' },
+      payload: {
+        customer: { email: ' Person@Example.TEST ', mobile_phone: '(843) 555-0100' },
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(limiter.requests).toMatchObject([
+      { scope: 'public_appointment_create', limit: 10, windowMilliseconds: 600_000 },
+      {
+        scope: 'public_appointment_contact',
+        subject: 'person@example.test|+18435550100',
+        limit: 10,
+        windowMilliseconds: 3_600_000,
+      },
+    ]);
     await app.close();
   });
 });

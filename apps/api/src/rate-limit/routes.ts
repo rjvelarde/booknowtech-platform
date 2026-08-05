@@ -12,52 +12,73 @@ export function registerRateLimitHook(
   limiter: RateLimiter,
 ): void {
   app.addHook('preHandler', async (request, reply) => {
-    const policy = policyFor(request, environment, limiter);
-    if (!policy) return;
-    try {
-      const decision = await limiter.consume(policy);
-      request.log.info({
-        event: 'rate_limit.checked',
-        scope: policy.scope,
-        outcome: decision.allowed ? 'allowed' : 'rejected',
-      });
-      if (decision.allowed) return;
-      void reply.header('Retry-After', String(decision.retryAfterSeconds));
-      return rateLimitError(reply, request, policy.scope);
-    } catch (error) {
-      request.log.warn({ err: error, event: 'rate_limit.failed', scope: policy.scope });
-      return unavailableError(reply, request, policy.scope);
+    const policies = policiesFor(request, environment, limiter);
+    for (const policy of policies) {
+      try {
+        const decision = await limiter.consume(policy);
+        request.log.info({
+          event: 'rate_limit.checked',
+          scope: policy.scope,
+          outcome: decision.allowed ? 'allowed' : 'rejected',
+        });
+        if (decision.allowed) continue;
+        void reply.header('Retry-After', String(decision.retryAfterSeconds));
+        return rateLimitError(reply, request, policy.scope);
+      } catch (error) {
+        request.log.warn({ err: error, event: 'rate_limit.failed', scope: policy.scope });
+        return unavailableError(reply, request, policy.scope);
+      }
     }
   });
 }
 
-function policyFor(request: FastifyRequest, environment: Environment, limiter: RateLimiter) {
+function policiesFor(request: FastifyRequest, environment: Environment, limiter: RateLimiter) {
   const route = request.routeOptions.url;
   const ip = clientIp(request, environment);
   if (route === '/api/v1/auth/login')
-    return policy('admin_login_ip', 'platform', ip, 20, 15 * 60_000);
-  if (!route?.startsWith('/api/v1/public/')) return null;
+    return [policy('admin_login_ip', 'platform', ip, 20, 15 * 60_000)];
+  if (!route?.startsWith('/api/v1/public/')) return [];
   const hostKey = limiter.tenantKey(request.hostname.toLowerCase());
   const ipHost = `${ip}|${request.hostname.toLowerCase()}`;
-  if (route === '/api/v1/public/appointments' && request.method === 'POST')
-    return policy('public_appointment_create', hostKey, ipHost, 10, 10 * 60_000);
+  if (route === '/api/v1/public/appointments' && request.method === 'POST') {
+    return [
+      policy('public_appointment_create', hostKey, ipHost, 10, 10 * 60_000),
+      policy('public_appointment_contact', hostKey, appointmentContact(request), 10, 60 * 60_000),
+    ];
+  }
   if (route.endsWith('/available-starts')) {
     if (route.includes('/appointments/manage/'))
-      return managementPolicy(request, hostKey, ip, 'management_availability', 30, 60_000);
-    return policy('public_availability', hostKey, ipHost, 60, 60_000);
+      return [managementPolicy(request, hostKey, ip, 'management_availability', 30, 60_000)];
+    return [policy('public_availability', hostKey, ipHost, 60, 60_000)];
   }
   if (route.includes('/appointments/manage/')) {
     const mutation = request.method !== 'GET';
-    return managementPolicy(
-      request,
-      hostKey,
-      ip,
-      mutation ? 'management_mutation' : 'management_read',
-      mutation ? 10 : 30,
-      mutation ? 10 * 60_000 : 60_000,
-    );
+    return [
+      managementPolicy(
+        request,
+        hostKey,
+        ip,
+        mutation ? 'management_mutation' : 'management_read',
+        mutation ? 10 : 30,
+        mutation ? 10 * 60_000 : 60_000,
+      ),
+    ];
   }
-  return policy('public_discovery', hostKey, ipHost, 120, 60_000);
+  return [policy('public_discovery', hostKey, ipHost, 120, 60_000)];
+}
+
+function appointmentContact(request: FastifyRequest): string {
+  const customer = (request.body as { customer?: Record<string, unknown> } | undefined)?.customer;
+  const email = typeof customer?.email === 'string' ? customer.email.trim().toLowerCase() : '';
+  const phone =
+    typeof customer?.mobile_phone === 'string' ? normalizeUsPhone(customer.mobile_phone) : '';
+  return `${email}|${phone || 'invalid-phone'}`;
+}
+
+function normalizeUsPhone(value: string): string | null {
+  let digits = value.replace(/\D/g, '');
+  if (digits.length === 10) digits = `1${digits}`;
+  return digits.length === 11 && digits.startsWith('1') ? `+${digits}` : null;
 }
 
 function managementPolicy(
