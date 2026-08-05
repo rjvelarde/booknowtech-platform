@@ -21,7 +21,6 @@
     reverse_proxy {$API_PRIVATE_ORIGIN} {
       header_up -X-Forwarded-*
       header_up -X-Real-IP
-      header_up -X-BookNowTech-Client-IP
       header_up X-BookNowTech-Client-IP {client_ip}
     }
   }
