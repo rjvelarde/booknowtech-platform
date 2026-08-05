@@ -1,5 +1,10 @@
 {
   auto_https off
+  servers {
+    trusted_proxies static 127.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 ::1/128 fc00::/7 fe80::/10
+    trusted_proxies_strict
+    client_ip_headers X-Real-IP
+  }
 }
 
 :{$PORT:8080} {
@@ -13,7 +18,11 @@
   }
 
   handle /api/* {
-    reverse_proxy {$API_PRIVATE_ORIGIN}
+    reverse_proxy {$API_PRIVATE_ORIGIN} {
+      header_up -X-Forwarded-*
+      header_up -X-Real-IP
+      header_up X-BookNowTech-Client-IP {client_ip}
+    }
   }
 
   handle {

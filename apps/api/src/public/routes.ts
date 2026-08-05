@@ -17,6 +17,7 @@ import type {
 import { dateRange, generateSlots, localToUtc, previewDay } from '../availability/routes.js';
 import { authenticateAdminMutation, authenticateAdminRequest } from '../auth/routes.js';
 import type { Environment } from '../config.js';
+import { clientIp } from '../client-ip.js';
 import { TenantHostResolver } from './tenant-host-resolver.js';
 
 const managers = new Set(['tenant_owner', 'tenant_admin']);
@@ -155,12 +156,13 @@ export function registerPublicBookingRoutes(
     const hostname = fallbackTenantSlug(request.hostname) ?? 'invalid';
     const route = request.routeOptions.url ?? request.url.split('?')[0]!;
     const maximum = route.endsWith('/available-starts') ? 30 : 120;
-    if (!limiter.allow(`${request.ip}:${hostname}:${route}`, maximum, 60_000)) {
+    const requesterIp = clientIp(request, environment);
+    if (!limiter.allow(`${requesterIp}:${hostname}:${route}`, maximum, 60_000)) {
       void reply.header('Retry-After', '60');
       return safeError(reply, 429, 'public_rate_limit_exceeded', request.id);
     }
     if (request.method === 'POST' && route === '/api/v1/public/appointments') {
-      const actor = `${request.ip}:${hostname}:public-appointment`;
+      const actor = `${requesterIp}:${hostname}:public-appointment`;
       const tenant = `${hostname}:public-appointment`;
       if (
         !submissionLimiter.allow(`${actor}:10m`, 5, 10 * 60_000) ||

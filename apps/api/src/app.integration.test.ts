@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildApplication } from './app.js';
+import { clientIp } from './client-ip.js';
 import { StubReadinessProbe, testEnvironment } from './test-fixtures.js';
 
 describe('operational API', () => {
@@ -95,5 +96,46 @@ describe('operational API', () => {
 
     const response = await app.inject({ method: 'GET', url: '/documentation/openapi.json' });
     expect(response.statusCode).toBe(404);
+  });
+
+  it('applies the explicit proxy policy while routes use the canonical client-IP helper', async () => {
+    const environment = { ...testEnvironment, NODE_ENV: 'production' as const };
+    const app = await buildApplication({
+      environment,
+      readiness: new StubReadinessProbe(),
+      logger: false,
+    });
+    applications.push(app);
+    app.get('/test/client-ip', (request) => ({
+      data: { canonical: clientIp(request, environment), fastify: request.ip },
+    }));
+
+    const trustedPath = await app.inject({
+      method: 'GET',
+      url: '/test/client-ip',
+      remoteAddress: '100.64.0.5',
+      headers: {
+        'x-booknowtech-client-ip': '203.0.113.55',
+        'x-forwarded-for': '198.51.100.55',
+        'x-real-ip': '192.0.2.55',
+      },
+    });
+    const directPath = await app.inject({
+      method: 'GET',
+      url: '/test/client-ip',
+      remoteAddress: '198.51.100.80',
+      headers: {
+        'x-booknowtech-client-ip': '203.0.113.80',
+        'x-forwarded-for': '192.0.2.80',
+        'x-real-ip': '192.0.2.81',
+      },
+    });
+
+    expect(trustedPath.json()).toEqual({
+      data: { canonical: '203.0.113.55', fastify: '198.51.100.55' },
+    });
+    expect(directPath.json()).toEqual({
+      data: { canonical: '198.51.100.80', fastify: '198.51.100.80' },
+    });
   });
 });
