@@ -8,11 +8,11 @@ Production and staging browser requests follow this path:
 browser -> Railway public ingress -> frontend/Caddy -> Railway private network -> API
 ```
 
-The required staging contract is that Railway appends the connecting client address to
-`X-Forwarded-For`; the evidence table below must confirm that behavior before production. Caddy
+Railway documents `X-Real-IP` as the request header containing the connecting client's remote IP.
+The evidence table below must confirm that Railway overwrites any inbound value before production. Caddy
 accepts forwarding metadata only when its immediate peer is loopback, link-local, RFC1918,
-Railway's observed `100.64.0.0/10` shared-address space, or IPv6 ULA, parses
-`X-Forwarded-For` from right to left, removes all `X-Forwarded-*`, `X-Real-IP`, and inbound
+Railway's observed `100.64.0.0/10` shared-address space, or IPv6 ULA, derives the client address
+from Railway's `X-Real-IP`, removes all `X-Forwarded-*`, `X-Real-IP`, and inbound
 `X-BookNowTech-Client-IP` values, and sends one `X-BookNowTech-Client-IP` value to the API.
 
 The API accepts that canonical header only in `staging` or `production` when its socket peer is on
@@ -28,6 +28,11 @@ external client address. Railway was therefore confirmed to use this shared-addr
 private frontend-to-API path. The range is trusted only as an immediate infrastructure peer; client
 identity must still come from Caddy's sanitized canonical header.
 
+The second staging probe advanced through that private hop but produced `89.222.103.194`, a Railway
+edge address rather than the tester's public address. This disproved the original assumption that
+the right-to-left `X-Forwarded-For` chain was authoritative and prompted alignment with Railway's
+documented `X-Real-IP` contract. No Railway public-edge address range is trusted directly.
+
 ## Staging forwarding-chain evidence
 
 Complete this table before production promotion and attach the corresponding Railway log excerpts
@@ -39,13 +44,13 @@ credentials or appointment tokens.
 | Normal request from a known IPv4 network                                  | API `http.request.started.client_ip` equals the probe's public IPv4 address | Pending staging deployment |
 | Normal request from an IPv6 network                                       | API client IP is one normalized IPv6 address                                | Pending staging deployment |
 | Request with fake `X-Forwarded-For`                                       | API client IP remains the real probe address                                | Pending staging deployment |
-| Request with fake `X-Real-IP`                                             | API client IP remains the real probe address                                | Pending staging deployment |
+| Request with fake `X-Real-IP`                                             | Railway overwrites it; API client IP remains the real probe address         | Pending staging deployment |
 | Request with fake `X-BookNowTech-Client-IP`                               | API client IP remains the real probe address                                | Pending staging deployment |
 | Direct request to the API private hostname from an approved private shell | Missing canonical header resolves to `unknown`                              | Pending staging deployment |
 
-If the first three public probes do not resolve to the known external client address, stop rollout.
-Do not broaden trusted ranges and do not trust the leftmost forwarding value. Capture the Caddy
-container's socket peer and the full redacted forwarding chain, then make an infrastructure decision.
+If the public probes do not resolve to the known external client address, stop rollout. Do not
+broaden trusted ranges and do not select an `X-Forwarded-For` value. Capture the Caddy container's
+socket peer and the redacted Railway routing headers, then make an infrastructure decision.
 
 ## Staging verification
 
@@ -57,7 +62,8 @@ container's socket peer and the full redacted forwarding chain, then make an inf
    public address.
 5. Repeat from a second network and, when available, an IPv6 connection.
 6. Repeat while supplying fake `X-Forwarded-For`, `X-Real-IP`, and
-   `X-BookNowTech-Client-IP` headers. The logged address must not change.
+   `X-BookNowTech-Client-IP` headers. Railway must overwrite `X-Real-IP`, and the logged address must
+   not change.
 7. Confirm admin login, public booking, and appointment management still work and retain distinct
    rate-limit subjects for clients on different networks.
 8. Confirm no forwarding header values, credentials, management tokens, cookies, or secrets appear
@@ -70,9 +76,9 @@ container's socket peer and the full redacted forwarding chain, then make an inf
   socket fallback.
 - API integration tests verify the explicit Fastify trust function and canonical helper with trusted
   and untrusted socket peers.
-- The frontend container test sends spoofed forwarding headers through the real Caddy binary and
-  verifies the API receives exactly one sanitized `X-BookNowTech-Client-IP` and no forwarded or
-  real-IP headers.
+- The frontend container test models Railway's documented `X-Real-IP` value alongside spoofed
+  forwarding and canonical headers, then verifies the API receives exactly one sanitized
+  `X-BookNowTech-Client-IP` and no forwarded or real-IP headers.
 
 ## Rollback
 

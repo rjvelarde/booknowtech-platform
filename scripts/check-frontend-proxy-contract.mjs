@@ -34,10 +34,10 @@ try {
   await waitUntilReady();
   await get('/api/v1/proxy-contract', {
     host: 'admin.booknowtech.com',
-    'x-forwarded-for': '192.0.2.200, 198.51.100.25, 100.64.0.5',
+    'x-forwarded-for': '192.0.2.200, 203.0.113.99, 100.64.0.5',
     'x-forwarded-host': 'attacker.example',
     'x-forwarded-proto': 'ftp',
-    'x-real-ip': '192.0.2.201',
+    'x-real-ip': '198.51.100.25',
     'x-booknowtech-client-ip': '192.0.2.202',
   });
 
