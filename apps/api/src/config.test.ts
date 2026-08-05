@@ -14,6 +14,7 @@ const valid = {
   TENANT_ADMIN_ENABLED: 'false',
   OPENAPI_ENABLED: 'true',
   PUBLIC_APPOINTMENT_TOKEN_SECRET: 'test-secret-that-is-at-least-thirty-two-bytes-long',
+  RATE_LIMIT_KEY_SECRET: 'test-rate-limit-secret-at-least-thirty-two-bytes',
 };
 
 describe('loadEnvironment', () => {

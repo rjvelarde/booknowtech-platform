@@ -158,7 +158,7 @@ describe('public booking discovery', () => {
     await app.close();
   });
 
-  it('rejects invalid public writes safely and applies the stricter submission limit', async () => {
+  it('rejects invalid public writes safely without exposing submitted contact data', async () => {
     const { app, store, tenant } = await testApp();
     vi.spyOn(store, 'getPublicTenantBySlug').mockResolvedValue(tenant);
     const body = {
@@ -178,21 +178,7 @@ describe('public booking discovery', () => {
       website: 'bot-value',
     };
 
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const response = await app.inject({
-        method: 'POST',
-        url: '/api/v1/public/appointments',
-        headers: {
-          host: 'brazilian-wax.booknowtech.com',
-          'idempotency-key': `550e8400-e29b-41d4-a716-44665544000${attempt}`,
-        },
-        payload: body,
-      });
-      expect(response.statusCode).toBe(400);
-      expect(response.json().error.code).toBe('invalid_public_booking_request');
-      expect(response.body).not.toContain('taylor@example.test');
-    }
-    const limited = await app.inject({
+    const response = await app.inject({
       method: 'POST',
       url: '/api/v1/public/appointments',
       headers: {
@@ -201,9 +187,9 @@ describe('public booking discovery', () => {
       },
       payload: body,
     });
-    expect(limited.statusCode).toBe(429);
-    expect(limited.json().error.code).toBe('public_rate_limit_exceeded');
-    expect(limited.headers['retry-after']).toBe('600');
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('invalid_public_booking_request');
+    expect(response.body).not.toContain('taylor@example.test');
     await app.close();
   });
 

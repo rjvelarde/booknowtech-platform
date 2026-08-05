@@ -796,6 +796,34 @@ const validators: Record<string, Document> = {
       },
     },
   },
+  request_rate_limits: {
+    $jsonSchema: {
+      bsonType: 'object',
+      additionalProperties: false,
+      required: [
+        '_id',
+        'scope',
+        'tenant_key',
+        'subject_hash',
+        'bucket_started_at',
+        'count',
+        'expires_at',
+        'created_at',
+        'updated_at',
+      ],
+      properties: {
+        _id: { bsonType: 'objectId' },
+        scope: { bsonType: 'string', pattern: '^[a-z0-9_.-]{1,64}$' },
+        tenant_key: { bsonType: 'string', minLength: 1, maxLength: 128 },
+        subject_hash: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+        bucket_started_at: { bsonType: 'date' },
+        count: { bsonType: ['int', 'long'], minimum: 1 },
+        expires_at: { bsonType: 'date' },
+        created_at: { bsonType: 'date' },
+        updated_at: { bsonType: 'date' },
+      },
+    },
+  },
 };
 
 export async function migrateDatabase(db: Db): Promise<void> {
@@ -1209,6 +1237,18 @@ export async function migrateDatabase(db: Db): Promise<void> {
     {
       key: { tenant_id: 1, appointment_id: 1, created_at: -1 },
       name: 'notification_outbox_appointment_history',
+    },
+  ]);
+  await db.collection('request_rate_limits').createIndexes([
+    {
+      key: { scope: 1, tenant_key: 1, subject_hash: 1, bucket_started_at: 1 },
+      name: 'request_rate_limits_bucket_unique',
+      unique: true,
+    },
+    {
+      key: { expires_at: 1 },
+      name: 'request_rate_limits_expiry_ttl',
+      expireAfterSeconds: 0,
     },
   ]);
 }

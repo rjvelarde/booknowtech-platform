@@ -2,11 +2,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import type { AdminStore, SessionCredential, VerifiedAdminContext } from '../admin/store.js';
 import type { Environment } from '../config.js';
-import { clientIp } from '../client-ip.js';
 import { verifyPassword } from './password.js';
+import { type RateLimiter, allowAllRateLimiter } from '../rate-limit/limiter.js';
 
 const SESSION_COOKIE = '__Host-bnt_admin_session';
-const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 
 interface LoginBody {
   email: string;
@@ -21,6 +20,7 @@ export function registerAdminRoutes(
   app: FastifyInstance,
   environment: Environment,
   store: AdminStore,
+  rateLimiter: RateLimiter = allowAllRateLimiter,
 ): void {
   app.post<{ Body: LoginBody }>(
     '/api/v1/auth/login',
@@ -38,15 +38,38 @@ export function registerAdminRoutes(
       },
     },
     async (request, reply) => {
-      if (!allowLoginAttempt(clientIp(request, environment))) {
-        return reply.status(429).send(authError('rate_limited', request.id));
-      }
       if (!validOrigin(request, environment.ADMIN_ORIGIN)) {
         return reply.status(403).send(authError('origin_rejected', request.id));
       }
       const user = await store.findUserByEmail(request.body.email);
       const valid = user ? await verifyPassword(request.body.password, user.password_hash) : false;
       if (!user || !valid) {
+        let accountDecision;
+        try {
+          accountDecision = await rateLimiter.consume({
+            scope: 'admin_login_account',
+            tenantKey: 'platform',
+            subject: request.body.email.trim().toLowerCase(),
+            limit: 5,
+            windowMilliseconds: 15 * 60_000,
+          });
+        } catch (error) {
+          request.log.warn({
+            err: error,
+            event: 'rate_limit.failed',
+            scope: 'admin_login_account',
+          });
+          return reply.status(503).send(authError('authorization_unavailable', request.id));
+        }
+        request.log.info({
+          event: 'rate_limit.checked',
+          scope: 'admin_login_account',
+          outcome: accountDecision.allowed ? 'allowed' : 'rejected',
+        });
+        if (!accountDecision.allowed) {
+          void reply.header('Retry-After', String(accountDecision.retryAfterSeconds));
+          return reply.status(429).send(authError('rate_limited', request.id));
+        }
         await store.audit({
           event: 'admin_login_failed',
           outcome: 'failure',
@@ -224,17 +247,6 @@ function authError(code: string, requestId: string): Record<string, unknown> {
 function validOrigin(request: FastifyRequest, expected: string): boolean {
   const origin = request.headers.origin;
   return origin === undefined || origin === expected;
-}
-
-function allowLoginAttempt(key: string): boolean {
-  const now = Date.now();
-  const current = loginAttempts.get(key);
-  if (!current || current.resetAt <= now) {
-    loginAttempts.set(key, { count: 1, resetAt: now + 15 * 60 * 1_000 });
-    return true;
-  }
-  current.count += 1;
-  return current.count <= 5;
 }
 
 function setSessionCookie(reply: FastifyReply, credential: SessionCredential): void {
