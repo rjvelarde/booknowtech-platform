@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -38,7 +38,8 @@ describe('public appointment management', () => {
       vi.fn().mockResolvedValue(jsonResponse(200, { data: managedAppointment() })),
     );
     render(<PublicAppointmentManagementPage />);
-    expect(await screen.findByRole('heading', { name: 'Harbor Service' })).toHaveFocus();
+    const heading = await screen.findByRole('heading', { name: 'Harbor Service' });
+    await waitFor(() => expect(heading).toHaveFocus());
     expect(screen.getByText('Safe Business')).toBeInTheDocument();
     expect(screen.getByText('BNT-12345678')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reschedule' })).toBeEnabled();
