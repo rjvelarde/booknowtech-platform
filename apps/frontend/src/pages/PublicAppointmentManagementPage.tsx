@@ -66,8 +66,12 @@ export function PublicAppointmentManagementPage() {
   };
   useEffect(() => void load(), []);
   useEffect(() => {
+    // Move focus to the heading on screen transitions (initial load, mode change).
+    // Intentionally excludes `message`: the status region below is aria-live, so a
+    // transient inline error is already announced — and focusing the heading on it
+    // would steal focus from the date field while the user is mid-typing.
     if (state !== 'loading') headingRef.current?.focus({ preventScroll: true });
-  }, [state, mode, message]);
+  }, [state, mode]);
 
   if (state === 'loading') return <ManagementStatus message="Loading your appointment…" />;
   if (state === 'unavailable' || !data || !access)
@@ -92,7 +96,11 @@ export function PublicAppointmentManagementPage() {
     setStarts([]);
     setSelected(null);
     setMessage(null);
-    if (!startDate) return;
+    // A native date input reports partial years (e.g. 0002) while the year is
+    // still being typed. Wait for a complete 4-digit year before calling the API,
+    // so incomplete input no longer triggers an error (which previously stole
+    // typing focus). Out-of-window complete dates are still validated by the API.
+    if (!startDate || Number(startDate.slice(0, 4)) < 1000) return;
     setBusy(true);
     try {
       const result = await listManagedReplacementStarts(

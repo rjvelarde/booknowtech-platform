@@ -96,7 +96,7 @@ describe('public appointment management', () => {
     render(<PublicAppointmentManagementPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'Reschedule' }));
     expect(screen.getByRole('heading', { name: 'Choose a new time' })).toHaveFocus();
-    fireEvent.change(screen.getByLabelText('Start of seven-day window'), {
+    fireEvent.change(screen.getByLabelText(/Earliest date/), {
       target: { value: '2026-09-05' },
     });
     fireEvent.click(await screen.findByRole('button', { name: /September 5/i }));
@@ -120,6 +120,22 @@ describe('public appointment management', () => {
     expect(screen.getByText(/can no longer be changed/)).toBeInTheDocument();
     const cancellationHeaders = fetchMock.mock.calls.at(-1)?.[1]?.headers as Record<string, string>;
     expect(cancellationHeaders.Authorization).toBe(`AppointmentToken ${replacementCredential}`);
+  });
+
+  it('ignores an incomplete year while typing the reschedule date and keeps focus', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { data: managedAppointment() }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<PublicAppointmentManagementPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reschedule' }));
+    const dateField = screen.getByLabelText(/Earliest date/);
+    // Native date inputs surface partial years (e.g. 0002) mid-typing.
+    fireEvent.change(dateField, { target: { value: '0002-09-05' } });
+    // No availability call fires for an incomplete year (only the initial load),
+    // and no error appears — which is what used to steal focus from the field.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Unable to load replacement times/)).not.toBeInTheDocument();
   });
 
   it.each([
@@ -188,7 +204,7 @@ describe('public appointment management', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<PublicAppointmentManagementPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'Reschedule' }));
-    fireEvent.change(screen.getByLabelText('Start of seven-day window'), {
+    fireEvent.change(screen.getByLabelText(/Earliest date/), {
       target: { value: '2026-09-05' },
     });
     fireEvent.click(await screen.findByRole('button', { name: /September 5/i }));
