@@ -407,6 +407,7 @@ function GuestDetailsForm({
   deliveryMode: PublicServiceView['delivery_mode'];
   onReview: (values: Record<string, string>) => void;
 }) {
+  const [phone, setPhone] = useState('');
   return (
     <form
       className="public-guest-form"
@@ -431,9 +432,12 @@ function GuestDetailsForm({
           name="mobile_phone"
           label="Mobile phone"
           type="tel"
+          inputMode="tel"
           autoComplete="tel"
           placeholder="(843) 555-0123"
           required
+          value={phone}
+          onChange={(event) => setPhone(formatUsPhone(event.target.value))}
         />
       </div>
       <label>
@@ -564,6 +568,16 @@ function PublicStatus({ message, alert = false }: { message: string; alert?: boo
 
 function money(minor: number, currency: string) {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(minor / 100);
+}
+
+// Progressively format US numbers as (XXX) XXX-XXXX for a consistent display.
+// The API normalizes to E.164 server-side, so any format submitted is accepted.
+function formatUsPhone(value: string) {
+  const digits = value.replace(/\D/g, '').slice(0, 10);
+  if (digits.length > 6) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  if (digits.length >= 3) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`.trimEnd();
+  if (digits.length > 0) return `(${digits}`;
+  return '';
 }
 
 function timeLabel(local: string) {
