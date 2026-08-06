@@ -956,6 +956,37 @@ button:disabled {
   border-radius: 0.6rem;
   background: #eef5fc;
 }
+
+/* Primary booking actions follow the tenant accent color instead of the
+   hardcoded blue on the base button rule. Text-on-accent stays white to match
+   the selected-choice chips, which already assume a dark-enough accent. */
+.public-guest-form button[type='submit'],
+.public-review-details button:not(.text-button) {
+  background: var(--booking-accent);
+}
+
+/* Secondary action: a quiet button clearly subordinate to the primary CTA. */
+.public-review-details .text-button {
+  justify-self: start;
+  padding: 0.5rem 0.25rem;
+  color: var(--booking-accent);
+  background: transparent;
+  font-weight: 750;
+}
+.public-review-details .text-button:hover,
+.public-review-details .text-button:focus-visible {
+  text-decoration: underline;
+}
+
+/* Flag required fields up front so people aren't surprised at submit time. */
+.public-summary-price {
+  font-weight: 700;
+}
+.public-guest-form label:not(.checkbox-label):has(> input:required, > select:required) > span::after,
+.public-guest-form fieldset label:has(> input:required) > span::after {
+  content: ' *';
+  color: #a12622;
+}
 @media (max-width: 40rem) {
   .public-form-grid,
   .public-guest-form fieldset {

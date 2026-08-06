@@ -250,6 +250,10 @@ export function PublicBookingPage() {
                 timeZone: selectedStart.timezone,
               })}
             </p>
+            <p className="public-summary-price">
+              {service.duration_minutes} minutes ·{' '}
+              {money(service.base_price_minor, service.currency)}
+            </p>
             {review ? (
               <div className="public-review-details">
                 <p>
