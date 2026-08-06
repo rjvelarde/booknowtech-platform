@@ -987,6 +987,17 @@ button:disabled {
   content: ' *';
   color: #a12622;
 }
+
+/* Public-facing eyebrows follow the tenant accent (scoped so the admin hub keeps its own). */
+.public-booking-page .eyebrow,
+.management-card .eyebrow {
+  color: var(--booking-accent, #1261a0);
+}
+
+/* Manage-appointment primary actions follow the tenant accent, matching the booking flow. */
+.management-content .management-actions button:not(.secondary-button):not(.danger-button) {
+  background: var(--booking-accent);
+}
 @media (max-width: 40rem) {
   .public-form-grid,
   .public-guest-form fieldset {

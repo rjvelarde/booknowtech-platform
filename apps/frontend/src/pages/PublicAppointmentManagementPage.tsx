@@ -244,12 +244,15 @@ export function PublicAppointmentManagementPage() {
             <fieldset className="management-flow" disabled={busy}>
               <legend>Find a replacement time</legend>
               <label>
-                <span>Start of seven-day window</span>
+                <span>Earliest date you’d like</span>
                 <input
                   type="date"
                   value={date}
                   onChange={(event) => void loadStarts(event.target.value)}
                 />
+                <small className="form-note">
+                  We’ll show open times for the next 7 days.
+                </small>
               </label>
               {busy ? <p role="status">Loading available times…</p> : null}
               <div
