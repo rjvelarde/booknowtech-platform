@@ -575,9 +575,19 @@ button:disabled {
   border-radius: 0.55rem;
   font: inherit;
 }
+.management-time-groups {
+  display: grid;
+  gap: 1.25rem;
+}
+.management-time-heading {
+  margin: 0 0 0.5rem;
+  color: #34465e;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
 .management-time-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
   gap: 0.65rem;
 }
 .management-time-grid button {

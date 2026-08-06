@@ -175,6 +175,8 @@ export function PublicAppointmentManagementPage() {
     }
   };
 
+  const startGroups = groupStartsByDay(starts);
+
   return (
     <main
       className="management-page"
@@ -264,21 +266,31 @@ export function PublicAppointmentManagementPage() {
               </label>
               {busy ? <p role="status">Loading available times…</p> : null}
               <div
-                className="management-time-grid"
+                className="management-time-groups"
                 role="group"
                 aria-label="Available replacement times"
               >
-                {starts.map((item) => (
-                  <button
-                    type="button"
-                    key={item.starts_at}
-                    aria-pressed={selected?.starts_at === item.starts_at}
-                    className={selected?.starts_at === item.starts_at ? 'selected' : ''}
-                    onClick={() => setSelected(item)}
-                  >
-                    {formatInstant(item.starts_at, item.timezone)}
-                    {selected?.starts_at === item.starts_at ? <span> ✓ Selected</span> : null}
-                  </button>
+                {startGroups.map((group) => (
+                  <div className="management-time-day" key={group.day}>
+                    <h3 className="management-time-heading">
+                      {formatDayHeading(group.heading.starts_at, group.heading.timezone)}
+                    </h3>
+                    <div className="management-time-grid">
+                      {group.items.map((item) => (
+                        <button
+                          type="button"
+                          key={item.starts_at}
+                          aria-pressed={selected?.starts_at === item.starts_at}
+                          aria-label={formatInstant(item.starts_at, item.timezone)}
+                          className={selected?.starts_at === item.starts_at ? 'selected' : ''}
+                          onClick={() => setSelected(item)}
+                        >
+                          {formatClockTime(item.starts_at, item.timezone)}
+                          {selected?.starts_at === item.starts_at ? <span> ✓ Selected</span> : null}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
               <div className="management-actions">
@@ -464,6 +476,29 @@ function formatInstant(value: string, timezone: string) {
     timeStyle: 'short',
     timeZone: timezone,
   }).format(new Date(value));
+}
+function formatDayHeading(value: string, timezone: string) {
+  return new Intl.DateTimeFormat([], { dateStyle: 'full', timeZone: timezone }).format(
+    new Date(value),
+  );
+}
+function formatClockTime(value: string, timezone: string) {
+  return new Intl.DateTimeFormat([], { timeStyle: 'short', timeZone: timezone }).format(
+    new Date(value),
+  );
+}
+// Group chronologically-ordered starts into consecutive days so the grid can
+// show one date heading with just the times beneath it, instead of repeating
+// the full date on every button.
+function groupStartsByDay(starts: PublicStartView[]) {
+  const groups: { day: string; heading: PublicStartView; items: PublicStartView[] }[] = [];
+  for (const item of starts) {
+    const day = item.local_start.slice(0, 10);
+    const current = groups.at(-1);
+    if (current?.day === day) current.items.push(item);
+    else groups.push({ day, heading: item, items: [item] });
+  }
+  return groups;
 }
 export function formatTimezone(timezone: string) {
   const value = new Date('2026-01-15T12:00:00.000Z');
