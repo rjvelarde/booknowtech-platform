@@ -575,9 +575,19 @@ button:disabled {
   border-radius: 0.55rem;
   font: inherit;
 }
+.management-time-groups {
+  display: grid;
+  gap: 1.25rem;
+}
+.management-time-heading {
+  margin: 0 0 0.5rem;
+  color: #34465e;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
 .management-time-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
   gap: 0.65rem;
 }
 .management-time-grid button {
@@ -955,6 +965,48 @@ button:disabled {
   padding: 0.75rem 1rem;
   border-radius: 0.6rem;
   background: #eef5fc;
+}
+
+/* Primary booking actions follow the tenant accent color instead of the
+   hardcoded blue on the base button rule. Text-on-accent stays white to match
+   the selected-choice chips, which already assume a dark-enough accent. */
+.public-guest-form button[type='submit'],
+.public-review-details button:not(.text-button) {
+  background: var(--booking-accent);
+}
+
+/* Secondary action: a quiet button clearly subordinate to the primary CTA. */
+.public-review-details .text-button {
+  justify-self: start;
+  padding: 0.5rem 0.25rem;
+  color: var(--booking-accent);
+  background: transparent;
+  font-weight: 750;
+}
+.public-review-details .text-button:hover,
+.public-review-details .text-button:focus-visible {
+  text-decoration: underline;
+}
+
+/* Flag required fields up front so people aren't surprised at submit time. */
+.public-summary-price {
+  font-weight: 700;
+}
+.public-guest-form label:not(.checkbox-label):has(> input:required, > select:required) > span::after,
+.public-guest-form fieldset label:has(> input:required) > span::after {
+  content: ' *';
+  color: #a12622;
+}
+
+/* Public-facing eyebrows follow the tenant accent (scoped so the admin hub keeps its own). */
+.public-booking-page .eyebrow,
+.management-card .eyebrow {
+  color: var(--booking-accent, #1261a0);
+}
+
+/* Manage-appointment primary actions follow the tenant accent, matching the booking flow. */
+.management-content .management-actions button:not(.secondary-button):not(.danger-button) {
+  background: var(--booking-accent);
 }
 @media (max-width: 40rem) {
   .public-form-grid,

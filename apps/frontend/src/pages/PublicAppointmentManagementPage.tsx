@@ -66,8 +66,12 @@ export function PublicAppointmentManagementPage() {
   };
   useEffect(() => void load(), []);
   useEffect(() => {
+    // Move focus to the heading on screen transitions (initial load, mode change).
+    // Intentionally excludes `message`: the status region below is aria-live, so a
+    // transient inline error is already announced — and focusing the heading on it
+    // would steal focus from the date field while the user is mid-typing.
     if (state !== 'loading') headingRef.current?.focus({ preventScroll: true });
-  }, [state, mode, message]);
+  }, [state, mode]);
 
   if (state === 'loading') return <ManagementStatus message="Loading your appointment…" />;
   if (state === 'unavailable' || !data || !access)
@@ -92,7 +96,11 @@ export function PublicAppointmentManagementPage() {
     setStarts([]);
     setSelected(null);
     setMessage(null);
-    if (!startDate) return;
+    // A native date input reports partial years (e.g. 0002) while the year is
+    // still being typed. Wait for a complete 4-digit year before calling the API,
+    // so incomplete input no longer triggers an error (which previously stole
+    // typing focus). Out-of-window complete dates are still validated by the API.
+    if (!startDate || Number(startDate.slice(0, 4)) < 1000) return;
     setBusy(true);
     try {
       const result = await listManagedReplacementStarts(
@@ -166,6 +174,8 @@ export function PublicAppointmentManagementPage() {
       setBusy(false);
     }
   };
+
+  const startGroups = groupStartsByDay(starts);
 
   return (
     <main
@@ -244,30 +254,43 @@ export function PublicAppointmentManagementPage() {
             <fieldset className="management-flow" disabled={busy}>
               <legend>Find a replacement time</legend>
               <label>
-                <span>Start of seven-day window</span>
+                <span>Earliest date you’d like</span>
                 <input
                   type="date"
                   value={date}
                   onChange={(event) => void loadStarts(event.target.value)}
                 />
+                <small className="form-note">
+                  We’ll show open times for the next 7 days.
+                </small>
               </label>
               {busy ? <p role="status">Loading available times…</p> : null}
               <div
-                className="management-time-grid"
+                className="management-time-groups"
                 role="group"
                 aria-label="Available replacement times"
               >
-                {starts.map((item) => (
-                  <button
-                    type="button"
-                    key={item.starts_at}
-                    aria-pressed={selected?.starts_at === item.starts_at}
-                    className={selected?.starts_at === item.starts_at ? 'selected' : ''}
-                    onClick={() => setSelected(item)}
-                  >
-                    {formatInstant(item.starts_at, item.timezone)}
-                    {selected?.starts_at === item.starts_at ? <span> ✓ Selected</span> : null}
-                  </button>
+                {startGroups.map((group) => (
+                  <div className="management-time-day" key={group.day}>
+                    <h3 className="management-time-heading">
+                      {formatDayHeading(group.heading.starts_at, group.heading.timezone)}
+                    </h3>
+                    <div className="management-time-grid">
+                      {group.items.map((item) => (
+                        <button
+                          type="button"
+                          key={item.starts_at}
+                          aria-pressed={selected?.starts_at === item.starts_at}
+                          aria-label={formatInstant(item.starts_at, item.timezone)}
+                          className={selected?.starts_at === item.starts_at ? 'selected' : ''}
+                          onClick={() => setSelected(item)}
+                        >
+                          {formatClockTime(item.starts_at, item.timezone)}
+                          {selected?.starts_at === item.starts_at ? <span> ✓ Selected</span> : null}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
               <div className="management-actions">
@@ -453,6 +476,29 @@ function formatInstant(value: string, timezone: string) {
     timeStyle: 'short',
     timeZone: timezone,
   }).format(new Date(value));
+}
+function formatDayHeading(value: string, timezone: string) {
+  return new Intl.DateTimeFormat([], { dateStyle: 'full', timeZone: timezone }).format(
+    new Date(value),
+  );
+}
+function formatClockTime(value: string, timezone: string) {
+  return new Intl.DateTimeFormat([], { timeStyle: 'short', timeZone: timezone }).format(
+    new Date(value),
+  );
+}
+// Group chronologically-ordered starts into consecutive days so the grid can
+// show one date heading with just the times beneath it, instead of repeating
+// the full date on every button.
+function groupStartsByDay(starts: PublicStartView[]) {
+  const groups: { day: string; heading: PublicStartView; items: PublicStartView[] }[] = [];
+  for (const item of starts) {
+    const day = item.local_start.slice(0, 10);
+    const current = groups.at(-1);
+    if (current?.day === day) current.items.push(item);
+    else groups.push({ day, heading: item, items: [item] });
+  }
+  return groups;
 }
 export function formatTimezone(timezone: string) {
   const value = new Date('2026-01-15T12:00:00.000Z');
