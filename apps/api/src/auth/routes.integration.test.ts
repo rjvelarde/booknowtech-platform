@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { AdminStore, type VerifiedAdminContext } from '../admin/store.js';
 import { buildApplication } from '../app.js';
-import { hashPassword } from './password.js';
+import { hashPassword, verifyPassword } from './password.js';
 import { StubReadinessProbe, testEnvironment } from '../test-fixtures.js';
 import type { RateLimiter } from '../rate-limit/limiter.js';
 
@@ -119,6 +119,221 @@ describe('administrative authentication routes', () => {
     await app.close();
   });
 
+  it('limits a first-login user to the password-change session envelope and blocks protected APIs', async () => {
+    const store = Object.create(AdminStore.prototype) as AdminStore;
+    const context = contextFixture(new ObjectId(), { mustChangePassword: true });
+    vi.spyOn(store, 'hydrateSession').mockResolvedValue(context);
+    vi.spyOn(store, 'rotateCsrf').mockResolvedValue('rotated-csrf');
+    const app = await buildApplication({
+      environment: { ...testEnvironment, TENANT_ADMIN_ENABLED: true },
+      readiness: new StubReadinessProbe(),
+      adminStore: store,
+      logger: false,
+    });
+
+    const session = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/session',
+      headers: { cookie: '__Host-bnt_admin_session=session-token' },
+    });
+    expect(session.statusCode).toBe(200);
+    expect(session.json().data).toMatchObject({
+      must_change_password: true,
+      active_tenant: null,
+      memberships: [],
+      csrf_token: 'rotated-csrf',
+    });
+
+    const protectedResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/admin/tenant',
+      headers: { cookie: '__Host-bnt_admin_session=session-token' },
+    });
+    expect(protectedResponse.statusCode).toBe(401);
+    expect(protectedResponse.json().error.code).toBe('authentication_required');
+    await app.close();
+  });
+
+  it('replaces a temporary password through the CSRF-protected, rate-limited flow without returning it', async () => {
+    const store = Object.create(AdminStore.prototype) as AdminStore;
+    const userId = new ObjectId();
+    const context = contextFixture(userId, {
+      mustChangePassword: true,
+      passwordHash: await hashPassword('Temporary password 123'),
+    });
+    const nextContext = contextFixture(userId);
+    vi.spyOn(store, 'hydrateSession')
+      .mockResolvedValueOnce(context)
+      .mockResolvedValueOnce(nextContext);
+    vi.spyOn(store, 'verifyCsrf').mockReturnValue(true);
+    const replace = vi.spyOn(store, 'replaceInitialPassword').mockResolvedValue({
+      token: 'rotated-session-token',
+      csrfToken: 'rotated-csrf-token',
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const limiter: RateLimiter = {
+      tenantKey: () => 'platform',
+      consume: () =>
+        Promise.resolve({
+          allowed: true,
+          count: 1,
+          limit: 5,
+          retryAfterSeconds: 0,
+          bucketStartedAt: new Date(),
+        }),
+    };
+    const app = await buildApplication({
+      environment: { ...testEnvironment, TENANT_ADMIN_ENABLED: true },
+      readiness: new StubReadinessProbe(),
+      adminStore: store,
+      rateLimiter: limiter,
+      logger: false,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/change-password',
+      headers: {
+        origin: testEnvironment.ADMIN_ORIGIN,
+        cookie: '__Host-bnt_admin_session=session-token',
+        'x-csrf-token': 'csrf-token',
+      },
+      payload: {
+        current_password: 'Temporary password 123',
+        new_password: 'Replacement password 456',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['set-cookie']).toContain('rotated-session-token');
+    expect(response.json().data.must_change_password).toBe(false);
+    const input = replace.mock.calls[0]?.[0];
+    expect(input).toBeDefined();
+    expect(input?.passwordHash).not.toContain('Replacement password 456');
+    expect(await verifyPassword('Replacement password 456', input!.passwordHash)).toBe(true);
+    expect(response.body).not.toContain('Temporary password 123');
+    expect(response.body).not.toContain('Replacement password 456');
+    await app.close();
+  });
+
+  it('rejects incorrect temporary passwords without changing the first-login requirement', async () => {
+    const store = Object.create(AdminStore.prototype) as AdminStore;
+    const context = contextFixture(new ObjectId(), {
+      mustChangePassword: true,
+      passwordHash: await hashPassword('Temporary password 123'),
+    });
+    vi.spyOn(store, 'hydrateSession').mockResolvedValue(context);
+    vi.spyOn(store, 'verifyCsrf').mockReturnValue(true);
+    const replace = vi.spyOn(store, 'replaceInitialPassword');
+    const audit = vi.spyOn(store, 'audit').mockResolvedValue();
+    const app = await buildApplication({
+      environment: { ...testEnvironment, TENANT_ADMIN_ENABLED: true },
+      readiness: new StubReadinessProbe(),
+      adminStore: store,
+      logger: false,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/change-password',
+      headers: {
+        origin: testEnvironment.ADMIN_ORIGIN,
+        cookie: '__Host-bnt_admin_session=session-token',
+        'x-csrf-token': 'csrf-token',
+      },
+      payload: { current_password: 'wrong', new_password: 'Replacement password 456' },
+    });
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe('invalid_credentials');
+    expect(replace).not.toHaveBeenCalled();
+    expect(audit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'initial_owner_password_change_failed',
+        metadata: { reason: 'invalid_current_password' },
+      }),
+    );
+    expect(JSON.stringify(audit.mock.calls)).not.toContain('wrong');
+    await app.close();
+  });
+
+  it('rejects weak passwords, missing CSRF, and rate-limited password changes safely', async () => {
+    const store = Object.create(AdminStore.prototype) as AdminStore;
+    const context = contextFixture(new ObjectId(), {
+      mustChangePassword: true,
+      passwordHash: await hashPassword('Temporary password 123'),
+    });
+    vi.spyOn(store, 'hydrateSession').mockResolvedValue(context);
+    const verifyCsrf = vi.spyOn(store, 'verifyCsrf').mockReturnValue(true);
+    const replace = vi.spyOn(store, 'replaceInitialPassword');
+    const app = await buildApplication({
+      environment: { ...testEnvironment, TENANT_ADMIN_ENABLED: true },
+      readiness: new StubReadinessProbe(),
+      adminStore: store,
+      logger: false,
+    });
+    const headers = {
+      origin: testEnvironment.ADMIN_ORIGIN,
+      cookie: '__Host-bnt_admin_session=session-token',
+      'x-csrf-token': 'csrf-token',
+    };
+    const weak = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/change-password',
+      headers,
+      payload: { current_password: 'Temporary password 123', new_password: 'short' },
+    });
+    expect(weak.statusCode).toBe(400);
+    expect(weak.json().error.code).toBe('invalid_new_password');
+    expect(replace).not.toHaveBeenCalled();
+
+    verifyCsrf.mockReturnValue(false);
+    const csrf = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/change-password',
+      headers,
+      payload: {
+        current_password: 'Temporary password 123',
+        new_password: 'Replacement password 456',
+      },
+    });
+    expect(csrf.statusCode).toBe(403);
+    expect(csrf.json().error.code).toBe('csrf_rejected');
+    await app.close();
+
+    const deniedLimiter: RateLimiter = {
+      tenantKey: () => 'platform',
+      consume: () =>
+        Promise.resolve({
+          allowed: false,
+          count: 6,
+          limit: 5,
+          retryAfterSeconds: 123,
+          bucketStartedAt: new Date(),
+        }),
+    };
+    const limitedApp = await buildApplication({
+      environment: { ...testEnvironment, TENANT_ADMIN_ENABLED: true },
+      readiness: new StubReadinessProbe(),
+      adminStore: store,
+      rateLimiter: deniedLimiter,
+      logger: false,
+    });
+    verifyCsrf.mockReturnValue(true);
+    const limited = await limitedApp.inject({
+      method: 'POST',
+      url: '/api/v1/auth/change-password',
+      headers,
+      payload: {
+        current_password: 'Temporary password 123',
+        new_password: 'Replacement password 456',
+      },
+    });
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers['retry-after']).toBe('123');
+    expect(limited.json().error.code).toBe('rate_limited');
+    await limitedApp.close();
+  });
+
   it('revokes the session, audits logout, and clears the host-only cookie', async () => {
     const store = Object.create(AdminStore.prototype) as AdminStore;
     const context = contextFixture(new ObjectId());
@@ -154,7 +369,10 @@ describe('administrative authentication routes', () => {
   });
 });
 
-function contextFixture(userId: ObjectId): VerifiedAdminContext {
+function contextFixture(
+  userId: ObjectId,
+  options: { mustChangePassword?: boolean; passwordHash?: string } = {},
+): VerifiedAdminContext {
   const tenantId = new ObjectId();
   const membershipId = new ObjectId();
   const now = new Date();
@@ -163,8 +381,8 @@ function contextFixture(userId: ObjectId): VerifiedAdminContext {
     public_id: 'user-public',
     email_normalized: 'owner@example.test',
     display_name: 'Owner',
-    password_hash: 'not-returned',
-    must_change_password: false,
+    password_hash: options.passwordHash ?? 'not-returned',
+    must_change_password: options.mustChangePassword ?? false,
     status: 'active' as const,
     created_at: now,
     updated_at: now,

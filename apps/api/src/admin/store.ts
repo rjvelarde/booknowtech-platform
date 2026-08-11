@@ -576,6 +576,66 @@ export class AdminStore {
     );
   }
 
+  public async replaceInitialPassword(input: {
+    context: VerifiedAdminContext;
+    passwordHash: string;
+    requestId: string;
+  }): Promise<SessionCredential | null> {
+    const session = this.database.client.startSession();
+    let credential: SessionCredential | null = null;
+    try {
+      await session.withTransaction(
+        async () => {
+          const updated = await this.users.updateOne(
+            { _id: input.context.user._id, status: 'active', must_change_password: true },
+            {
+              $set: {
+                password_hash: input.passwordHash,
+                must_change_password: false,
+                updated_at: new Date(),
+              },
+            },
+            { session },
+          );
+          if (updated.modifiedCount !== 1) return;
+
+          await this.sessions.updateMany(
+            { user_id: input.context.user._id, revoked_at: null },
+            {
+              $set: {
+                revoked_at: new Date(),
+                revocation_reason: 'password_replaced',
+              },
+            },
+            { session },
+          );
+          credential = await this.insertSession(
+            input.context.user._id,
+            input.context.session.selected_membership_id,
+            input.requestId,
+            session,
+          );
+          await this.audit({
+            event: 'initial_owner_password_changed',
+            outcome: 'success',
+            actorUserId: input.context.user._id,
+            tenantId: input.context.tenant?._id ?? null,
+            requestId: input.requestId,
+            session,
+          });
+        },
+        {
+          readConcern: { level: 'snapshot' },
+          writeConcern: { w: 'majority' },
+          readPreference: 'primary',
+        },
+      );
+    } finally {
+      await session.endSession();
+    }
+    return credential;
+  }
+
   public async audit(input: {
     event: string;
     outcome: 'success' | 'failure';
@@ -2045,27 +2105,31 @@ export class AdminStore {
     userId: ObjectId,
     selectedMembershipId: ObjectId | null,
     requestId: string,
+    session?: ClientSession,
   ): Promise<SessionCredential> {
     const now = new Date();
     const token = createToken();
     const csrfToken = createToken();
     const expiresAt = new Date(now.getTime() + SESSION_DURATION_MILLISECONDS);
-    await this.sessions.insertOne({
-      _id: new ObjectId(),
-      public_id: randomUUID(),
-      token_hash: hashSecret(token),
-      audience: 'admin',
-      user_id: userId,
-      selected_membership_id: selectedMembershipId,
-      csrf_token_hash: hashSecret(csrfToken),
-      created_at: now,
-      rotated_at: now,
-      last_seen_at: now,
-      expires_at: expiresAt,
-      revoked_at: null,
-      revocation_reason: null,
-      created_request_id: requestId,
-    });
+    await this.sessions.insertOne(
+      {
+        _id: new ObjectId(),
+        public_id: randomUUID(),
+        token_hash: hashSecret(token),
+        audience: 'admin',
+        user_id: userId,
+        selected_membership_id: selectedMembershipId,
+        csrf_token_hash: hashSecret(csrfToken),
+        created_at: now,
+        rotated_at: now,
+        last_seen_at: now,
+        expires_at: expiresAt,
+        revoked_at: null,
+        revocation_reason: null,
+        created_request_id: requestId,
+      },
+      session ? { session } : undefined,
+    );
     return { token, csrfToken, expiresAt };
   }
 }

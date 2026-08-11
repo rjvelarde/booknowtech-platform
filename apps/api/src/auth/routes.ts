@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import type { AdminStore, SessionCredential, VerifiedAdminContext } from '../admin/store.js';
 import type { Environment } from '../config.js';
-import { verifyPassword } from './password.js';
+import { hashPassword, validateReplacementPassword, verifyPassword } from './password.js';
 import { type RateLimiter, allowAllRateLimiter } from '../rate-limit/limiter.js';
 
 const SESSION_COOKIE = '__Host-bnt_admin_session';
@@ -14,6 +14,11 @@ interface LoginBody {
 
 interface SelectMembershipBody {
   membership_public_id: string;
+}
+
+interface ChangePasswordBody {
+  current_password: string;
+  new_password: string;
 }
 
 export function registerAdminRoutes(
@@ -93,11 +98,88 @@ export function registerAdminRoutes(
   );
 
   app.get('/api/v1/auth/session', async (request, reply) => {
-    const context = await authenticateAdminRequest(request, store);
+    const context = await authenticateAdminRequest(request, store, { allowPasswordChange: true });
     if (!context) return reply.status(401).send(authError('authentication_required', request.id));
     const csrfToken = await store.rotateCsrf(context.session);
     return reply.send(sessionEnvelope(context, csrfToken, request.id));
   });
+
+  app.post<{ Body: ChangePasswordBody }>(
+    '/api/v1/auth/change-password',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['current_password', 'new_password'],
+          properties: {
+            current_password: { type: 'string', minLength: 1, maxLength: 256 },
+            new_password: { type: 'string', minLength: 1, maxLength: 256 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const context = await authenticateAdminMutation(request, reply, environment, store, {
+        allowPasswordChange: true,
+      });
+      if (!context) return;
+      if (!context.user.must_change_password)
+        return reply.status(409).send(authError('password_change_not_required', request.id));
+      let decision;
+      try {
+        decision = await rateLimiter.consume({
+          scope: 'admin_password_change_account',
+          tenantKey: 'platform',
+          subject: context.user.public_id,
+          limit: 5,
+          windowMilliseconds: 15 * 60_000,
+        });
+      } catch (error) {
+        request.log.warn({
+          err: error,
+          event: 'rate_limit.failed',
+          scope: 'admin_password_change_account',
+        });
+        return reply.status(503).send(authError('authorization_unavailable', request.id));
+      }
+      if (!decision.allowed) {
+        void reply.header('Retry-After', String(decision.retryAfterSeconds));
+        return reply.status(429).send(authError('rate_limited', request.id));
+      }
+      const currentPasswordValid = await verifyPassword(
+        request.body.current_password,
+        context.user.password_hash,
+      );
+      if (!currentPasswordValid) {
+        await store.audit({
+          event: 'initial_owner_password_change_failed',
+          outcome: 'failure',
+          actorUserId: context.user._id,
+          tenantId: context.tenant?._id ?? null,
+          requestId: request.id,
+          metadata: { reason: 'invalid_current_password' },
+        });
+        return reply.status(401).send(authError('invalid_credentials', request.id));
+      }
+      if (
+        !validateReplacementPassword(request.body.new_password) ||
+        request.body.new_password === request.body.current_password
+      ) {
+        return reply.status(400).send(authError('invalid_new_password', request.id));
+      }
+      const credential = await store.replaceInitialPassword({
+        context,
+        passwordHash: await hashPassword(request.body.new_password),
+        requestId: request.id,
+      });
+      if (!credential)
+        return reply.status(409).send(authError('password_change_not_required', request.id));
+      setSessionCookie(reply, credential);
+      const nextContext = await store.hydrateSession(credential.token);
+      return reply.send(sessionEnvelope(nextContext!, credential.csrfToken, request.id));
+    },
+  );
 
   app.post<{ Body: SelectMembershipBody }>(
     '/api/v1/auth/select-membership',
@@ -144,7 +226,9 @@ export function registerAdminRoutes(
   );
 
   app.post('/api/v1/auth/logout', async (request, reply) => {
-    const context = await authenticateAdminMutation(request, reply, environment, store);
+    const context = await authenticateAdminMutation(request, reply, environment, store, {
+      allowPasswordChange: true,
+    });
     if (!context) return;
     await store.revokeSession(context.session, 'logout');
     clearSessionCookie(reply);
@@ -181,9 +265,12 @@ export function registerAdminRoutes(
 export async function authenticateAdminRequest(
   request: FastifyRequest,
   store: AdminStore,
+  options: { allowPasswordChange?: boolean } = {},
 ): Promise<VerifiedAdminContext | null> {
   const token = parseCookies(request.headers.cookie)[SESSION_COOKIE];
-  return token ? store.hydrateSession(token) : null;
+  const context = token ? await store.hydrateSession(token) : null;
+  if (context?.user.must_change_password && !options.allowPasswordChange) return null;
+  return context;
 }
 
 export async function authenticateAdminMutation(
@@ -191,12 +278,13 @@ export async function authenticateAdminMutation(
   reply: FastifyReply,
   environment: Environment,
   store: AdminStore,
+  options: { allowPasswordChange?: boolean } = {},
 ): Promise<VerifiedAdminContext | null> {
   if (!validOrigin(request, environment.ADMIN_ORIGIN)) {
     await reply.status(403).send(authError('origin_rejected', request.id));
     return null;
   }
-  const context = await authenticateAdminRequest(request, store);
+  const context = await authenticateAdminRequest(request, store, options);
   if (!context) {
     await reply.status(401).send(authError('authentication_required', request.id));
     return null;
@@ -220,18 +308,23 @@ function sessionEnvelope(
   return {
     data: {
       user: { public_id: context.user.public_id, display_name: context.user.display_name },
-      active_tenant: context.tenant
-        ? {
-            public_id: context.tenant.public_id,
-            display_name: context.tenant.display_name,
-            role: context.membership?.role,
-          }
-        : null,
-      memberships: context.memberships.map(({ membership, tenant }) => ({
-        public_id: membership.public_id,
-        role: membership.role,
-        tenant: { public_id: tenant.public_id, display_name: tenant.display_name },
-      })),
+      must_change_password: context.user.must_change_password,
+      active_tenant: context.user.must_change_password
+        ? null
+        : context.tenant
+          ? {
+              public_id: context.tenant.public_id,
+              display_name: context.tenant.display_name,
+              role: context.membership?.role,
+            }
+          : null,
+      memberships: context.user.must_change_password
+        ? []
+        : context.memberships.map(({ membership, tenant }) => ({
+            public_id: membership.public_id,
+            role: membership.role,
+            tenant: { public_id: tenant.public_id, display_name: tenant.display_name },
+          })),
       csrf_token: csrfToken,
     },
     meta: { request_id: requestId },

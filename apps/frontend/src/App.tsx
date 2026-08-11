@@ -4,6 +4,7 @@ import { fallbackTenantSlug } from '@booknowtech/shared/hostname';
 import {
   type AdminSessionView,
   ApiError,
+  changePassword,
   hydrateSession,
   login,
   logout,
@@ -11,6 +12,7 @@ import {
 } from './api/client.js';
 import { BusinessHubHomePage } from './pages/BusinessHubHomePage.js';
 import { LoginPage } from './pages/LoginPage.js';
+import { FirstLoginPasswordPage } from './pages/FirstLoginPasswordPage.js';
 import { BusinessProfilePage } from './pages/BusinessProfilePage.js';
 import { ServicesPage } from './pages/ServicesPage.js';
 import { ProvidersPage } from './pages/ProvidersPage.js';
@@ -25,7 +27,7 @@ import { PublicBookingSettingsPage } from './pages/PublicBookingSettingsPage.js'
 import { PublicAppointmentManagementPage } from './pages/PublicAppointmentManagementPage.js';
 import { loadPublicEnvironment } from './config.js';
 
-type View = 'loading' | 'placeholder' | 'login' | 'select' | 'hub' | 'denied';
+type View = 'loading' | 'placeholder' | 'login' | 'password' | 'select' | 'hub' | 'denied';
 
 export function App() {
   const publicEnvironment = loadPublicEnvironment(
@@ -92,6 +94,26 @@ export function App() {
     }
   };
 
+  const handlePasswordChange = async (
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> => {
+    if (!session) return;
+    setBusy(true);
+    setError(null);
+    try {
+      applySession(
+        await changePassword(currentPassword, newPassword, session.csrf_token),
+        setSession,
+        setView,
+      );
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.code : 'request_failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleLogout = async (): Promise<void> => {
     if (!session) return;
     setBusy(true);
@@ -111,6 +133,10 @@ export function App() {
   if (view === 'placeholder')
     return <StatusCard message="The Business Hub is being prepared for launch." />;
   if (view === 'login') return <LoginPage busy={busy} error={error} onLogin={handleLogin} />;
+  if (view === 'password' && session)
+    return (
+      <FirstLoginPasswordPage busy={busy} error={error} onChangePassword={handlePasswordChange} />
+    );
   if (view === 'denied' || !session)
     return <StatusCard message="Your account does not have an active business membership." />;
   if (view === 'select')
@@ -209,7 +235,8 @@ function applySession(
   setView: (view: View) => void,
 ): void {
   setSession(session);
-  if (session.active_tenant) setView('hub');
+  if (session.must_change_password) setView('password');
+  else if (session.active_tenant) setView('hub');
   else if (session.memberships.length > 0) setView('select');
   else setView('denied');
 }

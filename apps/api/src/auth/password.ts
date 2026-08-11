@@ -4,6 +4,16 @@ import { promisify } from 'node:util';
 const scrypt = promisify(scryptCallback);
 const KEY_LENGTH = 64;
 
+export function validateReplacementPassword(password: string): boolean {
+  return (
+    password.length >= 16 &&
+    password.length <= 256 &&
+    /[a-z]/u.test(password) &&
+    /[A-Z]/u.test(password) &&
+    /[0-9]/u.test(password)
+  );
+}
+
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
   const derived = (await scrypt(password, salt, KEY_LENGTH)) as Buffer;

@@ -11,6 +11,64 @@ describe('Business Hub', () => {
     window.history.replaceState({}, '', '/');
   });
 
+  it('forces a first-login user into password replacement on refresh and blocks Hub navigation', async () => {
+    const forced = {
+      ...activeSession(),
+      must_change_password: true,
+      active_tenant: null,
+      memberships: [],
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { data: forced })));
+    window.history.replaceState({}, '', '/appointments');
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Set a new password' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Appointments')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByLabelText('Temporary password'));
+  });
+
+  it('submits a password replacement and resumes the normal Hub only after the server clears it', async () => {
+    const forced = {
+      ...activeSession(),
+      must_change_password: true,
+      active_tenant: null,
+      memberships: [],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { data: forced }))
+      .mockResolvedValueOnce(jsonResponse(200, { data: activeSession() }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    fireEvent.change(await screen.findByLabelText('Temporary password'), {
+      target: { value: 'Temporary password 123' },
+    });
+    fireEvent.change(screen.getByLabelText('New password'), {
+      target: { value: 'Replacement password 456' },
+    });
+    fireEvent.change(screen.getByLabelText('Confirm new password'), {
+      target: { value: 'Replacement password 456' },
+    });
+    fireEvent.submit(screen.getByRole('button', { name: 'Continue' }).closest('form')!);
+
+    expect(await screen.findByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/auth/change-password',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'x-csrf-token': 'csrf' }),
+        body: JSON.stringify({
+          current_password: 'Temporary password 123',
+          new_password: 'Replacement password 456',
+        }),
+      }),
+    );
+  });
+
   it('selects public booking only for supported tenant hosts', () => {
     expect(isPublicBookingHost('brazilian-wax.booknowtech.com')).toBe(true);
     expect(isPublicBookingHost('BRAZILIAN-WAX.booknowtech.com.')).toBe(true);
@@ -322,6 +380,7 @@ describe('Business Hub', () => {
 function activeSession() {
   return {
     user: { public_id: 'user', display_name: 'Owner' },
+    must_change_password: false,
     active_tenant: {
       public_id: 'tenant',
       display_name: 'Harbor Demo',
