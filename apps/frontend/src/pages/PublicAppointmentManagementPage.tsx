@@ -260,9 +260,7 @@ export function PublicAppointmentManagementPage() {
                   value={date}
                   onChange={(event) => void loadStarts(event.target.value)}
                 />
-                <small className="form-note">
-                  We’ll show open times for the next 7 days.
-                </small>
+                <small className="form-note">We’ll show open times for the next 7 days.</small>
               </label>
               {busy ? <p role="status">Loading available times…</p> : null}
               <div

@@ -992,7 +992,9 @@ button:disabled {
 .public-summary-price {
   font-weight: 700;
 }
-.public-guest-form label:not(.checkbox-label):has(> input:required, > select:required) > span::after,
+.public-guest-form
+  label:not(.checkbox-label):has(> input:required, > select:required)
+  > span::after,
 .public-guest-form fieldset label:has(> input:required) > span::after {
   content: ' *';
   color: #a12622;
