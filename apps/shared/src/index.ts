@@ -20,3 +20,6 @@ export {
   PRODUCTION_BOOKING_ROOT_DOMAIN,
   STAGING_BOOKING_ROOT_DOMAIN,
 } from './hostname.js';
+
+export { PLATFORM_TENANT_DEFAULTS } from './platform-defaults.js';
+export type { TenantDesignation } from './platform-defaults.js';

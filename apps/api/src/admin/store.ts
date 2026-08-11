@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { type ClientSession, type Collection, type Db, type Filter, ObjectId } from 'mongodb';
 import {
+  type TenantDesignation,
   derivePublicAppointmentCredential,
   hashPublicAppointmentCredential,
 } from '@booknowtech/shared';
@@ -23,6 +24,7 @@ export interface TenantDocument {
   default_slot_cadence_minutes: number;
   locale: string;
   currency: string;
+  designation: TenantDesignation;
   public_booking_enabled: boolean;
   public_profile: {
     business_name: string;
@@ -378,9 +380,27 @@ export interface UserDocument {
   email_normalized: string;
   display_name: string;
   password_hash: string;
+  must_change_password: boolean;
   status: 'active' | 'disabled';
   created_at: Date;
   updated_at: Date;
+}
+
+export interface TenantProvisioningOperationDocument {
+  _id: ObjectId;
+  public_id: string;
+  request_id: string;
+  operation_type: 'create_tenant' | 'set_status' | 'deactivate_internal_qa';
+  request_fingerprint: string;
+  operator_id: string;
+  reason: string;
+  tenant_public_id: string | null;
+  owner_user_public_id: string | null;
+  designation: TenantDesignation;
+  status: 'started' | 'completed' | 'failed';
+  failure_category: string | null;
+  created_at: Date;
+  completed_at: Date | null;
 }
 
 export interface RoleDocument {

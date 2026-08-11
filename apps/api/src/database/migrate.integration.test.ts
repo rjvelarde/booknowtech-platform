@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { MongoClient, ObjectId } from 'mongodb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import type { TenantProvisioningOperationDocument } from '../admin/store.js';
 import { migrateDatabase } from './migrate.js';
 
 const uri = process.env.MONGODB_TEST_URI;
@@ -35,6 +36,198 @@ suite('administrative foundation migration', () => {
     expect(indexes.find(({ name }) => name === 'admin_sessions_expiry_ttl')).toMatchObject({
       expireAfterSeconds: 0,
     });
+  });
+
+  it('backfills legacy tenant and user records without changing existing values', async () => {
+    const legacyDb = client.db(`booknowtech_legacy_${randomUUID().replaceAll('-', '')}`);
+    await legacyDb.createCollection('tenants');
+    await legacyDb.createCollection('users');
+    const now = new Date();
+    const tenantId = new ObjectId();
+    const userId = new ObjectId();
+    await legacyDb.collection('tenants').insertOne({
+      _id: tenantId,
+      public_id: randomUUID(),
+      slug: 'legacy-tenant',
+      display_name: 'Legacy Tenant',
+      legal_name: null,
+      contact: { email_normalized: null, phone_e164: null, website_url: null },
+      default_timezone: 'America/New_York',
+      default_slot_cadence_minutes: 30,
+      locale: 'en-US',
+      currency: 'USD',
+      public_booking_enabled: true,
+      public_profile: {
+        business_name: 'Legacy Tenant',
+        description: null,
+        tagline: null,
+        logo_url: null,
+        primary_color: null,
+        website_url: null,
+        phone_e164: null,
+        email_normalized: null,
+      },
+      booking_policy: { minimum_lead_minutes: 60, maximum_advance_days: 45 },
+      public_booking_terms: {
+        version: 'legacy-v1',
+        acknowledgment_label: 'Legacy terms',
+        terms_url: null,
+      },
+      appointment_email_settings: {
+        enabled: true,
+        sender_name: 'Legacy Tenant',
+        reply_to_email: null,
+      },
+      appointment_self_service: {
+        enabled: true,
+        cancellation_cutoff_minutes: 720,
+        reschedule_cutoff_minutes: 720,
+      },
+      version: 4,
+      updated_by: null,
+      status: 'active',
+      created_at: now,
+      updated_at: now,
+    });
+    await legacyDb.collection('users').insertOne({
+      _id: userId,
+      public_id: randomUUID(),
+      email_normalized: 'legacy@example.test',
+      display_name: 'Legacy Owner',
+      password_hash: 'legacy-hash',
+      status: 'active',
+      created_at: now,
+      updated_at: now,
+    });
+
+    await migrateDatabase(legacyDb);
+    await migrateDatabase(legacyDb);
+
+    expect(await legacyDb.collection('tenants').findOne({ _id: tenantId })).toMatchObject({
+      designation: 'customer',
+      public_booking_enabled: true,
+      default_slot_cadence_minutes: 30,
+      booking_policy: { minimum_lead_minutes: 60, maximum_advance_days: 45 },
+    });
+    expect(await legacyDb.collection('users').findOne({ _id: userId })).toMatchObject({
+      must_change_password: false,
+      status: 'active',
+    });
+    await legacyDb.dropDatabase();
+  });
+
+  it('creates strict provisioning-operation storage and named indexes', async () => {
+    await migrateDatabase(db);
+    const collection = db.collection('tenant_provisioning_operations');
+    const indexes = await collection.indexes();
+    expect(indexes.map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        'tenant_provisioning_operations_public_id_unique',
+        'tenant_provisioning_operations_request_id_unique',
+        'tenant_provisioning_operations_request_fingerprint',
+        'tenant_provisioning_operations_tenant_created',
+        'tenant_provisioning_operations_status_created',
+      ]),
+    );
+
+    const operation: TenantProvisioningOperationDocument = {
+      _id: new ObjectId(),
+      public_id: randomUUID(),
+      request_id: randomUUID(),
+      operation_type: 'create_tenant',
+      request_fingerprint: 'a'.repeat(64),
+      operator_id: 'operator@example.test',
+      reason: 'Provision an approved design-partner tenant.',
+      tenant_public_id: null,
+      owner_user_public_id: null,
+      designation: 'customer',
+      status: 'started',
+      failure_category: null,
+      created_at: new Date(),
+      completed_at: null,
+    };
+    await expect(collection.insertOne(operation)).resolves.toBeDefined();
+    await expect(
+      collection.insertOne({ ...operation, _id: new ObjectId(), public_id: randomUUID() }),
+    ).rejects.toThrow();
+    await expect(
+      collection.insertOne({
+        ...operation,
+        _id: new ObjectId(),
+        public_id: randomUUID(),
+        request_id: randomUUID(),
+        raw_owner_email: 'owner@example.test',
+      }),
+    ).rejects.toThrow();
+    await expect(
+      collection.insertOne({
+        ...operation,
+        _id: new ObjectId(),
+        public_id: randomUUID(),
+        request_id: randomUUID(),
+        designation: 'demo',
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('requires the additive tenant designation and user password-change flag', async () => {
+    await migrateDatabase(db);
+    await expect(
+      db.collection('tenants').insertOne({
+        public_id: randomUUID(),
+        slug: 'missing-designation',
+        display_name: 'Missing Designation',
+        legal_name: null,
+        contact: { email_normalized: null, phone_e164: null, website_url: null },
+        default_timezone: 'UTC',
+        default_slot_cadence_minutes: 15,
+        locale: 'en-US',
+        currency: 'USD',
+        public_booking_enabled: false,
+        public_profile: {
+          business_name: 'Missing Designation',
+          description: null,
+          tagline: null,
+          logo_url: null,
+          primary_color: null,
+          website_url: null,
+          phone_e164: null,
+          email_normalized: null,
+        },
+        booking_policy: { minimum_lead_minutes: 120, maximum_advance_days: 90 },
+        public_booking_terms: {
+          version: '1',
+          acknowledgment_label: 'I agree to the booking and cancellation terms.',
+          terms_url: null,
+        },
+        appointment_email_settings: {
+          enabled: false,
+          sender_name: 'Missing Designation',
+          reply_to_email: null,
+        },
+        appointment_self_service: {
+          enabled: false,
+          cancellation_cutoff_minutes: 1_440,
+          reschedule_cutoff_minutes: 1_440,
+        },
+        version: 1,
+        updated_by: null,
+        status: 'active',
+        created_at: new Date(),
+        updated_at: new Date(),
+      }),
+    ).rejects.toThrow();
+    await expect(
+      db.collection('users').insertOne({
+        public_id: randomUUID(),
+        email_normalized: 'missing-flag@example.test',
+        display_name: 'Missing Flag',
+        password_hash: 'hash',
+        status: 'active',
+        created_at: new Date(),
+        updated_at: new Date(),
+      }),
+    ).rejects.toThrow();
   });
 
   it('rejects roles outside the fixed role model', async () => {
