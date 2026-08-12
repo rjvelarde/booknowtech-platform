@@ -300,6 +300,7 @@ function tenantFixture(): TenantDocument {
     default_slot_cadence_minutes: 15,
     locale: 'en-US',
     currency: 'USD',
+    designation: 'customer',
     version: 2,
     updated_by: null,
     status: 'active',

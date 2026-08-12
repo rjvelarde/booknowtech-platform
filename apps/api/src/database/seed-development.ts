@@ -31,6 +31,7 @@ async function main(): Promise<void> {
         $set: {
           display_name: 'Internal Test Owner',
           password_hash: passwordHash,
+          must_change_password: false,
           status: 'active',
           updated_at: now,
         },
@@ -71,6 +72,7 @@ async function main(): Promise<void> {
             default_slot_cadence_minutes: tenant.slug === 'harbor-demo' ? 15 : 30,
             locale: 'en-US',
             currency: 'USD',
+            designation: 'internal_qa',
             public_booking_enabled: true,
             public_profile: {
               business_name: tenant.display_name,

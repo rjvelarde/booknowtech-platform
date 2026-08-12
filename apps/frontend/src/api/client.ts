@@ -8,6 +8,7 @@ export interface MembershipView {
 
 export interface AdminSessionView {
   user: { public_id: string; display_name: string };
+  must_change_password: boolean;
   active_tenant: { public_id: string; display_name: string; role: string } | null;
   memberships: MembershipView[];
   csrf_token: string;
@@ -527,6 +528,18 @@ export async function login(email: string, password: string): Promise<AdminSessi
   return request('/v1/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+  csrfToken: string,
+): Promise<AdminSessionView> {
+  return request('/v1/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    headers: { 'x-csrf-token': csrfToken },
   });
 }
 

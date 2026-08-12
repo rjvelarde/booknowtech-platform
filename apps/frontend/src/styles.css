@@ -136,6 +136,12 @@ button:disabled {
 .form-error {
   color: #a12622;
 }
+.form-help {
+  margin: -0.25rem 0 0;
+  color: #4e6078;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
 .form-success {
   padding: 0.75rem 1rem;
   border: 1px solid #86c89a;
@@ -992,7 +998,9 @@ button:disabled {
 .public-summary-price {
   font-weight: 700;
 }
-.public-guest-form label:not(.checkbox-label):has(> input:required, > select:required) > span::after,
+.public-guest-form
+  label:not(.checkbox-label):has(> input:required, > select:required)
+  > span::after,
 .public-guest-form fieldset label:has(> input:required) > span::after {
   content: ' *';
   color: #a12622;
@@ -1009,6 +1017,15 @@ button:disabled {
   background: var(--booking-accent);
 }
 @media (max-width: 40rem) {
+  .landing-page {
+    align-items: start;
+    padding: 1rem;
+  }
+  .landing-card {
+    margin-top: 1rem;
+    padding: 2rem 1.25rem;
+    border-radius: 1rem;
+  }
   .public-form-grid,
   .public-guest-form fieldset {
     grid-template-columns: 1fr;

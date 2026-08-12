@@ -1,4 +1,7 @@
 import type { Db, Document } from 'mongodb';
+import { PLATFORM_TENANT_DEFAULTS } from '@booknowtech/shared';
+
+const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$';
 
 const validators: Record<string, Document> = {
   tenants: {
@@ -14,6 +17,7 @@ const validators: Record<string, Document> = {
         'default_slot_cadence_minutes',
         'locale',
         'currency',
+        'designation',
         'public_booking_enabled',
         'public_profile',
         'booking_policy',
@@ -32,6 +36,7 @@ const validators: Record<string, Document> = {
           required: ['email_normalized', 'phone_e164', 'website_url'],
         },
         currency: { bsonType: 'string', pattern: '^[A-Z]{3}$' },
+        designation: { enum: ['customer', 'internal_qa'] },
         public_booking_enabled: { bsonType: 'bool' },
         public_profile: {
           bsonType: 'object',
@@ -105,11 +110,15 @@ const validators: Record<string, Document> = {
         'email_normalized',
         'display_name',
         'password_hash',
+        'must_change_password',
         'status',
         'created_at',
         'updated_at',
       ],
-      properties: { status: { enum: ['active', 'disabled'] } },
+      properties: {
+        must_change_password: { bsonType: 'bool' },
+        status: { enum: ['active', 'disabled'] },
+      },
     },
   },
   roles: {
@@ -119,6 +128,7 @@ const validators: Record<string, Document> = {
       properties: {
         role: { enum: ['tenant_owner', 'tenant_admin', 'provider', 'front_desk'] },
         status: { enum: ['active', 'suspended', 'revoked'] },
+        suspended_by_tenant_status: { bsonType: 'bool' },
       },
     },
   },
@@ -824,6 +834,55 @@ const validators: Record<string, Document> = {
       },
     },
   },
+  tenant_provisioning_operations: {
+    $jsonSchema: {
+      bsonType: 'object',
+      additionalProperties: false,
+      required: [
+        '_id',
+        'public_id',
+        'request_id',
+        'operation_type',
+        'request_fingerprint',
+        'operator_id',
+        'reason',
+        'tenant_public_id',
+        'owner_user_public_id',
+        'designation',
+        'status',
+        'failure_category',
+        'created_at',
+        'completed_at',
+      ],
+      properties: {
+        _id: { bsonType: 'objectId' },
+        public_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        request_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        operation_type: {
+          enum: ['create_tenant', 'set_status', 'deactivate_internal_qa'],
+        },
+        request_fingerprint: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+        operator_id: {
+          bsonType: 'string',
+          minLength: 3,
+          maxLength: 120,
+          pattern: '^[a-z0-9][a-z0-9._@+-]*$',
+        },
+        reason: { bsonType: 'string', minLength: 10, maxLength: 500 },
+        tenant_public_id: { bsonType: ['string', 'null'], pattern: UUID_PATTERN },
+        owner_user_public_id: { bsonType: ['string', 'null'], pattern: UUID_PATTERN },
+        designation: { enum: ['customer', 'internal_qa'] },
+        status: { enum: ['started', 'completed', 'failed'] },
+        failure_category: {
+          bsonType: ['string', 'null'],
+          maxLength: 80,
+          pattern: '^[a-z0-9][a-z0-9_]*$',
+        },
+        created_at: { bsonType: 'date' },
+        completed_at: { bsonType: ['date', 'null'] },
+      },
+    },
+  },
 };
 
 export async function migrateDatabase(db: Db): Promise<void> {
@@ -839,56 +898,86 @@ export async function migrateDatabase(db: Db): Promise<void> {
             $ifNull: ['$contact', { email_normalized: null, phone_e164: null, website_url: null }],
           },
           default_timezone: { $ifNull: ['$default_timezone', 'UTC'] },
-          default_slot_cadence_minutes: { $ifNull: ['$default_slot_cadence_minutes', 15] },
-          locale: { $ifNull: ['$locale', 'en-US'] },
+          default_slot_cadence_minutes: {
+            $ifNull: [
+              '$default_slot_cadence_minutes',
+              PLATFORM_TENANT_DEFAULTS.defaultSlotCadenceMinutes,
+            ],
+          },
+          locale: { $ifNull: ['$locale', PLATFORM_TENANT_DEFAULTS.locale] },
           currency: { $ifNull: ['$currency', 'USD'] },
+          designation: { $ifNull: ['$designation', 'customer'] },
           version: { $ifNull: ['$version', 1] },
           updated_by: { $ifNull: ['$updated_by', null] },
-          public_booking_enabled: { $ifNull: ['$public_booking_enabled', false] },
+          public_booking_enabled: {
+            $ifNull: ['$public_booking_enabled', PLATFORM_TENANT_DEFAULTS.publicBookingEnabled],
+          },
           public_profile: {
             $ifNull: [
               '$public_profile',
               {
                 business_name: '$display_name',
-                description: null,
-                tagline: null,
-                logo_url: null,
-                primary_color: null,
-                website_url: null,
-                phone_e164: null,
-                email_normalized: null,
+                description: PLATFORM_TENANT_DEFAULTS.publicProfile.description,
+                tagline: PLATFORM_TENANT_DEFAULTS.publicProfile.tagline,
+                logo_url: PLATFORM_TENANT_DEFAULTS.publicProfile.logoUrl,
+                primary_color: PLATFORM_TENANT_DEFAULTS.publicProfile.primaryColor,
+                website_url: PLATFORM_TENANT_DEFAULTS.publicProfile.websiteUrl,
+                phone_e164: PLATFORM_TENANT_DEFAULTS.publicProfile.phoneE164,
+                email_normalized: PLATFORM_TENANT_DEFAULTS.publicProfile.emailNormalized,
               },
             ],
           },
           booking_policy: {
-            $ifNull: ['$booking_policy', { minimum_lead_minutes: 120, maximum_advance_days: 90 }],
+            $ifNull: [
+              '$booking_policy',
+              {
+                minimum_lead_minutes: PLATFORM_TENANT_DEFAULTS.bookingPolicy.minimumLeadMinutes,
+                maximum_advance_days: PLATFORM_TENANT_DEFAULTS.bookingPolicy.maximumAdvanceDays,
+              },
+            ],
           },
           public_booking_terms: {
             $ifNull: [
               '$public_booking_terms',
               {
-                version: '1',
-                acknowledgment_label: 'I agree to the booking and cancellation terms.',
-                terms_url: null,
+                version: PLATFORM_TENANT_DEFAULTS.publicBookingTerms.version,
+                acknowledgment_label:
+                  PLATFORM_TENANT_DEFAULTS.publicBookingTerms.acknowledgmentLabel,
+                terms_url: PLATFORM_TENANT_DEFAULTS.publicBookingTerms.termsUrl,
               },
             ],
           },
           appointment_email_settings: {
             $ifNull: [
               '$appointment_email_settings',
-              { enabled: false, sender_name: '$display_name', reply_to_email: null },
+              {
+                enabled: PLATFORM_TENANT_DEFAULTS.appointmentEmailSettings.enabled,
+                sender_name: '$display_name',
+                reply_to_email: PLATFORM_TENANT_DEFAULTS.appointmentEmailSettings.replyToEmail,
+              },
             ],
           },
           appointment_self_service: {
             $ifNull: [
               '$appointment_self_service',
               {
-                enabled: false,
-                cancellation_cutoff_minutes: 1440,
-                reschedule_cutoff_minutes: 1440,
+                enabled: PLATFORM_TENANT_DEFAULTS.appointmentSelfService.enabled,
+                cancellation_cutoff_minutes:
+                  PLATFORM_TENANT_DEFAULTS.appointmentSelfService.cancellationCutoffMinutes,
+                reschedule_cutoff_minutes:
+                  PLATFORM_TENANT_DEFAULTS.appointmentSelfService.rescheduleCutoffMinutes,
               },
             ],
           },
+        },
+      },
+    ]);
+  }
+  if (existing.has('users')) {
+    await db.collection('users').updateMany({}, [
+      {
+        $set: {
+          must_change_password: { $ifNull: ['$must_change_password', false] },
         },
       },
     ]);
@@ -975,6 +1064,30 @@ export async function migrateDatabase(db: Db): Promise<void> {
       sparse: true,
     },
     { key: { status: 1 }, name: 'users_status' },
+  ]);
+  await db.collection('tenant_provisioning_operations').createIndexes([
+    {
+      key: { public_id: 1 },
+      name: 'tenant_provisioning_operations_public_id_unique',
+      unique: true,
+    },
+    {
+      key: { request_id: 1 },
+      name: 'tenant_provisioning_operations_request_id_unique',
+      unique: true,
+    },
+    {
+      key: { request_fingerprint: 1 },
+      name: 'tenant_provisioning_operations_request_fingerprint',
+    },
+    {
+      key: { tenant_public_id: 1, created_at: -1 },
+      name: 'tenant_provisioning_operations_tenant_created',
+    },
+    {
+      key: { status: 1, created_at: 1 },
+      name: 'tenant_provisioning_operations_status_created',
+    },
   ]);
   await db.collection('roles').createIndexes([
     {
@@ -1237,6 +1350,10 @@ export async function migrateDatabase(db: Db): Promise<void> {
     {
       key: { tenant_id: 1, appointment_id: 1, created_at: -1 },
       name: 'notification_outbox_appointment_history',
+    },
+    {
+      key: { tenant_id: 1, status: 1, processing_started_at: 1 },
+      name: 'notification_outbox_tenant_cleanup',
     },
   ]);
   await db.collection('request_rate_limits').createIndexes([
