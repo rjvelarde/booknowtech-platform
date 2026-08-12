@@ -151,25 +151,21 @@ suite('tenant status and internal-QA cleanup', () => {
       1,
     );
     expect(
-      await db
-        .collection('notification_outbox')
-        .countDocuments({
-          status: 'failed',
-          last_error_code: 'internal_qa_deactivated',
-          processing_started_at: null,
-        }),
+      await db.collection('notification_outbox').countDocuments({
+        status: 'failed',
+        last_error_code: 'internal_qa_deactivated',
+        processing_started_at: null,
+      }),
     ).toBe(2);
-    const reclaimed = await db
-      .collection('notification_outbox')
-      .findOneAndUpdate(
-        {
-          $or: [
-            { status: 'pending' },
-            { status: 'processing', processing_started_at: { $lte: old } },
-          ],
-        },
-        { $set: { status: 'processing' } },
-      );
+    const reclaimed = await db.collection('notification_outbox').findOneAndUpdate(
+      {
+        $or: [
+          { status: 'pending' },
+          { status: 'processing', processing_started_at: { $lte: old } },
+        ],
+      },
+      { $set: { status: 'processing' } },
+    );
     expect(reclaimed).toBeNull();
     expect(await db.collection('appointments').countDocuments({ tenant_id: stored!._id })).toBe(1);
     expect(
