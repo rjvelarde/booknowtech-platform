@@ -313,10 +313,11 @@ function token(tenantId: ObjectId) {
 }
 function appointment(tenantId: ObjectId, status: 'scheduled' | 'cancelled') {
   const now = new Date();
+  const actorId = new ObjectId();
   return {
     _id: new ObjectId(),
     public_id: randomUUID(),
-    reference: `BNT-${randomUUID().slice(0, 8)}`,
+    reference: `BNT-${randomUUID().slice(0, 8).toUpperCase()}`,
     tenant_id: tenantId,
     customer_id: new ObjectId(),
     provider_id: new ObjectId(),
@@ -358,8 +359,8 @@ function appointment(tenantId: ObjectId, status: 'scheduled' | 'cancelled') {
     version: 1,
     created_at: now,
     updated_at: now,
-    created_by: null,
-    updated_by: null,
+    created_by: actorId,
+    updated_by: actorId,
   };
 }
 function outbox(
