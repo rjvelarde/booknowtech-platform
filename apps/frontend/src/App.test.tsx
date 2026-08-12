@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { App, isPublicBookingHost } from './App.js';
@@ -26,7 +26,9 @@ describe('Business Hub', () => {
     expect(await screen.findByRole('heading', { name: 'Set a new password' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
     expect(screen.queryByText('Appointments')).not.toBeInTheDocument();
-    expect(document.activeElement).toBe(screen.getByLabelText('Temporary password'));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByLabelText('Temporary password')),
+    );
   });
 
   it('submits a password replacement and resumes the normal Hub only after the server clears it', async () => {
