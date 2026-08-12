@@ -21,6 +21,24 @@ export class ProvisioningConnectionFailure extends Error {
   }
 }
 
+export class ProvisioningArgumentsFailure extends Error {
+  public constructor() {
+    super('Provisioning arguments failed validation');
+  }
+}
+
+export class ProvisioningAuthorizationFailure extends Error {
+  public constructor() {
+    super('Provisioning authorization failed');
+  }
+}
+
+export class ProvisioningInputFailure extends Error {
+  public constructor() {
+    super('Provisioning input failed validation');
+  }
+}
+
 interface CommandArguments {
   requestId: string;
   inputPath: string;
@@ -36,12 +54,27 @@ export async function runProvisioningCli(
     write?: (value: string) => void;
   } = {},
 ): Promise<void> {
-  const parsed = parseArguments(arguments_);
-  const authorization = authorizeProvisioning(environment);
-  const input = await readAndValidateProvisioningInput(
-    parsed.inputPath,
-    authorization.environment.BOOKING_ROOT_DOMAIN,
-  );
+  let parsed: CommandArguments;
+  try {
+    parsed = parseArguments(arguments_);
+  } catch {
+    throw new ProvisioningArgumentsFailure();
+  }
+  let authorization: ReturnType<typeof authorizeProvisioning>;
+  try {
+    authorization = authorizeProvisioning(environment);
+  } catch {
+    throw new ProvisioningAuthorizationFailure();
+  }
+  let input: Awaited<ReturnType<typeof readAndValidateProvisioningInput>>;
+  try {
+    input = await readAndValidateProvisioningInput(
+      parsed.inputPath,
+      authorization.environment.BOOKING_ROOT_DOMAIN,
+    );
+  } catch {
+    throw new ProvisioningInputFailure();
+  }
   const write = dependencies.write ?? ((value) => stdout.write(`${value}\n`));
 
   if (parsed.dryValidate) {
@@ -175,6 +208,21 @@ export function safeProvisioningError(error: unknown): { code: string; message: 
   if (error instanceof ProvisioningConnectionFailure)
     return {
       code: 'provisioning_database_connection_failed',
+      message: 'The provisioning request could not be completed.',
+    };
+  if (error instanceof ProvisioningArgumentsFailure)
+    return {
+      code: 'provisioning_arguments_invalid',
+      message: 'The provisioning request could not be completed.',
+    };
+  if (error instanceof ProvisioningAuthorizationFailure)
+    return {
+      code: 'provisioning_authorization_denied',
+      message: 'The provisioning request could not be completed.',
+    };
+  if (error instanceof ProvisioningInputFailure)
+    return {
+      code: 'provisioning_input_invalid',
       message: 'The provisioning request could not be completed.',
     };
   if (error instanceof ProvisioningPersistenceFailure)

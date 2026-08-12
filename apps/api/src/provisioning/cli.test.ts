@@ -7,7 +7,10 @@ import { verifyPassword } from '../auth/password.js';
 import {
   hashTemporaryPassword,
   parseArguments,
+  ProvisioningArgumentsFailure,
+  ProvisioningAuthorizationFailure,
   ProvisioningConnectionFailure,
+  ProvisioningInputFailure,
   ProvisioningTemporaryPasswordFailure,
   runProvisioningCli,
   safeProvisioningError,
@@ -111,6 +114,15 @@ describe('tenant-provision CLI', () => {
     );
     expect(safeProvisioningError(new ProvisioningConnectionFailure()).code).toBe(
       'provisioning_database_connection_failed',
+    );
+    expect(safeProvisioningError(new ProvisioningArgumentsFailure()).code).toBe(
+      'provisioning_arguments_invalid',
+    );
+    expect(safeProvisioningError(new ProvisioningAuthorizationFailure()).code).toBe(
+      'provisioning_authorization_denied',
+    );
+    expect(safeProvisioningError(new ProvisioningInputFailure()).code).toBe(
+      'provisioning_input_invalid',
     );
     expect(
       safeProvisioningError(new ProvisioningPersistenceFailure('tenant_insert')).code,
