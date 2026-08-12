@@ -43,6 +43,9 @@ describe('tenant-provision CLI', () => {
     expect(parseArguments(['create', '--request-id', id, '--input', 'tenant.json'])).toMatchObject({
       requestId: id,
     });
+    expect(
+      parseArguments(['--', 'create', '--request-id', id, '--input', 'tenant.json']),
+    ).toMatchObject({ requestId: id });
     expect(() =>
       parseArguments([
         'create',

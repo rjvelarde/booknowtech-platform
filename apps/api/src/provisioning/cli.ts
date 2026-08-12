@@ -64,6 +64,8 @@ export async function runProvisioningCli(
 }
 
 export function parseArguments(arguments_: string[]): CommandArguments {
+  // pnpm forwards an optional separator to the script when invoking this command.
+  if (arguments_[0] === '--') arguments_ = arguments_.slice(1);
   if (arguments_[0] !== 'create') throw new Error('Usage: tenant-provision create');
   let requestId: string | undefined;
   let inputPath: string | undefined;
