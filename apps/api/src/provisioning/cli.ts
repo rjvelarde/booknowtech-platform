@@ -3,7 +3,23 @@ import { MongoClient } from 'mongodb';
 import { hashPassword } from '../auth/password.js';
 import { authorizeProvisioning } from './guard.js';
 import { readAndValidateProvisioningInput } from './input.js';
-import { ProvisioningConflict, provisionTenant } from './service.js';
+import {
+  ProvisioningConflict,
+  ProvisioningPersistenceFailure,
+  provisionTenant,
+} from './service.js';
+
+export class ProvisioningTemporaryPasswordFailure extends Error {
+  public constructor() {
+    super('Temporary password collection failed');
+  }
+}
+
+export class ProvisioningConnectionFailure extends Error {
+  public constructor() {
+    super('Provisioning database connection failed');
+  }
+}
 
 interface CommandArguments {
   requestId: string;
@@ -42,13 +58,22 @@ export async function runProvisioningCli(
   }
 
   const readPassword = dependencies.passwordReader ?? readConfirmedMaskedPassword;
-  const passwordHash = await hashTemporaryPassword(await readPassword());
+  let passwordHash: string;
+  try {
+    passwordHash = await hashTemporaryPassword(await readPassword());
+  } catch {
+    throw new ProvisioningTemporaryPasswordFailure();
+  }
 
   const client = (dependencies.clientFactory ?? ((uri) => new MongoClient(uri)))(
     authorization.environment.MONGODB_URI,
   );
   try {
-    await client.connect();
+    try {
+      await client.connect();
+    } catch {
+      throw new ProvisioningConnectionFailure();
+    }
     const result = await provisionTenant({
       client,
       database: client.db(authorization.environment.MONGODB_DATABASE),
@@ -142,6 +167,21 @@ function isUuid(value: string): boolean {
 export function safeProvisioningError(error: unknown): { code: string; message: string } {
   if (error instanceof ProvisioningConflict)
     return { code: error.code, message: 'The provisioning request could not be completed.' };
+  if (error instanceof ProvisioningTemporaryPasswordFailure)
+    return {
+      code: 'temporary_password_rejected',
+      message: 'The provisioning request could not be completed.',
+    };
+  if (error instanceof ProvisioningConnectionFailure)
+    return {
+      code: 'provisioning_database_connection_failed',
+      message: 'The provisioning request could not be completed.',
+    };
+  if (error instanceof ProvisioningPersistenceFailure)
+    return {
+      code: `provisioning_${error.stage}_failed`,
+      message: 'The provisioning request could not be completed.',
+    };
   return {
     code: 'provisioning_failed',
     message: 'The provisioning request could not be completed.',

@@ -7,9 +7,12 @@ import { verifyPassword } from '../auth/password.js';
 import {
   hashTemporaryPassword,
   parseArguments,
+  ProvisioningConnectionFailure,
+  ProvisioningTemporaryPasswordFailure,
   runProvisioningCli,
   safeProvisioningError,
 } from './cli.js';
+import { ProvisioningPersistenceFailure } from './service.js';
 
 const directories: string[] = [];
 const environment = {
@@ -100,6 +103,18 @@ describe('tenant-provision CLI', () => {
     expect(encoded).toMatch(/^scrypt\$/u);
     expect(encoded).not.toContain(plaintext);
     await expect(verifyPassword(plaintext, encoded)).resolves.toBe(true);
+  });
+
+  it('reports only safe provisioning failure categories', () => {
+    expect(safeProvisioningError(new ProvisioningTemporaryPasswordFailure()).code).toBe(
+      'temporary_password_rejected',
+    );
+    expect(safeProvisioningError(new ProvisioningConnectionFailure()).code).toBe(
+      'provisioning_database_connection_failed',
+    );
+    expect(
+      safeProvisioningError(new ProvisioningPersistenceFailure('tenant_insert')).code,
+    ).toBe('provisioning_tenant_insert_failed');
   });
 });
 

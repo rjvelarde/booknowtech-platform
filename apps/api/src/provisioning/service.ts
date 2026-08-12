@@ -19,6 +19,26 @@ export class ProvisioningConflict extends Error {
   }
 }
 
+/**
+ * A deliberately redacted persistence failure. The CLI may report the stage
+ * identifier, but never a database error message because those messages can
+ * contain document fragments.
+ */
+export class ProvisioningPersistenceFailure extends Error {
+  public constructor(
+    public readonly stage:
+      | 'conflict_check'
+      | 'tenant_insert'
+      | 'owner_insert'
+      | 'role_insert'
+      | 'operation_insert'
+      | 'audit_insert'
+      | 'transaction',
+  ) {
+    super(`Provisioning persistence failed at ${stage}`);
+  }
+}
+
 export interface ProvisioningResult {
   outcome: 'created' | 'replayed';
   request_id: string;
@@ -56,12 +76,14 @@ export async function provisionTenant(input: {
   const tenantPublicId = randomUUID();
   const ownerPublicId = randomUUID();
   const now = new Date();
+  let persistenceStage: ProvisioningPersistenceFailure['stage'] = 'transaction';
 
   try {
     const session = input.client.startSession();
     try {
       await session.withTransaction(
         async () => {
+          persistenceStage = 'conflict_check';
           await assertNoConflicts(input.database, input.provisioningInput, session);
           const tenant = buildTenant(input.provisioningInput, tenantId, tenantPublicId, now);
           const user: UserDocument = {
@@ -102,16 +124,21 @@ export async function provisionTenant(input: {
             completed_at: now,
           };
 
+          persistenceStage = 'tenant_insert';
           await input.database.collection<TenantDocument>('tenants').insertOne(tenant, { session });
           await input.hooks?.beforeCommit?.('tenant');
+          persistenceStage = 'owner_insert';
           await input.database.collection<UserDocument>('users').insertOne(user, { session });
           await input.hooks?.beforeCommit?.('owner');
+          persistenceStage = 'role_insert';
           await input.database.collection<RoleDocument>('roles').insertOne(role, { session });
           await input.hooks?.beforeCommit?.('role');
+          persistenceStage = 'operation_insert';
           await input.database
             .collection<TenantProvisioningOperationDocument>('tenant_provisioning_operations')
             .insertOne(operation, { session });
           await input.hooks?.beforeCommit?.('operation');
+          persistenceStage = 'audit_insert';
           await input.database.collection('audit_logs').insertOne(
             {
               public_id: randomUUID(),
@@ -154,6 +181,8 @@ export async function provisionTenant(input: {
     if (error instanceof MongoServerError && error.code === 11000) {
       await throwResolvedDuplicate(input.database, input.provisioningInput);
     }
+    if (error instanceof MongoServerError)
+      throw new ProvisioningPersistenceFailure(persistenceStage);
     throw error;
   }
 
