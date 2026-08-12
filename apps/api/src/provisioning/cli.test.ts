@@ -5,13 +5,13 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { verifyPassword } from '../auth/password.js';
 import {
-  hashTemporaryPassword,
-  parseArguments,
   ProvisioningArgumentsFailure,
   ProvisioningAuthorizationFailure,
   ProvisioningConnectionFailure,
   ProvisioningInputFailure,
   ProvisioningTemporaryPasswordFailure,
+  hashTemporaryPassword,
+  parseArguments,
   runProvisioningCli,
   safeProvisioningError,
 } from './cli.js';
@@ -44,7 +44,7 @@ afterEach(async () =>
 );
 
 describe('tenant-provision CLI', () => {
-  it('accepts only the create command and never accepts a password argument', () => {
+  it('accepts the three bounded commands and never accepts a password argument', () => {
     const id = randomUUID();
     expect(parseArguments(['create', '--request-id', id, '--input', 'tenant.json'])).toMatchObject({
       requestId: id,
@@ -52,6 +52,20 @@ describe('tenant-provision CLI', () => {
     expect(
       parseArguments(['--', 'create', '--request-id', id, '--input', 'tenant.json']),
     ).toMatchObject({ requestId: id });
+    expect(
+      parseArguments([
+        'set-status',
+        '--request-id',
+        id,
+        '--tenant',
+        'internal-qa',
+        '--status',
+        'suspended',
+      ]),
+    ).toMatchObject({ command: 'set-status', tenantSlug: 'internal-qa', status: 'suspended' });
+    expect(
+      parseArguments(['deactivate-internal-qa', '--request-id', id, '--tenant', 'internal-qa']),
+    ).toMatchObject({ command: 'deactivate-internal-qa', tenantSlug: 'internal-qa' });
     expect(() =>
       parseArguments([
         'create',
@@ -61,6 +75,17 @@ describe('tenant-provision CLI', () => {
         'tenant.json',
         '--password',
         'secret',
+      ]),
+    ).toThrow();
+    expect(() =>
+      parseArguments([
+        'set-status',
+        '--request-id',
+        id,
+        '--tenant',
+        'internal-qa',
+        '--status',
+        'deleted',
       ]),
     ).toThrow();
   });
@@ -124,9 +149,9 @@ describe('tenant-provision CLI', () => {
     expect(safeProvisioningError(new ProvisioningInputFailure()).code).toBe(
       'provisioning_input_invalid',
     );
-    expect(
-      safeProvisioningError(new ProvisioningPersistenceFailure('tenant_insert')).code,
-    ).toBe('provisioning_tenant_insert_failed');
+    expect(safeProvisioningError(new ProvisioningPersistenceFailure('tenant_insert')).code).toBe(
+      'provisioning_tenant_insert_failed',
+    );
   });
 });
 

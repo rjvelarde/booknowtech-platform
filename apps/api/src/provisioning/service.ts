@@ -11,7 +11,10 @@ import type { ProvisioningAuthorization } from './guard.js';
 import { type ValidatedProvisioningInput, fingerprintProvisioningRequest } from './input.js';
 
 export type ProvisioningConflictCode =
-  'request_id_mismatch' | 'tenant_slug_conflict' | 'owner_email_conflict';
+  | 'request_id_mismatch'
+  | 'tenant_slug_conflict'
+  | 'owner_email_conflict'
+  | 'tenant_designation_conflict';
 
 export class ProvisioningConflict extends Error {
   public constructor(public readonly code: ProvisioningConflictCode) {

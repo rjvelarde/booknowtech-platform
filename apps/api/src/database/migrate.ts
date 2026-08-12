@@ -128,6 +128,7 @@ const validators: Record<string, Document> = {
       properties: {
         role: { enum: ['tenant_owner', 'tenant_admin', 'provider', 'front_desk'] },
         status: { enum: ['active', 'suspended', 'revoked'] },
+        suspended_by_tenant_status: { bsonType: 'bool' },
       },
     },
   },
@@ -1349,6 +1350,10 @@ export async function migrateDatabase(db: Db): Promise<void> {
     {
       key: { tenant_id: 1, appointment_id: 1, created_at: -1 },
       name: 'notification_outbox_appointment_history',
+    },
+    {
+      key: { tenant_id: 1, status: 1, processing_started_at: 1 },
+      name: 'notification_outbox_tenant_cleanup',
     },
   ]);
   await db.collection('request_rate_limits').createIndexes([

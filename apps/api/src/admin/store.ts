@@ -410,6 +410,7 @@ export interface RoleDocument {
   user_id: ObjectId;
   role: AdminRole;
   status: 'active' | 'suspended' | 'revoked';
+  suspended_by_tenant_status?: boolean;
   created_at: Date;
   updated_at: Date;
 }

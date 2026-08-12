@@ -8,6 +8,7 @@ import {
   ProvisioningPersistenceFailure,
   provisionTenant,
 } from './service.js';
+import { type TenantStatus, deactivateInternalQa, setTenantStatus } from './status-service.js';
 
 export class ProvisioningTemporaryPasswordFailure extends Error {
   public constructor() {
@@ -40,8 +41,11 @@ export class ProvisioningInputFailure extends Error {
 }
 
 interface CommandArguments {
+  command: 'create' | 'set-status' | 'deactivate-internal-qa';
   requestId: string;
-  inputPath: string;
+  inputPath?: string;
+  tenantSlug?: string;
+  status?: TenantStatus;
   dryValidate: boolean;
 }
 
@@ -66,16 +70,45 @@ export async function runProvisioningCli(
   } catch {
     throw new ProvisioningAuthorizationFailure();
   }
+  const write = dependencies.write ?? ((value) => stdout.write(`${value}\n`));
+
+  if (parsed.command !== 'create') {
+    const client = (dependencies.clientFactory ?? ((uri) => new MongoClient(uri)))(
+      authorization.environment.MONGODB_URI,
+    );
+    try {
+      try {
+        await client.connect();
+      } catch {
+        throw new ProvisioningConnectionFailure();
+      }
+      const common = {
+        client,
+        database: client.db(authorization.environment.MONGODB_DATABASE),
+        authorization,
+        requestId: parsed.requestId,
+        tenantSlug: parsed.tenantSlug!,
+      };
+      const result =
+        parsed.command === 'set-status'
+          ? await setTenantStatus({ ...common, status: parsed.status! })
+          : await deactivateInternalQa(common);
+      write(JSON.stringify(result));
+      return;
+    } finally {
+      await client.close();
+    }
+  }
+
   let input: Awaited<ReturnType<typeof readAndValidateProvisioningInput>>;
   try {
     input = await readAndValidateProvisioningInput(
-      parsed.inputPath,
+      parsed.inputPath!,
       authorization.environment.BOOKING_ROOT_DOMAIN,
     );
   } catch {
     throw new ProvisioningInputFailure();
   }
-  const write = dependencies.write ?? ((value) => stdout.write(`${value}\n`));
 
   if (parsed.dryValidate) {
     write(
@@ -124,20 +157,53 @@ export async function runProvisioningCli(
 export function parseArguments(arguments_: string[]): CommandArguments {
   // pnpm forwards an optional separator to the script when invoking this command.
   if (arguments_[0] === '--') arguments_ = arguments_.slice(1);
-  if (arguments_[0] !== 'create') throw new Error('Usage: tenant-provision create');
+  const command = arguments_[0];
+  if (command !== 'create' && command !== 'set-status' && command !== 'deactivate-internal-qa')
+    throw new Error('Invalid provisioning command');
   let requestId: string | undefined;
   let inputPath: string | undefined;
   let dryValidate = false;
+  let tenantSlug: string | undefined;
+  let status: TenantStatus | undefined;
   for (let index = 1; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (argument === '--request-id') requestId = arguments_[++index];
     else if (argument === '--input') inputPath = arguments_[++index];
+    else if (argument === '--tenant') tenantSlug = arguments_[++index];
+    else if (argument === '--status') status = arguments_[++index] as TenantStatus;
     else if (argument === '--dry-validate') dryValidate = true;
     else throw new Error('Invalid provisioning arguments');
   }
-  if (!requestId || !isUuid(requestId) || !inputPath)
+  if (!requestId || !isUuid(requestId)) throw new Error('Invalid provisioning arguments');
+  if (command === 'create' && (!inputPath || tenantSlug || status))
     throw new Error('Invalid provisioning arguments');
-  return { requestId, inputPath, dryValidate };
+  if (
+    command === 'set-status' &&
+    (!tenantSlug ||
+      !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(tenantSlug) ||
+      !status ||
+      !['active', 'suspended'].includes(status) ||
+      inputPath ||
+      dryValidate)
+  )
+    throw new Error('Invalid provisioning arguments');
+  if (
+    command === 'deactivate-internal-qa' &&
+    (!tenantSlug ||
+      !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(tenantSlug) ||
+      inputPath ||
+      status ||
+      dryValidate)
+  )
+    throw new Error('Invalid provisioning arguments');
+  return {
+    command,
+    requestId,
+    ...(inputPath ? { inputPath } : {}),
+    ...(tenantSlug ? { tenantSlug } : {}),
+    ...(status ? { status } : {}),
+    dryValidate,
+  };
 }
 
 async function readConfirmedMaskedPassword(): Promise<string> {
