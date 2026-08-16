@@ -34,6 +34,7 @@ const environment = {
   OPENAPI_ENABLED: 'true',
   PUBLIC_APPOINTMENT_TOKEN_SECRET: 'a-safe-public-appointment-secret-value',
   RATE_LIMIT_KEY_SECRET: 'a-different-safe-rate-limit-secret-value',
+  MONITORING_TOKEN: 'bnt_monitoring_staging_0123456789abcdef0123456789abcdef',
   PROVISIONING_OPERATOR_ID: 'operator@example.test',
   PROVISIONING_REASON: 'Provision an approved internal design partner.',
   PROVISIONING_APPROVED: 'true',

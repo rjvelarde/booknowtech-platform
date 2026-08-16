@@ -98,6 +98,28 @@ suite('administrative foundation migration', () => {
     ).rejects.toThrow();
   });
 
+  it('creates bounded monitoring indexes for privacy-safe outbox aggregates', async () => {
+    await migrateDatabase(db);
+    await migrateDatabase(db);
+    const indexes = await db.collection('notification_outbox').indexes();
+    expect(indexes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'notification_outbox_monitor_pending',
+          key: { status: 1, created_at: 1 },
+        }),
+        expect.objectContaining({
+          name: 'notification_outbox_monitor_processing',
+          key: { status: 1, processing_started_at: 1 },
+        }),
+        expect.objectContaining({
+          name: 'notification_outbox_monitor_failed',
+          key: { status: 1, failed_at: 1 },
+        }),
+      ]),
+    );
+  });
+
   it('backfills legacy tenant and user records without changing existing values', async () => {
     const legacyDb = client.db(`booknowtech_legacy_${randomUUID().replaceAll('-', '')}`);
     await legacyDb.createCollection('tenants');

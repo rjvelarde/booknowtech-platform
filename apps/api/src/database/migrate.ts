@@ -1379,6 +1379,18 @@ export async function migrateDatabase(db: Db): Promise<void> {
       key: { tenant_id: 1, status: 1, processing_started_at: 1 },
       name: 'notification_outbox_tenant_cleanup',
     },
+    {
+      key: { status: 1, created_at: 1 },
+      name: 'notification_outbox_monitor_pending',
+    },
+    {
+      key: { status: 1, processing_started_at: 1 },
+      name: 'notification_outbox_monitor_processing',
+    },
+    {
+      key: { status: 1, failed_at: 1 },
+      name: 'notification_outbox_monitor_failed',
+    },
   ]);
   await db.collection('service_heartbeats').createIndexes([
     {
