@@ -18,6 +18,17 @@ const expectedHeaders = {
 
 const api = createServer((incoming, response) => {
   response.setHeader('content-type', 'application/json');
+  response.setHeader('x-request-id', incoming.headers['x-request-id'] ?? 'security-header-test');
+  if (incoming.url === '/health/ready') {
+    response.statusCode = 200;
+    response.end(JSON.stringify({ data: { status: 'ready' } }));
+    return;
+  }
+  if (incoming.url === '/health/ready?state=unhealthy') {
+    response.statusCode = 503;
+    response.end(JSON.stringify({ data: { status: 'not_ready' } }));
+    return;
+  }
   if (incoming.url === '/api/v1/version') {
     response.statusCode = 200;
     response.end(JSON.stringify({ data: { version: 'security-header-test' } }));
@@ -65,6 +76,27 @@ try {
     'text/html',
   );
   await verify('/api/v1/version', 'admin.booknowtech.com', 200, 'application/json');
+  const productionReady = await verify(
+    '/api/health/ready',
+    'admin.booknowtech.com',
+    200,
+    'application/json',
+  );
+  assertJson(productionReady.body, { data: { status: 'ready' } });
+  const stagingReady = await verify(
+    '/api/health/ready',
+    'admin.staging.booknowtech.com',
+    200,
+    'application/json',
+  );
+  assertJson(stagingReady.body, { data: { status: 'ready' } });
+  const unhealthy = await verify(
+    '/api/health/ready?state=unhealthy',
+    'admin.booknowtech.com',
+    503,
+    'application/json',
+  );
+  assertJson(unhealthy.body, { data: { status: 'not_ready' } });
   await verify(
     '/api/v1/security-header-probe-not-found',
     'harbor-demo.booknowtech.com',
@@ -78,6 +110,15 @@ try {
 } finally {
   await command('docker', ['stop', container], true);
   await new Promise((resolve, reject) => api.close((error) => (error ? reject(error) : resolve())));
+}
+
+function assertJson(body, expected) {
+  const actual = JSON.parse(body);
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(
+      `JSON body was ${JSON.stringify(actual)}; expected ${JSON.stringify(expected)}`,
+    );
+  }
 }
 
 async function verify(path, host, status, contentType) {

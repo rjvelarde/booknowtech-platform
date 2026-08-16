@@ -4,6 +4,30 @@ import { PLATFORM_TENANT_DEFAULTS } from '@booknowtech/shared';
 const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$';
 
 const validators: Record<string, Document> = {
+  service_heartbeats: {
+    $jsonSchema: {
+      bsonType: 'object',
+      additionalProperties: false,
+      required: [
+        '_id',
+        'service',
+        'environment',
+        'commit_sha',
+        'instance_id',
+        'observed_at',
+        'expires_at',
+      ],
+      properties: {
+        _id: { bsonType: 'objectId' },
+        service: { enum: ['worker'] },
+        environment: { enum: ['development', 'test', 'staging', 'production'] },
+        commit_sha: { bsonType: 'string', pattern: '^[a-f0-9]{40}$' },
+        instance_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        observed_at: { bsonType: 'date' },
+        expires_at: { bsonType: 'date' },
+      },
+    },
+  },
   tenants: {
     $jsonSchema: {
       bsonType: 'object',
@@ -1354,6 +1378,22 @@ export async function migrateDatabase(db: Db): Promise<void> {
     {
       key: { tenant_id: 1, status: 1, processing_started_at: 1 },
       name: 'notification_outbox_tenant_cleanup',
+    },
+  ]);
+  await db.collection('service_heartbeats').createIndexes([
+    {
+      key: { service: 1, environment: 1, instance_id: 1 },
+      name: 'service_heartbeats_instance_unique',
+      unique: true,
+    },
+    {
+      key: { service: 1, environment: 1, observed_at: -1 },
+      name: 'service_heartbeats_freshness',
+    },
+    {
+      key: { expires_at: 1 },
+      name: 'service_heartbeats_expiry_ttl',
+      expireAfterSeconds: 0,
     },
   ]);
   await db.collection('request_rate_limits').createIndexes([

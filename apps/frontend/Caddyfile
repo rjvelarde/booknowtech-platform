@@ -17,6 +17,20 @@
     X-Frame-Options "DENY"
   }
 
+  @public_readiness {
+    method GET
+    path /api/health/ready
+  }
+
+  handle @public_readiness {
+    rewrite * /health/ready
+    reverse_proxy {$API_PRIVATE_ORIGIN} {
+      header_up -X-Forwarded-*
+      header_up -X-Real-IP
+      header_up X-BookNowTech-Client-IP {client_ip}
+    }
+  }
+
   handle /api/* {
     reverse_proxy {$API_PRIVATE_ORIGIN} {
       header_up -X-Forwarded-*
