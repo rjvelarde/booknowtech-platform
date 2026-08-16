@@ -38,6 +38,66 @@ suite('administrative foundation migration', () => {
     });
   });
 
+  it('creates strict, additive service-heartbeat storage and named indexes', async () => {
+    await migrateDatabase(db);
+    await migrateDatabase(db);
+
+    const indexes = await db.collection('service_heartbeats').indexes();
+    expect(indexes.map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        'service_heartbeats_instance_unique',
+        'service_heartbeats_freshness',
+        'service_heartbeats_expiry_ttl',
+      ]),
+    );
+    expect(indexes.find(({ name }) => name === 'service_heartbeats_instance_unique')).toMatchObject(
+      {
+        key: { service: 1, environment: 1, instance_id: 1 },
+        unique: true,
+      },
+    );
+    expect(indexes.find(({ name }) => name === 'service_heartbeats_freshness')).toMatchObject({
+      key: { service: 1, environment: 1, observed_at: -1 },
+    });
+    expect(indexes.find(({ name }) => name === 'service_heartbeats_expiry_ttl')).toMatchObject({
+      key: { expires_at: 1 },
+      expireAfterSeconds: 0,
+    });
+
+    const validHeartbeat = {
+      service: 'worker',
+      environment: 'staging',
+      commit_sha: 'a'.repeat(40),
+      instance_id: randomUUID(),
+      observed_at: new Date(),
+      expires_at: new Date(Date.now() + 600_000),
+    };
+    await db.collection('service_heartbeats').insertOne(validHeartbeat);
+    await expect(
+      db.collection('service_heartbeats').insertOne({
+        ...validHeartbeat,
+        _id: new ObjectId(),
+      }),
+    ).rejects.toThrow();
+
+    await expect(
+      db.collection('service_heartbeats').insertOne({
+        ...validHeartbeat,
+        _id: new ObjectId(),
+        instance_id: randomUUID(),
+        recipient: 'customer@example.test',
+      }),
+    ).rejects.toThrow();
+    await expect(
+      db.collection('service_heartbeats').insertOne({
+        ...validHeartbeat,
+        _id: new ObjectId(),
+        instance_id: randomUUID(),
+        commit_sha: 'not-an-immutable-sha',
+      }),
+    ).rejects.toThrow();
+  });
+
   it('backfills legacy tenant and user records without changing existing values', async () => {
     const legacyDb = client.db(`booknowtech_legacy_${randomUUID().replaceAll('-', '')}`);
     await legacyDb.createCollection('tenants');

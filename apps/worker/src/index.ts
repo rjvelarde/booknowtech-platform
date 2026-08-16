@@ -4,6 +4,7 @@ import { MongoClient } from 'mongodb';
 import { loadWorkerEnvironment } from './config.js';
 import { createWorkerLifecycle } from './lifecycle.js';
 import { startNotificationWorker } from './notification-worker.js';
+import { startWorkerHeartbeat } from './heartbeat.js';
 
 async function start(): Promise<void> {
   const environment = loadWorkerEnvironment();
@@ -22,6 +23,11 @@ async function start(): Promise<void> {
   const lifecycle = createWorkerLifecycle(logger);
   const mongo = new MongoClient(environment.MONGODB_URI);
   await mongo.connect();
+  const heartbeat = await startWorkerHeartbeat(
+    mongo.db(environment.MONGODB_DATABASE),
+    environment,
+    logger,
+  );
   const notificationWorker = startNotificationWorker(
     mongo.db(environment.MONGODB_DATABASE),
     environment,
@@ -31,6 +37,7 @@ async function start(): Promise<void> {
   logger.info({ event: 'service.started' });
   const signal = await lifecycle.waitForShutdown();
   logger.info({ event: 'service.stopping', signal });
+  await heartbeat.stop();
   await notificationWorker.stop();
   await mongo.close();
   lifecycle.dispose();
