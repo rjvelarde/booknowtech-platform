@@ -82,6 +82,8 @@ export async function verifyOnce(options, dependencies = {}) {
   }
   if (!validOutbox(data.outbox)) return failure(state, 'malformed_monitoring', false);
 
+  // Monitoring returns 503 for an API/worker mismatch, so classify the observed
+  // immutable identities before falling back to the generic service status.
   if (state.frontendSha !== state.apiSha || state.apiSha !== state.workerSha) {
     return failure(state, 'identity_mismatch', true);
   }
