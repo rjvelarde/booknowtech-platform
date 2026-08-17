@@ -17,6 +17,7 @@ const valid = {
   OPENAPI_ENABLED: 'true',
   PUBLIC_APPOINTMENT_TOKEN_SECRET: 'test-secret-that-is-at-least-thirty-two-bytes-long',
   RATE_LIMIT_KEY_SECRET: 'test-rate-limit-secret-at-least-thirty-two-bytes',
+  MONITORING_TOKEN: 'bnt_monitoring_test_0123456789abcdef0123456789abcdef',
 };
 
 describe('loadEnvironment', () => {
@@ -69,6 +70,7 @@ describe('loadEnvironment', () => {
       MONGODB_DATABASE: 'booknowtech_staging',
       BOOKING_ROOT_DOMAIN: 'staging.booknowtech.com',
       BUILD_VERSION: 'operator-value-is-ignored',
+      MONITORING_TOKEN: 'bnt_monitoring_staging_0123456789abcdef0123456789abcdef',
     });
     expect(environment.BUILD_VERSION).toBe('a'.repeat(40));
   });
@@ -82,6 +84,7 @@ describe('loadEnvironment', () => {
       RAILWAY_GIT_COMMIT_SHA: 'c'.repeat(40),
       MONGODB_DATABASE: 'booknowtech_production',
       OPENAPI_ENABLED: 'false',
+      MONITORING_TOKEN: 'bnt_monitoring_production_0123456789abcdef0123456789abcdef',
     };
     expect(loadEnvironment(production)).toMatchObject({
       NODE_ENV: 'production',
@@ -91,5 +94,27 @@ describe('loadEnvironment', () => {
     expect(() => loadEnvironment({ ...production, ALLOW_DEVELOPMENT_SEED: 'true' })).toThrow(
       'production seed variables',
     );
+  });
+
+  it('requires an environment-specific monitoring token distinct from application secrets', () => {
+    const staging = {
+      ...valid,
+      NODE_ENV: 'staging',
+      ENVIRONMENT_ID: 'staging',
+      RAILWAY_ENVIRONMENT_NAME: 'staging',
+      RAILWAY_GIT_COMMIT_SHA: 'a'.repeat(40),
+      MONGODB_DATABASE: 'booknowtech_staging',
+      BOOKING_ROOT_DOMAIN: 'staging.booknowtech.com',
+    };
+    expect(() => loadEnvironment(staging)).toThrow('MONITORING_TOKEN environment');
+    expect(() =>
+      loadEnvironment({
+        ...staging,
+        MONITORING_TOKEN: 'bnt_monitoring_staging_0123456789abcdef0123456789abcdef',
+      }),
+    ).not.toThrow();
+    expect(() =>
+      loadEnvironment({ ...valid, MONITORING_TOKEN: valid.RATE_LIMIT_KEY_SECRET }),
+    ).toThrow('MONITORING_TOKEN');
   });
 });

@@ -16,6 +16,7 @@ export const testEnvironment: Environment = {
   OPENAPI_ENABLED: true,
   PUBLIC_APPOINTMENT_TOKEN_SECRET: 'test-secret-that-is-at-least-thirty-two-bytes-long',
   RATE_LIMIT_KEY_SECRET: 'test-rate-limit-secret-at-least-thirty-two-bytes',
+  MONITORING_TOKEN: 'bnt_monitoring_test_0123456789abcdef0123456789abcdef',
 };
 
 export class StubReadinessProbe implements ReadinessProbe {

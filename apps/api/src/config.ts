@@ -26,6 +26,7 @@ const environmentSchema = z.object({
   OPENAPI_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true'),
   PUBLIC_APPOINTMENT_TOKEN_SECRET: z.string().min(32),
   RATE_LIMIT_KEY_SECRET: z.string().min(32),
+  MONITORING_TOKEN: z.string().min(48).max(256),
 });
 
 type ParsedEnvironment = z.infer<typeof environmentSchema>;
@@ -60,8 +61,21 @@ export function loadEnvironment(source: NodeJS.ProcessEnv = process.env): Enviro
     throw new Error('Invalid environment configuration: PUBLIC_APPOINTMENT_TOKEN_SECRET');
   if (unsafeSecret.test(environment.RATE_LIMIT_KEY_SECRET))
     throw new Error('Invalid environment configuration: RATE_LIMIT_KEY_SECRET');
+  if (unsafeSecret.test(environment.MONITORING_TOKEN))
+    throw new Error('Invalid environment configuration: MONITORING_TOKEN');
   if (environment.PUBLIC_APPOINTMENT_TOKEN_SECRET === environment.RATE_LIMIT_KEY_SECRET)
     throw new Error('Invalid environment configuration: environment-specific secrets');
+  if (
+    [environment.PUBLIC_APPOINTMENT_TOKEN_SECRET, environment.RATE_LIMIT_KEY_SECRET].includes(
+      environment.MONITORING_TOKEN,
+    )
+  )
+    throw new Error('Invalid environment configuration: MONITORING_TOKEN separation');
+  if (
+    ['staging', 'production'].includes(environment.ENVIRONMENT_ID) &&
+    !environment.MONITORING_TOKEN.startsWith(`bnt_monitoring_${environment.ENVIRONMENT_ID}_`)
+  )
+    throw new Error('Invalid environment configuration: MONITORING_TOKEN environment');
 
   return {
     ...environment,

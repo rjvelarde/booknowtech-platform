@@ -17,6 +17,7 @@ const valid = {
   OPENAPI_ENABLED: 'true',
   PUBLIC_APPOINTMENT_TOKEN_SECRET: 'a-safe-public-appointment-secret-value',
   RATE_LIMIT_KEY_SECRET: 'a-different-safe-rate-limit-secret-value',
+  MONITORING_TOKEN: 'bnt_monitoring_staging_0123456789abcdef0123456789abcdef',
   PROVISIONING_OPERATOR_ID: 'Operator.One@BookNowTech.com',
   PROVISIONING_REASON: 'Provision approved design partner for launch readiness.',
   PROVISIONING_APPROVED: 'true',

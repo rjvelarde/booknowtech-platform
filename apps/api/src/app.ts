@@ -18,6 +18,8 @@ import { registerPublicAppointmentManagementRoutes } from './public-management/r
 import type { ReadinessProbe } from './readiness.js';
 import { type RateLimiter, allowAllRateLimiter } from './rate-limit/limiter.js';
 import { registerRateLimitHook } from './rate-limit/routes.js';
+import { registerMonitoringRoute } from './monitoring/routes.js';
+import type { MonitoringReader } from './monitoring/store.js';
 
 interface BuildApplicationOptions {
   environment: Environment;
@@ -26,6 +28,8 @@ interface BuildApplicationOptions {
   adminStore?: AdminStore;
   closeAdmin?: () => Promise<void>;
   rateLimiter?: RateLimiter;
+  monitoringReader?: MonitoringReader;
+  monitoringNow?: () => Date;
 }
 
 const dataEnvelopeSchema = {
@@ -43,6 +47,8 @@ export async function buildApplication({
   adminStore,
   closeAdmin,
   rateLimiter,
+  monitoringReader,
+  monitoringNow,
 }: BuildApplicationOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger ? createLoggerOptions(environment) : false,
@@ -111,6 +117,15 @@ export async function buildApplication({
       },
     },
     () => ({ data: { status: 'live' } }),
+  );
+
+  registerMonitoringRoute(
+    app,
+    environment,
+    monitoringReader ?? {
+      read: async () => Promise.reject(new Error('Monitoring persistence unavailable')),
+    },
+    monitoringNow,
   );
 
   app.get(
