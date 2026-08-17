@@ -86,6 +86,14 @@ describe('release verifier', () => {
     );
   });
 
+  it('classifies a monitoring 503 caused by a fresh worker SHA mismatch precisely', async () => {
+    assertFailure(
+      await run(sequence({ frontend: A, api: A, worker: B, monitoringStatus: 503 })),
+      'identity_mismatch',
+      300_000,
+    );
+  });
+
   it('redacts the monitoring token and unsafe response content', async () => {
     const token = 'bnt_monitoring_staging_super-secret';
     const result = await run(

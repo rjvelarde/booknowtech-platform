@@ -81,12 +81,13 @@ export async function verifyOnce(options, dependencies = {}) {
     return failure(state, 'worker_stale', true);
   }
   if (!validOutbox(data.outbox)) return failure(state, 'malformed_monitoring', false);
-  if (monitoring.status === 503) return failure(state, 'monitoring_unhealthy', true);
-  if (monitoring.status !== 200) return failure(state, 'monitoring_unavailable', true);
 
   if (state.frontendSha !== state.apiSha || state.apiSha !== state.workerSha) {
     return failure(state, 'identity_mismatch', true);
   }
+
+  if (monitoring.status === 503) return failure(state, 'monitoring_unhealthy', true);
+  if (monitoring.status !== 200) return failure(state, 'monitoring_unavailable', true);
 
   return { ...state, pass: true, category: 'converged', retryable: false };
 }
