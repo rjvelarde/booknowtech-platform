@@ -21,12 +21,14 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "pnpm --recursive --if-present run typecheck",
     "test": "pnpm --filter @booknowtech/shared build && pnpm --recursive --if-present run test",
-    "test:unit": "pnpm --filter @booknowtech/shared build && pnpm --recursive --if-present run test:unit",
+    "test:unit": "pnpm --filter @booknowtech/shared build && pnpm --recursive --if-present run test:unit && pnpm test:release-verifier",
     "test:integration": "pnpm --filter @booknowtech/shared build && pnpm --recursive --if-present run test:integration",
     "test:security-headers": "node scripts/check-frontend-security-headers.mjs",
     "test:proxy-contract": "node scripts/check-frontend-proxy-contract.mjs",
     "audit": "pnpm audit --audit-level=high",
     "verify:frontend-env": "node scripts/check-frontend-bundle.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "test:release-verifier": "node --test scripts/verify-release.test.mjs",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
