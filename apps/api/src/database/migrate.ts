@@ -1,9 +1,90 @@
 import type { Db, Document } from 'mongodb';
-import { PLATFORM_TENANT_DEFAULTS } from '@booknowtech/shared';
+import { PLATFORM_TENANT_DEFAULTS, fallbackBookingOrigin } from '@booknowtech/shared';
 
 const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$';
+const DNS_LABEL_PATTERN = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+const HOSTNAME_PATTERN = `${DNS_LABEL_PATTERN}(?:\\.${DNS_LABEL_PATTERN})+`;
 
 const validators: Record<string, Document> = {
+  tenant_booking_hostnames: {
+    $jsonSchema: {
+      bsonType: 'object',
+      additionalProperties: false,
+      required: [
+        '_id',
+        'public_id',
+        'tenant_id',
+        'tenant_public_id',
+        'normalized_hostname',
+        'type',
+        'environment',
+        'status',
+        'verification_challenge_hash',
+        'verification_expires_at',
+        'verified_at',
+        'railway_mapping_reference',
+        'railway_status',
+        'tls_status',
+        'last_checked_at',
+        'failure_code',
+        'created_at',
+        'created_by',
+        'updated_at',
+        'updated_by',
+        'activated_at',
+        'disabled_at',
+        'removed_at',
+      ],
+      properties: {
+        _id: { bsonType: 'objectId' },
+        public_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        tenant_id: { bsonType: 'objectId' },
+        tenant_public_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        normalized_hostname: {
+          bsonType: 'string',
+          minLength: 4,
+          maxLength: 253,
+          pattern: `^${HOSTNAME_PATTERN}$`,
+        },
+        type: { enum: ['custom'] },
+        environment: { enum: ['staging', 'production'] },
+        status: {
+          enum: [
+            'pending_verification',
+            'verified',
+            'provisioning',
+            'active',
+            'failed',
+            'disabled',
+            'removing',
+            'removed',
+          ],
+        },
+        verification_challenge_hash: {
+          bsonType: ['string', 'null'],
+          pattern: '^[a-f0-9]{64}$',
+        },
+        verification_expires_at: { bsonType: ['date', 'null'] },
+        verified_at: { bsonType: ['date', 'null'] },
+        railway_mapping_reference: { bsonType: ['string', 'null'], maxLength: 200 },
+        railway_status: { bsonType: ['string', 'null'], maxLength: 80 },
+        tls_status: { bsonType: ['string', 'null'], maxLength: 80 },
+        last_checked_at: { bsonType: ['date', 'null'] },
+        failure_code: {
+          bsonType: ['string', 'null'],
+          maxLength: 80,
+          pattern: '^[a-z0-9][a-z0-9_]*$',
+        },
+        created_at: { bsonType: 'date' },
+        created_by: { bsonType: 'string', minLength: 3, maxLength: 120 },
+        updated_at: { bsonType: 'date' },
+        updated_by: { bsonType: 'string', minLength: 3, maxLength: 120 },
+        activated_at: { bsonType: ['date', 'null'] },
+        disabled_at: { bsonType: ['date', 'null'] },
+        removed_at: { bsonType: ['date', 'null'] },
+      },
+    },
+  },
   service_heartbeats: {
     $jsonSchema: {
       bsonType: 'object',
@@ -195,6 +276,7 @@ const validators: Record<string, Document> = {
         'recipient',
         'template_data',
         'appointment_access',
+        'public_booking_origin',
         'status',
         'attempt_count',
         'next_attempt_at',
@@ -208,6 +290,11 @@ const validators: Record<string, Document> = {
         'updated_at',
       ],
       properties: {
+        public_booking_origin: {
+          bsonType: ['string', 'null'],
+          maxLength: 262,
+          pattern: `^https://${HOSTNAME_PATTERN}$`,
+        },
         appointment_access: {
           bsonType: ['object', 'null'],
           required: ['token_public_id', 'generation'],
@@ -1047,6 +1134,25 @@ export async function migrateDatabase(db: Db): Promise<void> {
         { appointment_access: { $exists: false } },
         { $set: { appointment_access: null } },
       );
+    await db
+      .collection('notification_outbox')
+      .updateMany(
+        { public_booking_origin: { $exists: false } },
+        { $set: { public_booking_origin: null } },
+      );
+    const rootDomain =
+      db.databaseName === 'booknowtech_staging' ? 'staging.booknowtech.com' : 'booknowtech.com';
+    for await (const tenant of db.collection('tenants').find({}, { projection: { slug: 1 } })) {
+      if (typeof tenant.slug !== 'string') continue;
+      const origin = fallbackBookingOrigin(tenant.slug, rootDomain);
+      if (!origin) continue;
+      await db
+        .collection('notification_outbox')
+        .updateMany(
+          { tenant_id: tenant._id, public_booking_origin: null },
+          { $set: { public_booking_origin: origin } },
+        );
+    }
   }
   if (existing.has('provider_service_assignments')) {
     await db.collection('provider_service_assignments').updateMany(
@@ -1078,6 +1184,32 @@ export async function migrateDatabase(db: Db): Promise<void> {
     { key: { public_id: 1 }, name: 'tenants_public_id_unique', unique: true },
     { key: { slug: 1 }, name: 'tenants_slug_unique', unique: true },
     { key: { status: 1 }, name: 'tenants_status' },
+  ]);
+  await db.collection('tenant_booking_hostnames').createIndexes([
+    {
+      key: { public_id: 1 },
+      name: 'tenant_booking_hostnames_public_id_unique',
+      unique: true,
+    },
+    {
+      key: { environment: 1, normalized_hostname: 1 },
+      name: 'tenant_booking_hostnames_environment_hostname_unique',
+      unique: true,
+    },
+    {
+      key: { environment: 1, normalized_hostname: 1, status: 1 },
+      name: 'tenant_booking_hostnames_active_lookup',
+    },
+    {
+      key: { tenant_id: 1, environment: 1, status: 1, activated_at: 1 },
+      name: 'tenant_booking_hostnames_tenant_preferred',
+    },
+    {
+      key: { tenant_id: 1, environment: 1, status: 1 },
+      name: 'tenant_booking_hostnames_one_active_per_tenant',
+      unique: true,
+      partialFilterExpression: { status: 'active' },
+    },
   ]);
   await db.collection('users').createIndexes([
     { key: { public_id: 1 }, name: 'users_public_id_unique', unique: true },

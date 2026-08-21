@@ -12,6 +12,7 @@ import {
 import { authenticateAdminMutation, authenticateAdminRequest } from '../auth/routes.js';
 import { generateSlots, localToUtc, previewDay } from '../availability/routes.js';
 import type { Environment } from '../config.js';
+import { TenantHostResolver } from '../public/tenant-host-resolver.js';
 
 const appointmentRoles = new Set(['tenant_owner', 'tenant_admin', 'front_desk']);
 const overrideRoles = new Set(['tenant_owner', 'tenant_admin']);
@@ -60,6 +61,11 @@ export function registerAppointmentRoutes(
   environment: Environment,
   store: AdminStore,
 ): void {
+  const hostResolver = new TenantHostResolver(
+    store,
+    environment.BOOKING_ROOT_DOMAIN,
+    environment.ENVIRONMENT_ID === 'staging' ? 'staging' : 'production',
+  );
   app.get<{
     Querystring: {
       view?: 'today' | 'upcoming' | 'past';
@@ -313,6 +319,7 @@ export function registerAppointmentRoutes(
               requestId: request.id,
               session,
               tokenSecret: environment.PUBLIC_APPOINTMENT_TOKEN_SECRET,
+              publicBookingOrigin: (await hostResolver.publicBookingOrigin(context.tenant!))!,
             });
             return appointment;
           },
@@ -419,6 +426,7 @@ export function registerAppointmentRoutes(
             const updated = (await store.getAppointment(tenantId, current.public_id, session))!;
             await enqueueLifecycleEmail(
               store,
+              hostResolver,
               context.tenant!,
               updated,
               'appointment_rescheduled',
@@ -457,7 +465,7 @@ export function registerAppointmentRoutes(
     '/api/v1/admin/appointments/:appointmentPublicId/cancel',
     { schema: { operationId: 'cancelAppointment', tags: ['appointments'], body: cancelSchema } },
     async (request, reply) =>
-      transitionRoute(request, reply, environment, store, 'cancelled', request.body),
+      transitionRoute(request, reply, environment, store, hostResolver, 'cancelled', request.body),
   );
   for (const [path, status, event] of [
     ['complete', 'completed', 'appointment_completed'],
@@ -484,7 +492,16 @@ export function registerAppointmentRoutes(
         },
       },
       async (request, reply) =>
-        transitionRoute(request, reply, environment, store, status, request.body, event),
+        transitionRoute(
+          request,
+          reply,
+          environment,
+          store,
+          hostResolver,
+          status,
+          request.body,
+          event,
+        ),
     );
 }
 
@@ -496,6 +513,7 @@ async function transitionRoute(
   reply: FastifyReply,
   environment: Environment,
   store: AdminStore,
+  hostResolver: TenantHostResolver,
   status: Exclude<AppointmentStatus, 'scheduled'>,
   body: LifecycleBody | CancelBody,
   event = 'appointment_cancelled',
@@ -554,6 +572,7 @@ async function transitionRoute(
         if (status === 'cancelled')
           await enqueueLifecycleEmail(
             store,
+            hostResolver,
             context.tenant!,
             item,
             'appointment_cancelled',
@@ -915,6 +934,7 @@ async function appointmentDetailView(
 
 async function enqueueLifecycleEmail(
   store: AdminStore,
+  hostResolver: TenantHostResolver,
   tenant: NonNullable<VerifiedAdminContext['tenant']>,
   appointment: AppointmentDocument,
   type: 'appointment_rescheduled' | 'appointment_cancelled',
@@ -936,6 +956,7 @@ async function enqueueLifecycleEmail(
       requestId,
       session,
       tokenSecret,
+      publicBookingOrigin: (await hostResolver.publicBookingOrigin(tenant))!,
     });
 }
 

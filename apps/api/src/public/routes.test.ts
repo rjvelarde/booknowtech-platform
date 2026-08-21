@@ -106,6 +106,22 @@ describe('public booking discovery', () => {
     await app.close();
   });
 
+  it('keeps custom-host public routes behind TenantHostResolver', async () => {
+    const { app, store, tenant } = await testApp();
+    const customLookup = vi
+      .spyOn(store, 'getPublicTenantByCustomHostname')
+      .mockResolvedValue(tenant);
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/booking-context',
+      headers: { host: 'book.customer-domain.com' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(customLookup).toHaveBeenCalledWith('book.customer-domain.com', 'production');
+    expect(response.json().data.business.name).toBe('Brazilian Wax Demo');
+    await app.close();
+  });
+
   it('serves the configured staging suffix and rejects the production suffix', async () => {
     const { app, store, tenant } = await testApp({
       ...testEnvironment,
@@ -250,6 +266,9 @@ describe('public booking discovery', () => {
 
 async function testApp(environment = testEnvironment) {
   const store = Object.create(AdminStore.prototype) as AdminStore;
+  vi.spyOn(store, 'getPublicTenantByCustomHostname').mockResolvedValue(null);
+  vi.spyOn(store, 'getSelfServiceTenantByCustomHostname').mockResolvedValue(null);
+  vi.spyOn(store, 'getActiveCustomHostnameForTenant').mockResolvedValue(null);
   const tenant = tenantFixture();
   const app = await buildApplication({
     environment: { ...environment, TENANT_ADMIN_ENABLED: true },

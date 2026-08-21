@@ -147,7 +147,11 @@ export function registerPublicBookingRoutes(
   environment: Environment,
   store: AdminStore,
 ): void {
-  const hostResolver = new TenantHostResolver(store, environment.BOOKING_ROOT_DOMAIN);
+  const hostResolver = new TenantHostResolver(
+    store,
+    environment.BOOKING_ROOT_DOMAIN,
+    environment.ENVIRONMENT_ID === 'staging' ? 'staging' : 'production',
+  );
 
   app.get(
     '/api/v1/public/booking-context',
@@ -525,6 +529,7 @@ export function registerPublicBookingRoutes(
               requestId: request.id,
               session,
               tokenSecret: environment.PUBLIC_APPOINTMENT_TOKEN_SECRET,
+              publicBookingOrigin: (await hostResolver.publicBookingOrigin(currentTenant))!,
             });
             return { appointment, provider, replayed: false, confirmationEmailQueued };
           },

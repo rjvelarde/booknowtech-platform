@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  buildFallbackAppointmentManagementUrl,
-  buildPostmarkMetadata,
-} from './notification-worker.js';
+import { buildAppointmentManagementUrl, buildPostmarkMetadata } from './notification-worker.js';
 
 describe('buildPostmarkMetadata', () => {
   it('uses a Postmark-compatible metadata field name', () => {
@@ -16,24 +13,32 @@ describe('buildPostmarkMetadata', () => {
     expect(Object.values(metadata).every((value) => value.length <= 80)).toBe(true);
   });
 
-  it('generates management links from the canonical fallback origin', () => {
+  it('generates management links from the snapshotted origin', () => {
     expect(
-      buildFallbackAppointmentManagementUrl('Tenant-Slug', 'token-id', 'credential_value'),
-    ).toBe(
-      'https://tenant-slug.booknowtech.com/appointments/manage/token-id#token=credential_value',
-    );
-  });
-
-  it('generates staging management links only when staging is configured', () => {
-    expect(
-      buildFallbackAppointmentManagementUrl(
-        'Tenant-Slug',
+      buildAppointmentManagementUrl(
+        'https://book.customer.example',
         'token-id',
         'credential_value',
-        'staging.booknowtech.com',
+      ),
+    ).toBe('https://book.customer.example/appointments/manage/token-id#token=credential_value');
+  });
+
+  it('preserves a snapshotted fallback origin without reconstructing it', () => {
+    expect(
+      buildAppointmentManagementUrl(
+        'https://tenant-slug.staging.booknowtech.com',
+        'token-id',
+        'credential_value',
       ),
     ).toBe(
       'https://tenant-slug.staging.booknowtech.com/appointments/manage/token-id#token=credential_value',
     );
+  });
+
+  it('rejects an unsafe snapshotted origin', () => {
+    expect(
+      buildAppointmentManagementUrl('http://book.customer.example', 'token-id', 'credential'),
+    ).toBeNull();
+    expect(buildAppointmentManagementUrl(null, 'token-id', 'credential')).toBeNull();
   });
 });

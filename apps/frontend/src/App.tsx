@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { fallbackTenantSlug } from '@booknowtech/shared/hostname';
+import { isAdministrativeHostname } from '@booknowtech/shared/hostname';
 
 import {
   type AdminSessionView,
@@ -215,7 +215,7 @@ export function isPublicBookingHost(
   hostname: string,
   bookingRootDomain: 'booknowtech.com' | 'staging.booknowtech.com' = 'booknowtech.com',
 ): boolean {
-  return fallbackTenantSlug(hostname, bookingRootDomain) !== null;
+  return !isAdministrativeHostname(hostname, bookingRootDomain);
 }
 
 function navigate(path: string, setPath: (path: string) => void): void {

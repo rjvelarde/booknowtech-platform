@@ -62,6 +62,43 @@ export interface TenantDocument {
   updated_at: Date;
 }
 
+export type BookingHostnameEnvironment = 'staging' | 'production';
+export type BookingHostnameStatus =
+  | 'pending_verification'
+  | 'verified'
+  | 'provisioning'
+  | 'active'
+  | 'failed'
+  | 'disabled'
+  | 'removing'
+  | 'removed';
+
+export interface TenantBookingHostnameDocument {
+  _id: ObjectId;
+  public_id: string;
+  tenant_id: ObjectId;
+  tenant_public_id: string;
+  normalized_hostname: string;
+  type: 'custom';
+  environment: BookingHostnameEnvironment;
+  status: BookingHostnameStatus;
+  verification_challenge_hash: string | null;
+  verification_expires_at: Date | null;
+  verified_at: Date | null;
+  railway_mapping_reference: string | null;
+  railway_status: string | null;
+  tls_status: string | null;
+  last_checked_at: Date | null;
+  failure_code: string | null;
+  created_at: Date;
+  created_by: string;
+  updated_at: Date;
+  updated_by: string;
+  activated_at: Date | null;
+  disabled_at: Date | null;
+  removed_at: Date | null;
+}
+
 export const DELIVERY_MODES = ['provider_location', 'customer_location', 'virtual'] as const;
 export type DeliveryMode = (typeof DELIVERY_MODES)[number];
 
@@ -309,6 +346,7 @@ export interface NotificationOutboxDocument {
     location_mode: DeliveryMode;
   };
   appointment_access: { token_public_id: string; generation: number } | null;
+  public_booking_origin: string;
   status: 'pending' | 'processing' | 'delivered' | 'failed';
   attempt_count: number;
   next_attempt_at: Date;
@@ -461,6 +499,7 @@ const SESSION_DURATION_MILLISECONDS = 8 * 60 * 60 * 1_000;
 
 export class AdminStore {
   private readonly tenants: Collection<TenantDocument>;
+  private readonly tenantBookingHostnames: Collection<TenantBookingHostnameDocument>;
   private readonly users: Collection<UserDocument>;
   private readonly roles: Collection<RoleDocument>;
   private readonly sessions: Collection<AdminSessionDocument>;
@@ -479,6 +518,9 @@ export class AdminStore {
   public constructor(private readonly database: Db) {
     const db = database;
     this.tenants = db.collection<TenantDocument>('tenants');
+    this.tenantBookingHostnames = db.collection<TenantBookingHostnameDocument>(
+      'tenant_booking_hostnames',
+    );
     this.users = db.collection<UserDocument>('users');
     this.roles = db.collection<RoleDocument>('roles');
     this.sessions = db.collection<AdminSessionDocument>('admin_sessions');
@@ -682,6 +724,54 @@ export class AdminStore {
     return this.tenants.findOne({ slug, status: 'active' }, session ? { session } : undefined);
   }
 
+  public async getPublicTenantByCustomHostname(
+    normalizedHostname: string,
+    environment: BookingHostnameEnvironment,
+  ): Promise<TenantDocument | null> {
+    const hostname = await this.tenantBookingHostnames.findOne({
+      normalized_hostname: normalizedHostname,
+      environment,
+      status: 'active',
+    });
+    if (!hostname) return null;
+    return this.tenants.findOne({
+      _id: hostname.tenant_id,
+      public_id: hostname.tenant_public_id,
+      status: 'active',
+      public_booking_enabled: true,
+    });
+  }
+
+  public async getSelfServiceTenantByCustomHostname(
+    normalizedHostname: string,
+    environment: BookingHostnameEnvironment,
+  ): Promise<TenantDocument | null> {
+    const hostname = await this.tenantBookingHostnames.findOne({
+      normalized_hostname: normalizedHostname,
+      environment,
+      status: 'active',
+    });
+    if (!hostname) return null;
+    return this.tenants.findOne({
+      _id: hostname.tenant_id,
+      public_id: hostname.tenant_public_id,
+      status: 'active',
+      'appointment_self_service.enabled': true,
+    });
+  }
+
+  public async getActiveCustomHostnameForTenant(
+    tenantId: ObjectId,
+    tenantPublicId: string,
+    environment: BookingHostnameEnvironment,
+  ): Promise<string | null> {
+    const hostname = await this.tenantBookingHostnames.findOne(
+      { tenant_id: tenantId, tenant_public_id: tenantPublicId, environment, status: 'active' },
+      { sort: { activated_at: 1, normalized_hostname: 1 } },
+    );
+    return hostname?.normalized_hostname ?? null;
+  }
+
   public listPublicServices(tenantId: ObjectId): Promise<ServiceDocument[]> {
     return this.services
       .find({ tenant_id: tenantId, status: 'active', publicly_bookable: true })
@@ -783,6 +873,7 @@ export class AdminStore {
     session: ClientSession;
     appointmentAccess?: NotificationOutboxDocument['appointment_access'];
     tokenSecret?: string;
+    publicBookingOrigin: string;
   }): Promise<boolean> {
     if (!input.tenant.appointment_email_settings.enabled || !input.customer.email_normalized)
       return false;
@@ -843,6 +934,7 @@ export class AdminStore {
           location_mode: input.appointment.location.mode,
         },
         appointment_access: appointmentAccess,
+        public_booking_origin: input.publicBookingOrigin,
         status: 'pending',
         attempt_count: 0,
         next_attempt_at: now,
