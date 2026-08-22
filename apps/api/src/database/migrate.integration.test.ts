@@ -229,6 +229,52 @@ suite('administrative foundation migration', () => {
     }
   });
 
+  it('creates strict booking-hostname operation evidence and named indexes', async () => {
+    await migrateDatabase(db);
+    await migrateDatabase(db);
+    const indexes = await db.collection('tenant_booking_hostname_operations').indexes();
+    expect(indexes.map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        'tenant_booking_hostname_operations_public_id_unique',
+        'tenant_booking_hostname_operations_request_id_unique',
+        'tenant_booking_hostname_operations_hostname_created',
+        'tenant_booking_hostname_operations_tenant_environment_created',
+        'tenant_booking_hostname_operations_status_created',
+      ]),
+    );
+    expect(
+      indexes.find(({ name }) => name === 'tenant_booking_hostname_operations_request_id_unique'),
+    ).toMatchObject({ unique: true });
+    await expect(
+      db.collection('tenant_booking_hostname_operations').insertOne({
+        _id: new ObjectId(),
+        public_id: randomUUID(),
+        request_id: randomUUID(),
+        operation_type: 'activate',
+        request_fingerprint: 'a'.repeat(64),
+        operator_id: 'operator@example.test',
+        reason: 'Approved manual activation.',
+        environment: 'staging',
+        hostname_public_id: randomUUID(),
+        tenant_public_id: randomUUID(),
+        normalized_hostname: 'booking.customer-example.com',
+        status: 'completed',
+        previous_state: 'provisioning',
+        new_state: 'active',
+        failure_category: null,
+        result: {
+          txt_record_name: null,
+          operator_attested_railway_mapping_reference: 'railway-123',
+          operator_attested_railway_status: 'ready',
+          operator_attested_tls_status: 'ready',
+        },
+        created_at: new Date(),
+        completed_at: new Date(),
+        plaintext_token: 'must-not-be-accepted',
+      }),
+    ).rejects.toThrow();
+  });
+
   it('backfills legacy tenant and user records without changing existing values', async () => {
     const legacyDb = client.db(`booknowtech_legacy_${randomUUID().replaceAll('-', '')}`);
     await legacyDb.createCollection('tenants');
