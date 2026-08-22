@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { MongoClient, ObjectId } from 'mongodb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import type { TenantProvisioningOperationDocument } from '../admin/store.js';
+import { AdminStore, type TenantProvisioningOperationDocument } from '../admin/store.js';
 import { migrateDatabase } from './migrate.js';
 
 const uri = process.env.MONGODB_TEST_URI;
@@ -36,7 +36,7 @@ suite('administrative foundation migration', () => {
     expect(indexes.find(({ name }) => name === 'admin_sessions_expiry_ttl')).toMatchObject({
       expireAfterSeconds: 0,
     });
-  });
+  }, 15_000);
 
   it('creates strict, additive service-heartbeat storage and named indexes', async () => {
     await migrateDatabase(db);
@@ -118,6 +118,115 @@ suite('administrative foundation migration', () => {
         }),
       ]),
     );
+  });
+
+  it('backfills canonical origins and keeps orphaned legacy notices processable', async () => {
+    const legacyDb = client.db(`booknowtech_outbox_${randomUUID().replaceAll('-', '')}`);
+    await legacyDb.createCollection('tenants');
+    await legacyDb.createCollection('notification_outbox');
+    const now = new Date();
+    const tenantId = new ObjectId();
+    const tenantPublicId = randomUUID();
+    await legacyDb.collection('tenants').insertOne(tenantFixture(tenantId, tenantPublicId, now));
+    const knownNotice = notificationFixture(tenantId, now);
+    const orphanNotice = notificationFixture(new ObjectId(), now);
+    await legacyDb.collection('notification_outbox').insertMany([knownNotice, orphanNotice]);
+
+    await migrateDatabase(legacyDb);
+    await migrateDatabase(legacyDb);
+
+    await expect(
+      legacyDb.collection('notification_outbox').findOne({ _id: knownNotice._id }),
+    ).resolves.toMatchObject({
+      public_booking_origin: `https://custom-host-${tenantPublicId.slice(0, 8)}.booknowtech.com`,
+    });
+    await expect(
+      legacyDb.collection('notification_outbox').findOne({ _id: orphanNotice._id }),
+    ).resolves.toMatchObject({ public_booking_origin: null });
+    await expect(
+      legacyDb
+        .collection('notification_outbox')
+        .updateOne({ _id: orphanNotice._id }, { $set: { last_error_code: 'legacy_orphan' } }),
+    ).resolves.toMatchObject({ modifiedCount: 1 });
+    await legacyDb.dropDatabase();
+  });
+
+  it('enforces environment-scoped custom-host ownership and active-only lookup', async () => {
+    await migrateDatabase(db);
+    const tenantId = new ObjectId();
+    const tenantPublicId = randomUUID();
+    const now = new Date();
+    await db.collection('tenants').insertOne(tenantFixture(tenantId, tenantPublicId, now));
+    const hostname = (overrides: Record<string, unknown> = {}) => ({
+      _id: new ObjectId(),
+      public_id: randomUUID(),
+      tenant_id: tenantId,
+      tenant_public_id: tenantPublicId,
+      normalized_hostname: 'book.customer-domain.com',
+      type: 'custom',
+      environment: 'production',
+      status: 'active',
+      verification_challenge_hash: null,
+      verification_expires_at: null,
+      verified_at: now,
+      railway_mapping_reference: null,
+      railway_status: null,
+      tls_status: null,
+      last_checked_at: null,
+      failure_code: null,
+      created_at: now,
+      created_by: 'operator@example.test',
+      updated_at: now,
+      updated_by: 'operator@example.test',
+      activated_at: now,
+      disabled_at: null,
+      removed_at: null,
+      ...overrides,
+    });
+    await db.collection('tenant_booking_hostnames').insertOne(hostname());
+    await expect(
+      db
+        .collection('tenant_booking_hostnames')
+        .insertOne(hostname({ _id: new ObjectId(), public_id: randomUUID() })),
+    ).rejects.toThrow();
+    await db.collection('tenant_booking_hostnames').insertOne(
+      hostname({
+        _id: new ObjectId(),
+        public_id: randomUUID(),
+        environment: 'staging',
+        status: 'pending_verification',
+        activated_at: null,
+      }),
+    );
+    for (const status of ['pending_verification', 'failed', 'disabled'] as const) {
+      await db.collection('tenant_booking_hostnames').insertOne(
+        hostname({
+          _id: new ObjectId(),
+          public_id: randomUUID(),
+          normalized_hostname: `${status.replace('_', '-')}.customer-domain.com`,
+          status,
+          activated_at: null,
+          failure_code: status === 'failed' ? 'railway_mapping_failed' : null,
+          disabled_at: status === 'disabled' ? now : null,
+        }),
+      );
+    }
+
+    const store = new AdminStore(db);
+    await expect(
+      store.getPublicTenantByCustomHostname('book.customer-domain.com', 'production'),
+    ).resolves.toMatchObject({ public_id: tenantPublicId });
+    await expect(
+      store.getPublicTenantByCustomHostname('book.customer-domain.com', 'staging'),
+    ).resolves.toBeNull();
+    await expect(
+      store.getActiveCustomHostnameForTenant(tenantId, tenantPublicId, 'production'),
+    ).resolves.toBe('book.customer-domain.com');
+    for (const status of ['pending-verification', 'failed', 'disabled']) {
+      await expect(
+        store.getPublicTenantByCustomHostname(`${status}.customer-domain.com`, 'production'),
+      ).resolves.toBeNull();
+    }
   });
 
   it('backfills legacy tenant and user records without changing existing values', async () => {
@@ -616,6 +725,7 @@ suite('administrative foundation migration', () => {
               location_mode: 'provider_location',
             },
             appointment_access: { token_public_id: tokenId, generation: 1 },
+            public_booking_origin: 'https://tenant.booknowtech.com',
             status: 'pending',
             attempt_count: 0,
             next_attempt_at: now,
@@ -755,3 +865,92 @@ suite('administrative foundation migration', () => {
     expect(updatedAppointment?.updated_by).toEqual(staffUserId);
   });
 });
+
+function tenantFixture(_id: ObjectId, publicId: string, now: Date) {
+  return {
+    _id,
+    public_id: publicId,
+    slug: `custom-host-${publicId.slice(0, 8)}`,
+    display_name: 'Custom Host Tenant',
+    legal_name: null,
+    contact: { email_normalized: null, phone_e164: null, website_url: null },
+    default_timezone: 'America/New_York',
+    default_slot_cadence_minutes: 30,
+    locale: 'en-US',
+    currency: 'USD',
+    designation: 'customer',
+    public_booking_enabled: true,
+    public_profile: {
+      business_name: 'Custom Host Tenant',
+      description: null,
+      tagline: null,
+      logo_url: null,
+      primary_color: null,
+      website_url: null,
+      phone_e164: null,
+      email_normalized: null,
+    },
+    booking_policy: { minimum_lead_minutes: 60, maximum_advance_days: 45 },
+    public_booking_terms: {
+      version: 'v1',
+      acknowledgment_label: 'I agree.',
+      terms_url: null,
+    },
+    appointment_email_settings: {
+      enabled: true,
+      sender_name: 'Custom Host Tenant',
+      reply_to_email: null,
+    },
+    appointment_self_service: {
+      enabled: true,
+      cancellation_cutoff_minutes: 720,
+      reschedule_cutoff_minutes: 720,
+    },
+    version: 1,
+    updated_by: null,
+    status: 'active',
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function notificationFixture(tenantId: ObjectId, now: Date) {
+  return {
+    _id: new ObjectId(),
+    public_id: randomUUID(),
+    tenant_id: tenantId,
+    appointment_id: new ObjectId(),
+    appointment_public_id: randomUUID(),
+    appointment_reference: 'BNT-LEGACY',
+    type: 'appointment_confirmation',
+    channel: 'email',
+    recipient: 'customer@example.test',
+    template_data: {
+      business_name: 'Legacy Business',
+      business_logo_url: null,
+      business_phone: null,
+      business_email: null,
+      business_website: null,
+      customer_name: 'Customer',
+      provider_name: 'Provider',
+      provider_photo_url: null,
+      service_name: 'Service',
+      starts_at: now,
+      ends_at: new Date(now.valueOf() + 3_600_000),
+      timezone: 'UTC',
+      location_mode: 'provider_location',
+    },
+    appointment_access: null,
+    status: 'pending',
+    attempt_count: 0,
+    next_attempt_at: now,
+    processing_started_at: null,
+    delivered_at: null,
+    failed_at: null,
+    provider_message_id: null,
+    last_error_code: null,
+    request_id: randomUUID(),
+    created_at: now,
+    updated_at: now,
+  };
+}

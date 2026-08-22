@@ -69,6 +69,7 @@ try {
   await verify(assetPath, 'admin.booknowtech.com', 200);
   await verify('/providers/operator/edit', 'admin.booknowtech.com', 200, 'text/html');
   await verify('/book', 'harbor-demo.booknowtech.com', 200, 'text/html');
+  await verify('/book', 'book.customer-domain.test', 200, 'text/html');
   await verify(
     '/appointments/manage/11111111-1111-4111-8111-111111111111',
     'harbor-demo.booknowtech.com',
@@ -100,6 +101,12 @@ try {
   await verify(
     '/api/v1/security-header-probe-not-found',
     'harbor-demo.booknowtech.com',
+    404,
+    'application/json',
+  );
+  await verify(
+    '/api/v1/security-header-probe-not-found',
+    'book.customer-domain.test',
     404,
     'application/json',
   );

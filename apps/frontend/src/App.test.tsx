@@ -71,25 +71,30 @@ describe('Business Hub', () => {
     );
   });
 
-  it('selects public booking only for supported tenant hosts', () => {
+  it('reserves Business Hub for the explicit administrative host', () => {
     expect(isPublicBookingHost('brazilian-wax.booknowtech.com')).toBe(true);
     expect(isPublicBookingHost('BRAZILIAN-WAX.booknowtech.com.')).toBe(true);
     expect(isPublicBookingHost('brazilian-wax.localhost')).toBe(true);
     expect(isPublicBookingHost('brazilian-wax.localhost:8080')).toBe(true);
     expect(isPublicBookingHost('brazilian-wax.example.test')).toBe(true);
     expect(isPublicBookingHost('admin.booknowtech.com')).toBe(false);
-    expect(isPublicBookingHost('booknowtech.com')).toBe(false);
-    expect(isPublicBookingHost('www.booknowtech.com')).toBe(false);
-    expect(isPublicBookingHost('tenant.attacker.booknowtech.com')).toBe(false);
-    expect(isPublicBookingHost('tenant_booknowtech.com')).toBe(false);
+    expect(isPublicBookingHost('admin.staging.booknowtech.com', 'staging.booknowtech.com')).toBe(
+      false,
+    );
+    expect(isPublicBookingHost('book.customer-domain.com')).toBe(true);
+    expect(isPublicBookingHost('unknown.customer-domain.com')).toBe(true);
+    expect(isPublicBookingHost('booknowtech.com')).toBe(true);
+    expect(isPublicBookingHost('www.booknowtech.com')).toBe(true);
+    expect(isPublicBookingHost('tenant.attacker.booknowtech.com')).toBe(true);
+    expect(isPublicBookingHost('tenant_booknowtech.com')).toBe(true);
     expect(
       isPublicBookingHost('brazilian-wax.staging.booknowtech.com', 'staging.booknowtech.com'),
     ).toBe(true);
     expect(isPublicBookingHost('brazilian-wax.booknowtech.com', 'staging.booknowtech.com')).toBe(
-      false,
+      true,
     );
     expect(isPublicBookingHost('brazilian-wax.staging.booknowtech.com', 'booknowtech.com')).toBe(
-      false,
+      true,
     );
   });
 

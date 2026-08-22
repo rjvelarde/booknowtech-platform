@@ -3,7 +3,6 @@ import type { Logger } from 'pino';
 import {
   buildPublicAppointmentManagementUrl,
   derivePublicAppointmentCredential,
-  fallbackBookingOrigin,
 } from '@booknowtech/shared';
 
 import type { WorkerEnvironment } from './config.js';
@@ -22,6 +21,7 @@ interface OutboxDocument {
   recipient: string;
   template_data: AppointmentEmailTemplateData;
   appointment_access: { token_public_id: string; generation: number } | null;
+  public_booking_origin: string | null;
   status: 'pending' | 'processing' | 'delivered' | 'failed';
   attempt_count: number;
   next_attempt_at: Date;
@@ -37,7 +37,6 @@ interface OutboxDocument {
 interface TenantEmailDocument {
   _id: ObjectId;
   public_id: string;
-  slug: string;
   status: 'active' | 'inactive';
   appointment_email_settings: {
     enabled: boolean;
@@ -54,14 +53,26 @@ export function buildPostmarkMetadata(notificationPublicId: string): Record<stri
   return { notice_id: notificationPublicId };
 }
 
-export function buildFallbackAppointmentManagementUrl(
-  tenantSlug: string,
+export function buildAppointmentManagementUrl(
+  publicBookingOrigin: string | null,
   tokenPublicId: string,
   credential: string,
-  bookingRootDomain: WorkerEnvironment['BOOKING_ROOT_DOMAIN'] = 'booknowtech.com',
 ): string | null {
-  const origin = fallbackBookingOrigin(tenantSlug, bookingRootDomain);
-  return origin ? buildPublicAppointmentManagementUrl(origin, tokenPublicId, credential) : null;
+  if (!publicBookingOrigin) return null;
+  let origin: URL;
+  try {
+    origin = new URL(publicBookingOrigin);
+  } catch {
+    return null;
+  }
+  if (
+    origin.protocol !== 'https:' ||
+    origin.origin !== publicBookingOrigin ||
+    origin.username ||
+    origin.password
+  )
+    return null;
+  return buildPublicAppointmentManagementUrl(publicBookingOrigin, tokenPublicId, credential);
 }
 
 export function startNotificationWorker(
@@ -159,11 +170,10 @@ async function processOne(
             purpose: 'appointment_management',
           },
         );
-        managementUrl = buildFallbackAppointmentManagementUrl(
-          tenant.slug,
+        managementUrl = buildAppointmentManagementUrl(
+          item.public_booking_origin,
           token.public_id,
           credential,
-          environment.BOOKING_ROOT_DOMAIN,
         );
       }
     }

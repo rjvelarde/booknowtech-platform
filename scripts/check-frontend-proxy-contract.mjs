@@ -79,7 +79,11 @@ try {
   }
 
   const requestId = randomUUID();
-  for (const host of ['admin.booknowtech.com', 'admin.staging.booknowtech.com']) {
+  for (const host of [
+    'admin.booknowtech.com',
+    'admin.staging.booknowtech.com',
+    'book.customer-domain.test',
+  ]) {
     const healthy = await requestFrontend('GET', '/api/health/ready', {
       host,
       'x-request-id': requestId,

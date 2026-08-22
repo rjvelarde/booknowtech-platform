@@ -396,6 +396,7 @@ function outbox(
       location_mode: 'virtual',
     },
     appointment_access: null,
+    public_booking_origin: 'https://internal-qa.staging.booknowtech.com',
     status,
     attempt_count: 0,
     next_attempt_at: now,

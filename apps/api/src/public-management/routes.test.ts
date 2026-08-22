@@ -110,7 +110,13 @@ function fixture() {
     status: 'active',
     expires_at: appointment.starts_at,
   } as AppointmentPublicAccessTokenDocument;
+  const getSelfServiceTenantByCustomHostname = vi.fn<
+    AdminStore['getSelfServiceTenantByCustomHostname']
+  >(() => Promise.resolve(null));
   const store = {
+    getPublicTenantByCustomHostname: vi.fn(() => Promise.resolve(null)),
+    getSelfServiceTenantByCustomHostname,
+    getActiveCustomHostnameForTenant: vi.fn(() => Promise.resolve(null)),
     getActiveTenantBySlug: vi.fn((slug: string) =>
       Promise.resolve(slug === 'tenant' ? tenant : null),
     ),
@@ -119,22 +125,30 @@ function fixture() {
     getServiceById: vi.fn(() => Promise.resolve(service)),
     getProviderById: vi.fn(() => Promise.resolve({ photo_url: null })),
   } as unknown as AdminStore;
-  return { publicId, credential, store, token };
+  return { publicId, credential, store, token, getSelfServiceTenantByCustomHostname };
 }
 
 describe('public appointment management routes', () => {
   it('returns only the safe appointment projection for a valid hostname-bound token', async () => {
-    const { publicId, credential, store } = fixture();
+    const { publicId, credential, store, getSelfServiceTenantByCustomHostname } = fixture();
+    getSelfServiceTenantByCustomHostname.mockResolvedValue(tenant);
     const app = Fastify();
     registerPublicAppointmentManagementRoutes(app, testEnvironment, store);
     const response = await app.inject({
       method: 'GET',
       url: `/api/v1/public/appointments/manage/${publicId}`,
-      headers: { host: 'tenant.booknowtech.com', authorization: `AppointmentToken ${credential}` },
+      headers: {
+        host: 'book.customer-domain.com',
+        authorization: `AppointmentToken ${credential}`,
+      },
     });
     expect(response.statusCode).toBe(200);
     expect(response.body).toContain('Safe Business');
     expect(response.body).not.toContain('Private Customer');
+    expect(getSelfServiceTenantByCustomHostname).toHaveBeenCalledWith(
+      'book.customer-domain.com',
+      'production',
+    );
     expect(response.body).not.toContain('private note');
   });
 
@@ -178,6 +192,9 @@ describe('public appointment management routes', () => {
     const enqueue = vi.fn(() => Promise.resolve(true));
     const audit = vi.fn(() => Promise.resolve());
     const store = {
+      getPublicTenantByCustomHostname: vi.fn(() => Promise.resolve(null)),
+      getSelfServiceTenantByCustomHostname: vi.fn(() => Promise.resolve(null)),
+      getActiveCustomHostnameForTenant: vi.fn(() => Promise.resolve('book.customer-domain.com')),
       getActiveTenantBySlug: vi.fn(() => Promise.resolve(tenant)),
       getAppointmentAccessToken: vi.fn(() => Promise.resolve(currentToken)),
       getAppointment: vi.fn(() => Promise.resolve(currentAppointment)),
@@ -223,6 +240,9 @@ describe('public appointment management routes', () => {
     });
     expect(consume).toHaveBeenCalledOnce();
     expect(enqueue).toHaveBeenCalledOnce();
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ publicBookingOrigin: 'https://book.customer-domain.com' }),
+    );
     expect(audit).toHaveBeenCalledWith(
       expect.objectContaining({ actorUserId: null, session: expect.anything() }),
     );
