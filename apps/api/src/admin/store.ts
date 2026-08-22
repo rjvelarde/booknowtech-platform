@@ -99,6 +99,41 @@ export interface TenantBookingHostnameDocument {
   removed_at: Date | null;
 }
 
+export type BookingHostnameOperationType =
+  | 'issue_challenge'
+  | 'verify'
+  | 'begin_provisioning'
+  | 'activate'
+  | 'deactivate'
+  | 'begin_removal'
+  | 'complete_removal';
+
+export interface TenantBookingHostnameOperationDocument {
+  _id: ObjectId;
+  public_id: string;
+  request_id: string;
+  operation_type: BookingHostnameOperationType;
+  request_fingerprint: string;
+  operator_id: string;
+  reason: string;
+  environment: BookingHostnameEnvironment;
+  hostname_public_id: string | null;
+  tenant_public_id: string | null;
+  normalized_hostname: string;
+  status: 'completed' | 'refused' | 'failed';
+  previous_state: BookingHostnameStatus | null;
+  new_state: BookingHostnameStatus | null;
+  failure_category: string | null;
+  result: {
+    txt_record_name: string | null;
+    operator_attested_railway_mapping_reference: string | null;
+    operator_attested_railway_status: string | null;
+    operator_attested_tls_status: string | null;
+  };
+  created_at: Date;
+  completed_at: Date;
+}
+
 export const DELIVERY_MODES = ['provider_location', 'customer_location', 'virtual'] as const;
 export type DeliveryMode = (typeof DELIVERY_MODES)[number];
 
