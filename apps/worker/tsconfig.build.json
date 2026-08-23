@@ -8,5 +8,5 @@
     "sourceMap": true,
     "paths": {}
   },
-  "exclude": ["src/**/*.test.ts"]
+  "exclude": ["src/**/*.test.ts", "integration/**/*.ts"]
 }

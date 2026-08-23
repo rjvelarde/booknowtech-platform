@@ -42,7 +42,7 @@ PR 14A processes `account.updated` and the supported deauthorization event only.
 
 ## Rollback
 
-After webhook registration, setting `STRIPE_CONNECT_FOUNDATION_ENABLED=false` is the primary rollback. It disables terms/onboarding/Account Link actions while webhook ingestion and processing remain operational.
+After webhook registration, setting `STRIPE_PAYMENTS_FOUNDATION_ENABLED=false` is the primary rollback. It disables terms/onboarding/Account Link actions while webhook ingestion and processing remain operational.
 
 A full rollback to a pre-Stripe SHA removes the webhook endpoints and cannot process events. Stripe delivery failures and retries are expected until a compatible PR 14A release is restored or an approved incident action changes endpoint delivery. Collections and evidence are never dropped as rollback.
 

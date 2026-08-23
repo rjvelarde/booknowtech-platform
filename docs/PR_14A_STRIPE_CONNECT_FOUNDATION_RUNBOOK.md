@@ -11,7 +11,7 @@
 7. Redeliver an event and prove one projection/audit effect; deliver an older event and prove no regression.
 8. Prove tenant B isolation and provider/front-desk denial before Stripe calls.
 9. Restart the worker while an event is claimed and prove recovery.
-10. Disable `STRIPE_CONNECT_FOUNDATION_ENABLED`; prove onboarding stops while both webhook endpoints and processing continue.
+10. Disable `STRIPE_PAYMENTS_FOUNDATION_ENABLED`; prove onboarding stops while both webhook endpoints and processing continue.
 11. Confirm no payment UI, ledger collection, fee, PaymentIntent, Charge, Refund, or money movement exists.
 
 Archive sanitized request IDs, Stripe test event/account IDs, timestamps, database assertions, screenshots, and logs.

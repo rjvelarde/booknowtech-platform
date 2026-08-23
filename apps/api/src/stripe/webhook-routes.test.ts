@@ -23,7 +23,7 @@ describe('Stripe webhook raw-body boundary', () => {
         STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_connect_secret',
         BOOKNOWTECH_CONNECT_TERMS_VERSION: 'connect-v1',
         BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256: 'a'.repeat(64),
-        STRIPE_CONNECT_FOUNDATION_ENABLED: false,
+        STRIPE_PAYMENTS_FOUNDATION_ENABLED: false,
       },
       readiness: new StubReadinessProbe(),
       logger: false,

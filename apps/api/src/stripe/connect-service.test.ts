@@ -82,7 +82,7 @@ describe('ConnectService', () => {
 
   it('feature disablement blocks user operations without being part of webhook routing', async () => {
     const service = new ConnectService(
-      { ...environment(), STRIPE_CONNECT_FOUNDATION_ENABLED: false },
+      { ...environment(), STRIPE_PAYMENTS_FOUNDATION_ENABLED: false },
       {} as ConnectStore,
       adapter(),
     );
@@ -98,7 +98,7 @@ function environment() {
     STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_connect_secret',
     BOOKNOWTECH_CONNECT_TERMS_VERSION: 'connect-v1',
     BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256: 'a'.repeat(64),
-    STRIPE_CONNECT_FOUNDATION_ENABLED: true,
+    STRIPE_PAYMENTS_FOUNDATION_ENABLED: true,
   };
 }
 function adapter(overrides: Partial<StripeConnectAdapter> = {}): StripeConnectAdapter {

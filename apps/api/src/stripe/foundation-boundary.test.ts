@@ -18,7 +18,7 @@ describe('PR 14A money-movement boundary', () => {
     const source = files.map((file) => readFileSync(resolve(root, file), 'utf8')).join('\n');
     expect(source).not.toMatch(/payment_ledger_entries/u);
     expect(source).not.toMatch(
-      /paymentIntents\.|charges\.create|refunds\.create|subscriptions\.create|application_fee_amount/u,
+      /paymentIntents\.|setupIntents\.|charges\.create|refunds\.create|subscriptions\.create|invoices\.|checkout\.sessions|transfers\.create|paymentMethods\.|application_fee|transfer_data|on_behalf_of/u,
     );
   });
 });

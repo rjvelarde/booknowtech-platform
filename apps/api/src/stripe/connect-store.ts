@@ -89,11 +89,24 @@ export class ConnectStore {
   }
 
   public async beginAccountOperation(input: ConnectActor) {
-    const existingAccount = await this.activeAccount(input.tenantId);
-    if (existingAccount) return { kind: 'account' as const, account: existingAccount };
     const fingerprint = createHash('sha256')
       .update(`${input.tenantPublicId}|express|US|${input.tenantCurrency}`)
       .digest('hex');
+    const operationKey = {
+      tenant_id: input.tenantId,
+      request_id: input.requestId,
+      operation_type: 'create_account',
+    };
+    const existingOperation = await this.db
+      .collection('stripe_connect_operations')
+      .findOne(operationKey);
+    if (existingOperation) {
+      if (existingOperation.request_fingerprint !== fingerprint)
+        throw new Error('idempotency_conflict');
+      return { kind: 'operation' as const, operation: existingOperation };
+    }
+    const existingAccount = await this.activeAccount(input.tenantId);
+    if (existingAccount) return { kind: 'account' as const, account: existingAccount };
     const operation = {
       public_id: randomUUID(),
       tenant_id: input.tenantId,
@@ -109,20 +122,21 @@ export class ConnectStore {
       created_at: new Date(),
       completed_at: null,
     };
+    const session = this.db.client.startSession();
     try {
-      await this.db.collection('stripe_connect_operations').insertOne(operation);
+      await session.withTransaction(async () => {
+        await this.db.collection('stripe_connect_operations').insertOne(operation, { session });
+        await this.audit(input, 'stripe_connect_account_create_requested', {}, session);
+      });
     } catch (error) {
       if (!(error instanceof MongoServerError && error.code === 11000)) throw error;
-      const existing = await this.db.collection('stripe_connect_operations').findOne({
-        tenant_id: input.tenantId,
-        request_id: input.requestId,
-        operation_type: 'create_account',
-      });
+      const existing = await this.db.collection('stripe_connect_operations').findOne(operationKey);
       if (!existing || existing.request_fingerprint !== fingerprint)
         throw new Error('idempotency_conflict', { cause: error });
       return { kind: 'operation' as const, operation: existing };
+    } finally {
+      await session.endSession();
     }
-    await this.audit(input, 'stripe_connect_account_create_requested', {});
     return { kind: 'operation' as const, operation };
   }
 
@@ -169,24 +183,37 @@ export class ConnectStore {
   }
 
   public async recordAccountLink(input: ConnectActor, accountPublicId: string, accountId: string) {
-    await this.db.collection('stripe_connect_operations').insertOne({
-      public_id: randomUUID(),
-      tenant_id: input.tenantId,
-      request_id: input.requestId,
-      operation_type: 'create_account_link',
-      request_fingerprint: createHash('sha256').update(accountPublicId).digest('hex'),
-      stripe_idempotency_key: null,
-      status: 'completed',
-      stripe_account_id: accountId,
-      result_reference: accountPublicId,
-      failure_category: null,
-      created_by_user_id: input.userId,
-      created_at: new Date(),
-      completed_at: new Date(),
-    });
-    await this.audit(input, 'stripe_connect_account_link_created', {
-      stripe_account_id: accountId,
-    });
+    const session = this.db.client.startSession();
+    try {
+      await session.withTransaction(async () => {
+        await this.db.collection('stripe_connect_operations').insertOne(
+          {
+            public_id: randomUUID(),
+            tenant_id: input.tenantId,
+            request_id: input.requestId,
+            operation_type: 'create_account_link',
+            request_fingerprint: createHash('sha256').update(accountPublicId).digest('hex'),
+            stripe_idempotency_key: null,
+            status: 'completed',
+            stripe_account_id: accountId,
+            result_reference: accountPublicId,
+            failure_category: null,
+            created_by_user_id: input.userId,
+            created_at: new Date(),
+            completed_at: new Date(),
+          },
+          { session },
+        );
+        await this.audit(
+          input,
+          'stripe_connect_account_link_created',
+          { stripe_account_id: accountId },
+          session,
+        );
+      });
+    } finally {
+      await session.endSession();
+    }
   }
 
   public async failAccountOperation(input: ConnectActor, operationPublicId: string) {

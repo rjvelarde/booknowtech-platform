@@ -97,7 +97,7 @@ const validators: Record<string, Document> = {
         created_by_user_id: { bsonType: 'objectId' },
         updated_at: { bsonType: 'date' },
         updated_by_source: { enum: ['user', 'stripe_webhook', 'reconciliation'] },
-        version: { bsonType: 'int', minimum: 1 },
+        version: { bsonType: ['int', 'long', 'double'], minimum: 1 },
       },
     },
   },
@@ -146,6 +146,9 @@ const validators: Record<string, Document> = {
         'received_at',
         'updated_at',
       ],
+      properties: {
+        processing_token: { bsonType: ['string', 'null'], pattern: UUID_PATTERN },
+      },
     },
   },
   tenant_booking_hostnames: {

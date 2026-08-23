@@ -79,6 +79,7 @@ export class ConnectService {
   }
 
   private requireEnabled() {
-    if (!this.environment.STRIPE_CONNECT_FOUNDATION_ENABLED) throw new Error('foundation_disabled');
+    if (!this.environment.STRIPE_PAYMENTS_FOUNDATION_ENABLED)
+      throw new Error('foundation_disabled');
   }
 }

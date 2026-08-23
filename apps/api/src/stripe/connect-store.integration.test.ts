@@ -55,11 +55,35 @@ suite('Stripe Connect persistence boundaries', () => {
     ).rejects.toThrow();
   });
 
+  it('replays an exact account request and rejects a mismatched fingerprint', async () => {
+    const input = actor(tenantB);
+    const first = await store.beginAccountOperation(input);
+    const replay = await store.beginAccountOperation(input);
+
+    expect(first.kind).toBe('operation');
+    expect(replay).toMatchObject({
+      kind: 'operation',
+      operation: { public_id: first.kind === 'operation' ? first.operation.public_id : '' },
+    });
+    await expect(store.beginAccountOperation({ ...input, tenantCurrency: 'EUR' })).rejects.toThrow(
+      'idempotency_conflict',
+    );
+    expect(
+      await db.collection('stripe_connect_operations').countDocuments({ tenant_id: tenantB }),
+    ).toBe(1);
+    expect(
+      await db.collection('audit_logs').countDocuments({
+        tenant_id: tenantB,
+        event: 'stripe_connect_account_create_requested',
+      }),
+    ).toBe(1);
+  });
+
   it('deduplicates globally unique webhook IDs without crossing tenant account context', async () => {
     await db.collection('tenant_stripe_accounts').insertOne({
       public_id: randomUUID(),
       tenant_id: tenantA,
-      stripe_account_id: 'acct_tenant_a',
+      stripe_account_id: 'acct_tenantA',
       account_type: 'express',
       country: 'US',
       default_currency: 'USD',
@@ -92,7 +116,7 @@ suite('Stripe Connect persistence boundaries', () => {
     const event = {
       id: 'evt_global_once',
       type: 'account.updated',
-      account: 'acct_tenant_a',
+      account: 'acct_tenantA',
       created: new Date(),
       apiVersion: '2025-01-01',
       livemode: false,

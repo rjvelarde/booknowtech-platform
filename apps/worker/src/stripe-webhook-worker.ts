@@ -34,6 +34,7 @@ interface StripeWebhookEventDocument {
   attempt_count: number;
   next_attempt_at: Date;
   processing_started_at: Date | null;
+  processing_token?: string | null;
   received_at: Date;
   received_request_id: string;
   tenant_id: ObjectId | null;
@@ -68,7 +69,11 @@ export function startStripeWebhookWorker(db: Db, stripeSecretKey: string, logger
   let active = Promise.resolve();
   const poll = async () => {
     if (stopped) return;
-    active = processOne(db, stripe, logger).catch((error: unknown) =>
+    active = processStripeWebhookEvent(
+      db,
+      { retrieveAccount: (id) => stripe.accounts.retrieve(id) },
+      logger,
+    ).catch((error: unknown) =>
       logger.error({
         event: 'stripe_webhook.poll_failed',
         error_name: error instanceof Error ? error.name : 'unknown',
@@ -87,9 +92,18 @@ export function startStripeWebhookWorker(db: Db, stripeSecretKey: string, logger
   };
 }
 
-async function processOne(db: Db, stripe: Stripe, logger: Logger) {
+export interface StripeAccountReader {
+  retrieveAccount(accountId: string): Promise<Stripe.Account>;
+}
+
+export async function processStripeWebhookEvent(
+  db: Db,
+  stripe: StripeAccountReader,
+  logger: Logger,
+) {
   const events = db.collection<StripeWebhookEventDocument>('stripe_webhook_events');
   const now = new Date();
+  const processingToken = randomUUID();
   const event = await events.findOneAndUpdate(
     {
       $or: [
@@ -100,7 +114,14 @@ async function processOne(db: Db, stripe: Stripe, logger: Logger) {
         },
       ],
     },
-    { $set: { processing_status: 'processing', processing_started_at: now, updated_at: now } },
+    {
+      $set: {
+        processing_status: 'processing',
+        processing_started_at: now,
+        processing_token: processingToken,
+        updated_at: now,
+      },
+    },
     { sort: { next_attempt_at: 1, received_at: 1 }, returnDocument: 'after' },
   );
   if (!event) return;
@@ -113,14 +134,11 @@ async function processOne(db: Db, stripe: Stripe, logger: Logger) {
     if (!accountRecord) throw new Error('unresolved_account');
     let projection = event.sanitized_payload;
     const lastCreated = accountRecord.last_stripe_event_created_at;
-    if (
-      event.event_type === 'account.updated' &&
+    const ambiguousOrder =
       lastCreated &&
       event.stripe_created_at.valueOf() === lastCreated.valueOf() &&
-      accountRecord.last_stripe_event_id !== event.stripe_event_id
-    ) {
-      projection = sanitize(await stripe.accounts.retrieve(accountId));
-    }
+      accountRecord.last_stripe_event_id !== event.stripe_event_id;
+    if (ambiguousOrder) projection = sanitize(await stripe.retrieveAccount(accountId));
     const session = db.client.startSession();
     try {
       await session.withTransaction(async () => {
@@ -130,7 +148,7 @@ async function processOne(db: Db, stripe: Stripe, logger: Logger) {
         const stale =
           current?.last_stripe_event_created_at instanceof Date &&
           current.last_stripe_event_created_at > event.stripe_created_at;
-        if (event.event_type === 'account.application.deauthorized') {
+        if (event.event_type === 'account.application.deauthorized' && !stale && !ambiguousOrder) {
           await db.collection<TenantStripeAccountDocument>('tenant_stripe_accounts').updateOne(
             { _id: accountRecord._id, active: true },
             {
@@ -174,21 +192,26 @@ async function processOne(db: Db, stripe: Stripe, logger: Logger) {
               session,
             );
         }
-        await events.updateOne(
-          { _id: event._id, processing_status: 'processing' },
-          {
-            $set: {
-              processing_status: 'processed',
-              tenant_id: accountRecord.tenant_id,
-              processed_at: new Date(),
-              processing_started_at: null,
-              failure_category: null,
-              updated_at: new Date(),
+        await events
+          .updateOne(
+            { _id: event._id, processing_status: 'processing', processing_token: processingToken },
+            {
+              $set: {
+                processing_status: 'processed',
+                tenant_id: accountRecord.tenant_id,
+                processed_at: new Date(),
+                processing_started_at: null,
+                processing_token: null,
+                failure_category: null,
+                updated_at: new Date(),
+              },
+              $inc: { attempt_count: 1 },
             },
-            $inc: { attempt_count: 1 },
-          },
-          { session },
-        );
+            { session },
+          )
+          .then((result) => {
+            if (result.matchedCount !== 1) throw new Error('claim_lost');
+          });
       });
     } finally {
       await session.endSession();
@@ -202,14 +225,14 @@ async function processOne(db: Db, stripe: Stripe, logger: Logger) {
     const attempts = event.attempt_count + 1;
     const terminal = attempts >= MAX_ATTEMPTS;
     await events.updateOne(
-      { _id: event._id, processing_status: 'processing' },
+      { _id: event._id, processing_status: 'processing', processing_token: processingToken },
       {
         $set: {
           processing_status: terminal ? 'failed' : 'pending',
           next_attempt_at: new Date(Date.now() + Math.min(3_600_000, 2 ** attempts * 1_000)),
           processing_started_at: null,
-          failure_category:
-            reason instanceof Error ? reason.message.slice(0, 80) : 'processing_failed',
+          processing_token: null,
+          failure_category: failureCategory(reason),
           updated_at: new Date(),
         },
         $inc: { attempt_count: 1 },
@@ -222,6 +245,12 @@ async function processOne(db: Db, stripe: Stripe, logger: Logger) {
       terminal,
     });
   }
+}
+
+function failureCategory(reason: unknown): string {
+  if (reason instanceof Error && ['unresolved_account', 'claim_lost'].includes(reason.message))
+    return reason.message;
+  return 'stripe_processing_failed';
 }
 
 function sanitize(account: Stripe.Account): StripeProjection {

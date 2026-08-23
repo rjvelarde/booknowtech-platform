@@ -36,7 +36,7 @@ const environmentSchema = z.object({
     .string()
     .regex(/^[a-f0-9]{64}$/u)
     .optional(),
-  STRIPE_CONNECT_FOUNDATION_ENABLED: z
+  STRIPE_PAYMENTS_FOUNDATION_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
@@ -108,7 +108,7 @@ function validateStripeConfiguration(environment: z.infer<typeof environmentSche
   const configured = values.filter((value) => value !== undefined).length;
   if (configured !== 0 && configured !== values.length)
     throw new Error('Invalid environment configuration: incomplete Stripe Connect configuration');
-  if (environment.STRIPE_CONNECT_FOUNDATION_ENABLED && configured === 0)
+  if (environment.STRIPE_PAYMENTS_FOUNDATION_ENABLED && configured === 0)
     throw new Error('Invalid environment configuration: Stripe Connect configuration');
   if (configured === 0) return;
   if (environment.STRIPE_PLATFORM_WEBHOOK_SECRET === environment.STRIPE_CONNECT_WEBHOOK_SECRET)

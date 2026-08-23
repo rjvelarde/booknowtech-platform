@@ -112,7 +112,7 @@ function publicStatus(
   environment: Environment,
 ) {
   return {
-    foundation_enabled: environment.STRIPE_CONNECT_FOUNDATION_ENABLED,
+    foundation_enabled: environment.STRIPE_PAYMENTS_FOUNDATION_ENABLED,
     booknowtech_terms: {
       version: environment.BOOKNOWTECH_CONNECT_TERMS_VERSION,
       accepted: result.termsAccepted,

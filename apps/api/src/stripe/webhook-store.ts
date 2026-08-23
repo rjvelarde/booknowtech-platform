@@ -40,6 +40,7 @@ export class StripeWebhookStore {
       attempt_count: 0,
       next_attempt_at: now,
       processing_started_at: null,
+      processing_token: null,
       processed_at: supported ? null : now,
       failure_category: supported && !tenantAccount ? 'unresolved_account' : null,
       received_request_id: input.requestId,

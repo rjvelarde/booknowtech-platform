@@ -9,5 +9,5 @@
     "target": "ES2024",
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "integration/**/*.ts"]
 }
