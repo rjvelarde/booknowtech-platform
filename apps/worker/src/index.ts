@@ -5,6 +5,7 @@ import { loadWorkerEnvironment } from './config.js';
 import { createWorkerLifecycle } from './lifecycle.js';
 import { startNotificationWorker } from './notification-worker.js';
 import { startWorkerHeartbeat } from './heartbeat.js';
+import { startStripeWebhookWorker } from './stripe-webhook-worker.js';
 
 async function start(): Promise<void> {
   const environment = loadWorkerEnvironment();
@@ -33,12 +34,20 @@ async function start(): Promise<void> {
     environment,
     logger,
   );
+  const stripeWebhookWorker = environment.STRIPE_SECRET_KEY
+    ? startStripeWebhookWorker(
+        mongo.db(environment.MONGODB_DATABASE),
+        environment.STRIPE_SECRET_KEY,
+        logger,
+      )
+    : null;
 
   logger.info({ event: 'service.started' });
   const signal = await lifecycle.waitForShutdown();
   logger.info({ event: 'service.stopping', signal });
   await heartbeat.stop();
   await notificationWorker.stop();
+  await stripeWebhookWorker?.stop();
   await mongo.close();
   lifecycle.dispose();
   logger.info({ event: 'service.stopped' });

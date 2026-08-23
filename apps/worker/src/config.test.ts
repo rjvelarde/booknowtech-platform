@@ -81,4 +81,15 @@ describe('loadWorkerEnvironment', () => {
       loadWorkerEnvironment({ ...production, BOOKING_ROOT_DOMAIN: 'staging.booknowtech.com' }),
     ).toThrow('BOOKING_ROOT_DOMAIN');
   });
+
+  it('enforces environment-specific Stripe key mode without requiring Stripe for legacy work', () => {
+    expect(loadWorkerEnvironment(valid).STRIPE_SECRET_KEY).toBeUndefined();
+    expect(
+      loadWorkerEnvironment({ ...valid, STRIPE_SECRET_KEY: 'sk_test_worker_key' })
+        .STRIPE_SECRET_KEY,
+    ).toBe('sk_test_worker_key');
+    expect(() =>
+      loadWorkerEnvironment({ ...valid, STRIPE_SECRET_KEY: 'sk_live_wrong_mode' }),
+    ).toThrow('Stripe key mode');
+  });
 });

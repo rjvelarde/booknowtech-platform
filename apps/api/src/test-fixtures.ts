@@ -17,6 +17,8 @@ export const testEnvironment: Environment = {
   PUBLIC_APPOINTMENT_TOKEN_SECRET: 'test-secret-that-is-at-least-thirty-two-bytes-long',
   RATE_LIMIT_KEY_SECRET: 'test-rate-limit-secret-at-least-thirty-two-bytes',
   MONITORING_TOKEN: 'bnt_monitoring_test_0123456789abcdef0123456789abcdef',
+  STRIPE_CONNECT_COUNTRY: 'US',
+  STRIPE_PAYMENTS_FOUNDATION_ENABLED: false,
 };
 
 export class StubReadinessProbe implements ReadinessProbe {

@@ -6,6 +6,10 @@ import { loadEnvironment } from './config.js';
 import { AtlasReadinessProbe } from './readiness.js';
 import { MongoRateLimiter } from './rate-limit/limiter.js';
 import { MongoMonitoringReader } from './monitoring/store.js';
+import { StripeSdkConnectAdapter } from './stripe/adapter.js';
+import { ConnectStore } from './stripe/connect-store.js';
+import { ConnectService } from './stripe/connect-service.js';
+import { StripeWebhookStore } from './stripe/webhook-store.js';
 
 async function start(): Promise<void> {
   const environment = loadEnvironment();
@@ -13,11 +17,25 @@ async function start(): Promise<void> {
   const applicationClient = new MongoClient(environment.MONGODB_URI);
   await applicationClient.connect();
   const database = applicationClient.db(environment.MONGODB_DATABASE);
+  const stripeAdapter = environment.STRIPE_SECRET_KEY
+    ? new StripeSdkConnectAdapter(environment.STRIPE_SECRET_KEY)
+    : undefined;
   const app = await buildApplication({
     environment,
     readiness,
     monitoringReader: new MongoMonitoringReader(database),
     closeAdmin: async () => applicationClient.close(),
+    ...(stripeAdapter && environment.STRIPE_PLATFORM_WEBHOOK_SECRET
+      ? {
+          stripeAdapter,
+          stripeWebhookStore: new StripeWebhookStore(database),
+          connectService: new ConnectService(
+            environment,
+            new ConnectStore(database),
+            stripeAdapter,
+          ),
+        }
+      : {}),
     ...(environment.TENANT_ADMIN_ENABLED
       ? {
           adminStore: new AdminStore(database),

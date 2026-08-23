@@ -70,6 +70,15 @@ export function BusinessHubHomePage({
           >
             Public booking
           </button>
+          {tenant.role === 'tenant_owner' || tenant.role === 'tenant_admin' ? (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => onNavigate('/payments/connect')}
+            >
+              Payment account
+            </button>
+          ) : null}
           <button
             type="button"
             className="secondary-button"

@@ -6,6 +6,151 @@ const DNS_LABEL_PATTERN = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
 const HOSTNAME_PATTERN = `${DNS_LABEL_PATTERN}(?:\\.${DNS_LABEL_PATTERN})+`;
 
 const validators: Record<string, Document> = {
+  booknowtech_connect_terms_acceptances: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: [
+        'public_id',
+        'tenant_id',
+        'terms_version',
+        'accepted_at',
+        'accepted_by_user_id',
+        'accepted_by_membership_id',
+        'accepted_request_id',
+        'accepted_ip_hash',
+        'acceptance_text_hash',
+        'created_at',
+      ],
+      properties: {
+        public_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        tenant_id: { bsonType: 'objectId' },
+        terms_version: { bsonType: 'string', minLength: 1, maxLength: 80 },
+        accepted_at: { bsonType: 'date' },
+        accepted_by_user_id: { bsonType: 'objectId' },
+        accepted_by_membership_id: { bsonType: 'objectId' },
+        accepted_request_id: { bsonType: 'string', minLength: 1, maxLength: 128 },
+        accepted_ip_hash: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+        acceptance_text_hash: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+        created_at: { bsonType: 'date' },
+      },
+    },
+  },
+  tenant_stripe_accounts: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: [
+        'public_id',
+        'tenant_id',
+        'stripe_account_id',
+        'account_type',
+        'country',
+        'default_currency',
+        'status',
+        'active',
+        'details_submitted',
+        'charges_enabled',
+        'payouts_enabled',
+        'capabilities',
+        'requirements',
+        'last_stripe_event_id',
+        'last_stripe_event_created_at',
+        'last_synced_at',
+        'connected_at',
+        'disconnected_at',
+        'created_at',
+        'created_by_user_id',
+        'updated_at',
+        'updated_by_source',
+        'version',
+      ],
+      properties: {
+        public_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        tenant_id: { bsonType: 'objectId' },
+        stripe_account_id: { bsonType: 'string', pattern: '^acct_[A-Za-z0-9]+$' },
+        account_type: { enum: ['express'] },
+        country: { enum: ['US'] },
+        default_currency: { bsonType: 'string', pattern: '^[A-Z]{3}$' },
+        status: {
+          enum: [
+            'onboarding_started',
+            'pending_verification',
+            'action_required',
+            'restricted',
+            'payments_enabled',
+            'payouts_enabled',
+            'disabled',
+            'disconnected',
+          ],
+        },
+        active: { bsonType: 'bool' },
+        details_submitted: { bsonType: 'bool' },
+        charges_enabled: { bsonType: 'bool' },
+        payouts_enabled: { bsonType: 'bool' },
+        capabilities: { bsonType: 'object' },
+        requirements: { bsonType: 'object' },
+        last_stripe_event_id: { bsonType: ['string', 'null'] },
+        last_stripe_event_created_at: { bsonType: ['date', 'null'] },
+        last_synced_at: { bsonType: ['date', 'null'] },
+        connected_at: { bsonType: 'date' },
+        disconnected_at: { bsonType: ['date', 'null'] },
+        created_at: { bsonType: 'date' },
+        created_by_user_id: { bsonType: 'objectId' },
+        updated_at: { bsonType: 'date' },
+        updated_by_source: { enum: ['user', 'stripe_webhook', 'reconciliation'] },
+        version: { bsonType: ['int', 'long', 'double'], minimum: 1 },
+      },
+    },
+  },
+  stripe_connect_operations: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: [
+        'public_id',
+        'tenant_id',
+        'request_id',
+        'operation_type',
+        'request_fingerprint',
+        'stripe_idempotency_key',
+        'status',
+        'stripe_account_id',
+        'result_reference',
+        'failure_category',
+        'created_by_user_id',
+        'created_at',
+        'completed_at',
+      ],
+    },
+  },
+  stripe_webhook_events: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: [
+        'public_id',
+        'stripe_event_id',
+        'endpoint_kind',
+        'stripe_account_id',
+        'tenant_id',
+        'event_type',
+        'stripe_created_at',
+        'stripe_api_version',
+        'livemode',
+        'payload_hash',
+        'sanitized_payload',
+        'processing_status',
+        'attempt_count',
+        'next_attempt_at',
+        'processing_started_at',
+        'processed_at',
+        'failure_category',
+        'received_request_id',
+        'received_at',
+        'updated_at',
+      ],
+      properties: {
+        processing_token: { bsonType: ['string', 'null'], pattern: UUID_PATTERN },
+      },
+    },
+  },
   tenant_booking_hostnames: {
     $jsonSchema: {
       bsonType: 'object',
@@ -1351,6 +1496,57 @@ export async function migrateDatabase(db: Db): Promise<void> {
     {
       key: { status: 1, created_at: 1 },
       name: 'tenant_booking_hostname_operations_status_created',
+    },
+  ]);
+  await db.collection('booknowtech_connect_terms_acceptances').createIndexes([
+    { key: { public_id: 1 }, name: 'connect_terms_public_id_unique', unique: true },
+    {
+      key: { tenant_id: 1, terms_version: 1 },
+      name: 'connect_terms_tenant_version_unique',
+      unique: true,
+    },
+    { key: { tenant_id: 1, accepted_at: -1 }, name: 'connect_terms_tenant_accepted' },
+  ]);
+  await db.collection('tenant_stripe_accounts').createIndexes([
+    { key: { public_id: 1 }, name: 'tenant_stripe_accounts_public_id_unique', unique: true },
+    {
+      key: { stripe_account_id: 1 },
+      name: 'tenant_stripe_accounts_stripe_id_unique',
+      unique: true,
+    },
+    {
+      key: { tenant_id: 1, public_id: 1 },
+      name: 'tenant_stripe_accounts_tenant_public_unique',
+      unique: true,
+    },
+    {
+      key: { tenant_id: 1, active: 1 },
+      name: 'tenant_stripe_accounts_one_active',
+      unique: true,
+      partialFilterExpression: { active: true },
+    },
+    { key: { status: 1, last_synced_at: 1 }, name: 'tenant_stripe_accounts_operations' },
+  ]);
+  await db.collection('stripe_connect_operations').createIndexes([
+    { key: { public_id: 1 }, name: 'stripe_connect_operations_public_id_unique', unique: true },
+    {
+      key: { tenant_id: 1, request_id: 1, operation_type: 1 },
+      name: 'stripe_connect_operations_request_unique',
+      unique: true,
+    },
+    { key: { status: 1, created_at: 1 }, name: 'stripe_connect_operations_status_created' },
+  ]);
+  await db.collection('stripe_webhook_events').createIndexes([
+    { key: { public_id: 1 }, name: 'stripe_webhook_events_public_id_unique', unique: true },
+    { key: { stripe_event_id: 1 }, name: 'stripe_webhook_events_stripe_id_unique', unique: true },
+    {
+      key: { processing_status: 1, next_attempt_at: 1, received_at: 1 },
+      name: 'stripe_webhook_events_worker_poll',
+    },
+    { key: { tenant_id: 1, received_at: -1 }, name: 'stripe_webhook_events_tenant_received' },
+    {
+      key: { stripe_account_id: 1, received_at: -1 },
+      name: 'stripe_webhook_events_account_received',
     },
   ]);
   await db.collection('users').createIndexes([

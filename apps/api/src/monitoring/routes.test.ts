@@ -22,6 +22,10 @@ function snapshot(overrides: Partial<MonitoringSnapshot> = {}): MonitoringSnapsh
     oldestProcessingAt: null,
     terminalFailed15m: 0,
     terminalFailed24h: 0,
+    stripePendingCount: 0,
+    stripeOldestPendingAt: null,
+    stripeProcessingCount: 0,
+    stripeFailedCount: 0,
     ...overrides,
   };
 }
@@ -79,6 +83,12 @@ describe('internal monitoring route', () => {
           terminal_failed_15m: 3,
           terminal_failed_24h: 4,
         },
+        stripe_webhooks: {
+          pending_count: 0,
+          oldest_pending_age_seconds: null,
+          processing_count: 0,
+          failed_count: 0,
+        },
       },
     });
   });
@@ -115,6 +125,7 @@ describe('internal monitoring route', () => {
     ['wrong environment', { worker: { ...snapshot().worker!, environment: 'production' } }],
     ['malformed SHA', { worker: { ...snapshot().worker!, commit_sha: 'not-a-sha' } }],
     ['mismatched SHA', { worker: { ...snapshot().worker!, commit_sha: 'b'.repeat(40) } }],
+    ['failed Stripe webhook', { stripeFailedCount: 1 }],
   ])('fails closed for %s', async (_label, overrides) => {
     const app = await application({ read: () => Promise.resolve(snapshot(overrides)) });
     const response = await app.inject({
@@ -144,6 +155,7 @@ describe('internal monitoring route', () => {
       'api_sha',
       'worker',
       'outbox',
+      'stripe_webhooks',
     ]);
   });
 

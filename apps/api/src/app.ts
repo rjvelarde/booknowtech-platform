@@ -20,6 +20,11 @@ import { type RateLimiter, allowAllRateLimiter } from './rate-limit/limiter.js';
 import { registerRateLimitHook } from './rate-limit/routes.js';
 import { registerMonitoringRoute } from './monitoring/routes.js';
 import type { MonitoringReader } from './monitoring/store.js';
+import type { ConnectService } from './stripe/connect-service.js';
+import { registerConnectRoutes } from './stripe/connect-routes.js';
+import type { StripeConnectAdapter } from './stripe/adapter.js';
+import type { StripeWebhookStore } from './stripe/webhook-store.js';
+import { registerStripeWebhookRoutes } from './stripe/webhook-routes.js';
 
 interface BuildApplicationOptions {
   environment: Environment;
@@ -30,6 +35,9 @@ interface BuildApplicationOptions {
   rateLimiter?: RateLimiter;
   monitoringReader?: MonitoringReader;
   monitoringNow?: () => Date;
+  connectService?: ConnectService;
+  stripeAdapter?: StripeConnectAdapter;
+  stripeWebhookStore?: StripeWebhookStore;
 }
 
 const dataEnvelopeSchema = {
@@ -49,6 +57,9 @@ export async function buildApplication({
   rateLimiter,
   monitoringReader,
   monitoringNow,
+  connectService,
+  stripeAdapter,
+  stripeWebhookStore,
 }: BuildApplicationOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger ? createLoggerOptions(environment) : false,
@@ -127,6 +138,8 @@ export async function buildApplication({
     },
     monitoringNow,
   );
+  if (stripeAdapter && stripeWebhookStore)
+    registerStripeWebhookRoutes(app, environment, stripeAdapter, stripeWebhookStore);
 
   app.get(
     '/health/ready',
@@ -184,6 +197,7 @@ export async function buildApplication({
     registerPublicBookingRoutes(app, environment, adminStore);
     registerNotificationRoutes(app, environment, adminStore);
     registerPublicAppointmentManagementRoutes(app, environment, adminStore);
+    if (connectService) registerConnectRoutes(app, environment, adminStore, connectService);
   }
 
   app.addHook('onClose', async () => {

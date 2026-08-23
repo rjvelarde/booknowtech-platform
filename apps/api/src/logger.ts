@@ -14,8 +14,10 @@ export function createLoggerOptions(environment: Environment): LoggerOptions {
       paths: [
         'req.headers.authorization',
         'req.headers.cookie',
+        'req.headers.stripe-signature',
         'request.headers.authorization',
         'request.headers.cookie',
+        'request.headers.stripe-signature',
         '*.password',
         '*.secret',
         '*.token',

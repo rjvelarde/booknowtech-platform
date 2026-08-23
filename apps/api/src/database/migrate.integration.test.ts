@@ -38,6 +38,39 @@ suite('administrative foundation migration', () => {
     });
   }, 15_000);
 
+  it('creates only the approved PR 14A Connect collections and tenant/idempotency indexes', async () => {
+    await migrateDatabase(db);
+    await migrateDatabase(db);
+    const names = (await db.listCollections({}, { nameOnly: true }).toArray()).map(
+      ({ name }) => name,
+    );
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'booknowtech_connect_terms_acceptances',
+        'tenant_stripe_accounts',
+        'stripe_connect_operations',
+        'stripe_webhook_events',
+      ]),
+    );
+    expect(names).not.toContain('payment_ledger_entries');
+    expect(
+      (await db.collection('booknowtech_connect_terms_acceptances').indexes()).map(
+        ({ name }) => name,
+      ),
+    ).toContain('connect_terms_tenant_version_unique');
+    expect(
+      (await db.collection('tenant_stripe_accounts').indexes()).map(({ name }) => name),
+    ).toEqual(
+      expect.arrayContaining([
+        'tenant_stripe_accounts_stripe_id_unique',
+        'tenant_stripe_accounts_one_active',
+      ]),
+    );
+    expect(
+      (await db.collection('stripe_webhook_events').indexes()).map(({ name }) => name),
+    ).toContain('stripe_webhook_events_stripe_id_unique');
+  });
+
   it('creates strict, additive service-heartbeat storage and named indexes', async () => {
     await migrateDatabase(db);
     await migrateDatabase(db);

@@ -24,6 +24,7 @@ const environmentSchema = z.object({
   TRANSACTIONAL_EMAIL_FROM: z.string().email(),
   POSTMARK_SERVER_ID: z.coerce.number().int().positive(),
   PUBLIC_APPOINTMENT_TOKEN_SECRET: z.string().min(32),
+  STRIPE_SECRET_KEY: z.string().min(16).optional(),
 });
 
 type ParsedWorkerEnvironment = z.infer<typeof environmentSchema>;
@@ -63,6 +64,11 @@ export function loadWorkerEnvironment(source: NodeJS.ProcessEnv = process.env): 
     throw new Error('Invalid environment configuration: PUBLIC_APPOINTMENT_TOKEN_SECRET');
   if (environment.TRANSACTIONAL_EMAIL_TOKEN === environment.PUBLIC_APPOINTMENT_TOKEN_SECRET)
     throw new Error('Invalid environment configuration: environment-specific secrets');
+  if (environment.STRIPE_SECRET_KEY) {
+    const expectedPrefix = environment.ENVIRONMENT_ID === 'production' ? 'sk_live_' : 'sk_test_';
+    if (!environment.STRIPE_SECRET_KEY.startsWith(expectedPrefix))
+      throw new Error('Invalid environment configuration: Stripe key mode');
+  }
   const buildVersion = environment.RAILWAY_ENVIRONMENT_NAME
     ? environment.RAILWAY_GIT_COMMIT_SHA
     : environment.BUILD_VERSION;

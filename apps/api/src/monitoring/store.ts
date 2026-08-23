@@ -11,6 +11,7 @@ interface HeartbeatDocument {
 
 interface OldestDocument {
   created_at?: Date;
+  received_at?: Date;
   processing_started_at?: Date | null;
 }
 
@@ -22,6 +23,10 @@ export interface MonitoringSnapshot {
   oldestProcessingAt: Date | null;
   terminalFailed15m: number;
   terminalFailed24h: number;
+  stripePendingCount: number;
+  stripeOldestPendingAt: Date | null;
+  stripeProcessingCount: number;
+  stripeFailedCount: number;
 }
 
 export interface MonitoringReader {
@@ -37,6 +42,7 @@ export class MongoMonitoringReader implements MonitoringReader {
   public async read(environment: string, now: Date): Promise<MonitoringSnapshot> {
     const heartbeats = this.database.collection<HeartbeatDocument>('service_heartbeats');
     const outbox = this.database.collection<OldestDocument>('notification_outbox');
+    const stripeEvents = this.database.collection<OldestDocument>('stripe_webhook_events');
     const maxTimeMS = this.queryTimeoutMilliseconds;
     const fifteenMinutesAgo = new Date(now.valueOf() - 15 * 60_000);
     const twentyFourHoursAgo = new Date(now.valueOf() - 24 * 60 * 60_000);
@@ -72,6 +78,13 @@ export class MongoMonitoringReader implements MonitoringReader {
         { status: 'failed', failed_at: { $gte: twentyFourHoursAgo } },
         { maxTimeMS },
       ),
+      stripeEvents.countDocuments({ processing_status: 'pending' }, { maxTimeMS }),
+      stripeEvents.findOne(
+        { processing_status: 'pending' },
+        { sort: { received_at: 1 }, projection: { _id: 0, received_at: 1 }, maxTimeMS },
+      ),
+      stripeEvents.countDocuments({ processing_status: 'processing' }, { maxTimeMS }),
+      stripeEvents.countDocuments({ processing_status: 'failed' }, { maxTimeMS }),
     ]);
 
     let timer: NodeJS.Timeout | undefined;
@@ -88,6 +101,10 @@ export class MongoMonitoringReader implements MonitoringReader {
       oldestProcessing,
       terminalFailed15m,
       terminalFailed24h,
+      stripePendingCount,
+      stripeOldestPending,
+      stripeProcessingCount,
+      stripeFailedCount,
     ] = await Promise.race([query, timeout]).finally(() => {
       if (timer) clearTimeout(timer);
     });
@@ -100,6 +117,10 @@ export class MongoMonitoringReader implements MonitoringReader {
       oldestProcessingAt: oldestProcessing?.processing_started_at ?? null,
       terminalFailed15m,
       terminalFailed24h,
+      stripePendingCount,
+      stripeOldestPendingAt: stripeOldestPending?.received_at ?? null,
+      stripeProcessingCount,
+      stripeFailedCount,
     };
   }
 }

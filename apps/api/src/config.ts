@@ -27,6 +27,24 @@ const environmentSchema = z.object({
   PUBLIC_APPOINTMENT_TOKEN_SECRET: z.string().min(32),
   RATE_LIMIT_KEY_SECRET: z.string().min(32),
   MONITORING_TOKEN: z.string().min(48).max(256),
+  STRIPE_SECRET_KEY: z.string().min(16).optional(),
+  STRIPE_PLATFORM_WEBHOOK_SECRET: z.string().min(16).optional(),
+  STRIPE_CONNECT_WEBHOOK_SECRET: z.string().min(16).optional(),
+  STRIPE_CONNECT_COUNTRY: z.literal('US').default('US'),
+  BOOKNOWTECH_CONNECT_TERMS_VERSION: z
+    .string()
+    .min(1)
+    .max(80)
+    .regex(/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u)
+    .optional(),
+  BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
+    .optional(),
+  STRIPE_PAYMENTS_FOUNDATION_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
 });
 
 type ParsedEnvironment = z.infer<typeof environmentSchema>;
@@ -76,11 +94,39 @@ export function loadEnvironment(source: NodeJS.ProcessEnv = process.env): Enviro
     !environment.MONITORING_TOKEN.startsWith(`bnt_monitoring_${environment.ENVIRONMENT_ID}_`)
   )
     throw new Error('Invalid environment configuration: MONITORING_TOKEN environment');
+  validateStripeConfiguration(environment);
 
   return {
     ...environment,
     BUILD_VERSION: buildVersion(environment),
   };
+}
+
+function validateStripeConfiguration(environment: z.infer<typeof environmentSchema>): void {
+  const values = [
+    environment.STRIPE_SECRET_KEY,
+    environment.STRIPE_PLATFORM_WEBHOOK_SECRET,
+    environment.STRIPE_CONNECT_WEBHOOK_SECRET,
+    environment.BOOKNOWTECH_CONNECT_TERMS_VERSION,
+    environment.BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256,
+  ];
+  const configured = values.filter((value) => value !== undefined).length;
+  if (configured !== 0 && configured !== values.length)
+    throw new Error('Invalid environment configuration: incomplete Stripe Connect configuration');
+  if (environment.STRIPE_PAYMENTS_FOUNDATION_ENABLED && configured === 0)
+    throw new Error('Invalid environment configuration: Stripe Connect configuration');
+  if (configured === 0) return;
+  if (environment.STRIPE_PLATFORM_WEBHOOK_SECRET === environment.STRIPE_CONNECT_WEBHOOK_SECRET)
+    throw new Error('Invalid environment configuration: Stripe webhook secret separation');
+  const live = environment.STRIPE_SECRET_KEY!.startsWith('sk_live_');
+  const test = environment.STRIPE_SECRET_KEY!.startsWith('sk_test_');
+  if ((!live && !test) || (environment.ENVIRONMENT_ID === 'production' ? !live : !test))
+    throw new Error('Invalid environment configuration: Stripe key mode');
+  if (
+    !environment.STRIPE_PLATFORM_WEBHOOK_SECRET!.startsWith('whsec_') ||
+    !environment.STRIPE_CONNECT_WEBHOOK_SECRET!.startsWith('whsec_')
+  )
+    throw new Error('Invalid environment configuration: Stripe webhook secrets');
 }
 
 function validatePairing(environment: z.infer<typeof environmentSchema>): string | null {
