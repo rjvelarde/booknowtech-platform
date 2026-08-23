@@ -31,7 +31,12 @@ const environmentSchema = z.object({
   STRIPE_PLATFORM_WEBHOOK_SECRET: z.string().min(16).optional(),
   STRIPE_CONNECT_WEBHOOK_SECRET: z.string().min(16).optional(),
   STRIPE_CONNECT_COUNTRY: z.literal('US').default('US'),
-  BOOKNOWTECH_CONNECT_TERMS_VERSION: z.string().min(1).max(80).optional(),
+  BOOKNOWTECH_CONNECT_TERMS_VERSION: z
+    .string()
+    .min(1)
+    .max(80)
+    .regex(/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u)
+    .optional(),
   BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256: z
     .string()
     .regex(/^[a-f0-9]{64}$/u)

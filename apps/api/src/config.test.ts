@@ -139,5 +139,8 @@ describe('loadEnvironment', () => {
     expect(() =>
       loadEnvironment({ ...stripe, STRIPE_SECRET_KEY: 'sk_live_wrong_environment' }),
     ).toThrow('key mode');
+    expect(() =>
+      loadEnvironment({ ...stripe, BOOKNOWTECH_CONNECT_TERMS_VERSION: '=connect-v1' }),
+    ).toThrow();
   });
 });

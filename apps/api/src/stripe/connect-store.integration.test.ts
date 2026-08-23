@@ -79,6 +79,30 @@ suite('Stripe Connect persistence boundaries', () => {
     ).toBe(1);
   });
 
+  it('reuses the original durable account operation across new HTTP request IDs', async () => {
+    const input = actor();
+    const first = await store.beginAccountOperation(input);
+    expect(first.kind).toBe('operation');
+    if (first.kind !== 'operation') return;
+    await store.failAccountOperation(input, String(first.operation.public_id));
+
+    const retry = await store.beginAccountOperation({ ...input, requestId: randomUUID() });
+
+    expect(retry).toMatchObject({
+      kind: 'operation',
+      operation: {
+        public_id: first.operation.public_id,
+        stripe_idempotency_key: first.operation.stripe_idempotency_key,
+      },
+    });
+    expect(
+      await db.collection('stripe_connect_operations').countDocuments({
+        tenant_id: input.tenantId,
+        operation_type: 'create_account',
+      }),
+    ).toBe(1);
+  });
+
   it('deduplicates globally unique webhook IDs without crossing tenant account context', async () => {
     await db.collection('tenant_stripe_accounts').insertOne({
       public_id: randomUUID(),

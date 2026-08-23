@@ -107,6 +107,17 @@ export class ConnectStore {
     }
     const existingAccount = await this.activeAccount(input.tenantId);
     if (existingAccount) return { kind: 'account' as const, account: existingAccount };
+    const durableOperation = await this.db
+      .collection('stripe_connect_operations')
+      .findOne(
+        { tenant_id: input.tenantId, operation_type: 'create_account' },
+        { sort: { created_at: 1 } },
+      );
+    if (durableOperation) {
+      if (durableOperation.request_fingerprint !== fingerprint)
+        throw new Error('idempotency_conflict');
+      return { kind: 'operation' as const, operation: durableOperation };
+    }
     const operation = {
       public_id: randomUUID(),
       tenant_id: input.tenantId,
