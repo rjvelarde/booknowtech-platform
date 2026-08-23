@@ -26,6 +26,7 @@ import { PublicBookingPage } from './pages/PublicBookingPage.js';
 import { PublicBookingSettingsPage } from './pages/PublicBookingSettingsPage.js';
 import { PublicAppointmentManagementPage } from './pages/PublicAppointmentManagementPage.js';
 import { loadPublicEnvironment } from './config.js';
+import { PaymentSetupPage } from './pages/PaymentSetupPage.js';
 
 type View = 'loading' | 'placeholder' | 'login' | 'password' | 'select' | 'hub' | 'denied';
 
@@ -158,6 +159,9 @@ export function App() {
       ) : null}
       {path === '/public-booking' ? (
         <PublicBookingSettingsPage csrfToken={session.csrf_token} canManage={canManage(session)} />
+      ) : null}
+      {path.startsWith('/payments/connect') ? (
+        <PaymentSetupPage csrfToken={session.csrf_token} canManage={canManage(session)} />
       ) : null}
       {path === '/services' ? (
         <ServicesPage

@@ -62,6 +62,21 @@ export interface AppointmentEmailSettingsView {
   version: number;
 }
 
+export interface ConnectStatusView {
+  foundation_enabled: boolean;
+  booknowtech_terms: { version: string; accepted: boolean };
+  account: null | {
+    public_id: string;
+    status: string;
+    details_submitted: boolean;
+    charges_enabled: boolean;
+    payouts_enabled: boolean;
+    capabilities: Record<string, string | null>;
+    requirements: { currently_due: string[]; past_due: string[]; pending_verification: string[] };
+    last_synced_at: string | null;
+  };
+}
+
 export interface ServiceView {
   public_id: string;
   internal_code: string | null;
@@ -391,6 +406,35 @@ export function listAppointments(
   const query = new URLSearchParams();
   Object.entries(input).forEach(([key, value]) => value && query.set(key, value));
   return request(`/v1/admin/appointments${query.size ? `?${query.toString()}` : ''}`);
+}
+
+export function getConnectStatus(): Promise<ConnectStatusView> {
+  return request('/v1/admin/payments/connect/status');
+}
+
+export function acceptBookNowTechConnectTerms(csrfToken: string) {
+  return request<{ terms_version: string; accepted: boolean; changed: boolean }>(
+    '/v1/admin/payments/connect/terms-acceptance',
+    {
+      method: 'POST',
+      body: JSON.stringify({ accepted: true }),
+      headers: { 'x-csrf-token': csrfToken },
+    },
+  );
+}
+
+export function startConnectOnboarding(csrfToken: string) {
+  return request<ConnectStatusView['account']>('/v1/admin/payments/connect/onboarding', {
+    method: 'POST',
+    headers: { 'x-csrf-token': csrfToken },
+  });
+}
+
+export function createConnectAccountLink(csrfToken: string) {
+  return request<{ url: string; expires_at: string }>('/v1/admin/payments/connect/account-link', {
+    method: 'POST',
+    headers: { 'x-csrf-token': csrfToken },
+  });
 }
 
 export function getAppointment(publicId: string): Promise<AppointmentView> {

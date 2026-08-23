@@ -117,4 +117,27 @@ describe('loadEnvironment', () => {
       loadEnvironment({ ...valid, MONITORING_TOKEN: valid.RATE_LIMIT_KEY_SECRET }),
     ).toThrow('MONITORING_TOKEN');
   });
+
+  it('keeps disabled Stripe optional but requires a complete, separated test-mode configuration when enabled', () => {
+    expect(loadEnvironment(valid).STRIPE_CONNECT_FOUNDATION_ENABLED).toBe(false);
+    const stripe = {
+      ...valid,
+      STRIPE_SECRET_KEY: 'sk_test_valid_foundation_key',
+      STRIPE_PLATFORM_WEBHOOK_SECRET: 'whsec_platform_distinct_secret',
+      STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_connect_distinct_secret',
+      BOOKNOWTECH_CONNECT_TERMS_VERSION: 'connect-v1',
+      BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256: 'a'.repeat(64),
+      STRIPE_CONNECT_FOUNDATION_ENABLED: 'true',
+    };
+    expect(loadEnvironment(stripe)).toMatchObject({ STRIPE_CONNECT_FOUNDATION_ENABLED: true });
+    expect(() =>
+      loadEnvironment({
+        ...stripe,
+        STRIPE_CONNECT_WEBHOOK_SECRET: stripe.STRIPE_PLATFORM_WEBHOOK_SECRET,
+      }),
+    ).toThrow('separation');
+    expect(() =>
+      loadEnvironment({ ...stripe, STRIPE_SECRET_KEY: 'sk_live_wrong_environment' }),
+    ).toThrow('key mode');
+  });
 });

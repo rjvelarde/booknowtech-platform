@@ -17,6 +17,7 @@
     "@booknowtech/shared": "workspace:*",
     "mongodb": "7.5.0",
     "pino": "10.3.1",
+    "stripe": "18.5.0",
     "zod": "4.4.3"
   },
   "devDependencies": {

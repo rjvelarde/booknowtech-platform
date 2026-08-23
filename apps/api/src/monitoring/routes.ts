@@ -13,7 +13,7 @@ const nullableInteger = { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null
 const monitoringDataSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['environment', 'api_sha', 'worker', 'outbox'],
+  required: ['environment', 'api_sha', 'worker', 'outbox', 'stripe_webhooks'],
   properties: {
     environment: { type: 'string', enum: ['development', 'test', 'staging', 'production'] },
     api_sha: { type: 'string' },
@@ -46,6 +46,17 @@ const monitoringDataSchema = {
         oldest_processing_age_seconds: nullableInteger,
         terminal_failed_15m: nullableInteger,
         terminal_failed_24h: nullableInteger,
+      },
+    },
+    stripe_webhooks: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['pending_count', 'oldest_pending_age_seconds', 'processing_count', 'failed_count'],
+      properties: {
+        pending_count: nullableInteger,
+        oldest_pending_age_seconds: nullableInteger,
+        processing_count: nullableInteger,
+        failed_count: nullableInteger,
       },
     },
   },
@@ -129,7 +140,13 @@ function monitoringResponse(environment: Environment, snapshot: MonitoringSnapsh
   const shaMatches = shaValid && worker.commit_sha === environment.BUILD_VERSION;
 
   return {
-    healthy: present && fresh && environmentMatches && apiShaValid && shaMatches,
+    healthy:
+      present &&
+      fresh &&
+      environmentMatches &&
+      apiShaValid &&
+      shaMatches &&
+      snapshot.stripeFailedCount === 0,
     data: {
       environment: environment.ENVIRONMENT_ID,
       api_sha: environment.BUILD_VERSION,
@@ -147,6 +164,12 @@ function monitoringResponse(environment: Environment, snapshot: MonitoringSnapsh
         terminal_failed_15m: snapshot.terminalFailed15m,
         terminal_failed_24h: snapshot.terminalFailed24h,
       },
+      stripe_webhooks: {
+        pending_count: snapshot.stripePendingCount,
+        oldest_pending_age_seconds: age(now, snapshot.stripeOldestPendingAt),
+        processing_count: snapshot.stripeProcessingCount,
+        failed_count: snapshot.stripeFailedCount,
+      },
     },
   };
 }
@@ -163,6 +186,12 @@ function unavailableData(environment: Environment) {
       oldest_processing_age_seconds: null,
       terminal_failed_15m: null,
       terminal_failed_24h: null,
+    },
+    stripe_webhooks: {
+      pending_count: null,
+      oldest_pending_age_seconds: null,
+      processing_count: null,
+      failed_count: null,
     },
   };
 }

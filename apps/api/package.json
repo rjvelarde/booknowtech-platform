@@ -13,7 +13,7 @@
     "start": "node --env-file-if-exists=../../.env dist/server.js",
     "test": "vitest run",
     "test:unit": "vitest run --exclude '**/*.integration.test.ts'",
-    "test:integration": "vitest run src/app.integration.test.ts src/auth/routes.integration.test.ts src/auth/first-login-password.integration.test.ts src/availability/routes.integration.test.ts src/catalog/routes.integration.test.ts src/database/migrate.integration.test.ts src/domain-management/service.integration.test.ts src/monitoring/store.integration.test.ts src/provider/routes.integration.test.ts src/provisioning/service.integration.test.ts src/provisioning/status-service.integration.test.ts src/rate-limit/limiter.integration.test.ts",
+    "test:integration": "vitest run src/app.integration.test.ts src/auth/routes.integration.test.ts src/auth/first-login-password.integration.test.ts src/availability/routes.integration.test.ts src/catalog/routes.integration.test.ts src/database/migrate.integration.test.ts src/domain-management/service.integration.test.ts src/monitoring/store.integration.test.ts src/provider/routes.integration.test.ts src/provisioning/service.integration.test.ts src/provisioning/status-service.integration.test.ts src/rate-limit/limiter.integration.test.ts src/stripe/connect-store.integration.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -22,6 +22,7 @@
     "fastify": "5.10.0",
     "mongodb": "7.5.0",
     "pino": "10.3.1",
+    "stripe": "18.5.0",
     "tldts": "7.4.9",
     "zod": "4.4.3"
   },

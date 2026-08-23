@@ -30,6 +30,12 @@ suite('Mongo monitoring reader', () => {
       },
       { key: { status: 1, failed_at: 1 }, name: 'notification_outbox_monitor_failed' },
     ]);
+    await db
+      .collection('stripe_webhook_events')
+      .createIndex(
+        { processing_status: 1, next_attempt_at: 1, received_at: 1 },
+        { name: 'stripe_webhook_events_worker_poll' },
+      );
   });
 
   afterAll(async () => {
@@ -66,6 +72,15 @@ suite('Mongo monitoring reader', () => {
       { status: 'failed', failed_at: new Date(now.valueOf() - 60 * 60_000) },
       { status: 'failed', failed_at: new Date(now.valueOf() - 25 * 60 * 60_000) },
     ]);
+    await db.collection('stripe_webhook_events').insertMany([
+      {
+        processing_status: 'pending',
+        next_attempt_at: now,
+        received_at: new Date(now.valueOf() - 45_000),
+      },
+      { processing_status: 'processing', received_at: new Date(now.valueOf() - 20_000) },
+      { processing_status: 'failed', received_at: new Date(now.valueOf() - 10_000) },
+    ]);
 
     const result = await new MongoMonitoringReader(db).read('staging', now);
 
@@ -82,6 +97,10 @@ suite('Mongo monitoring reader', () => {
       oldestProcessingAt: new Date(now.valueOf() - 60_000),
       terminalFailed15m: 1,
       terminalFailed24h: 2,
+      stripePendingCount: 1,
+      stripeOldestPendingAt: new Date(now.valueOf() - 45_000),
+      stripeProcessingCount: 1,
+      stripeFailedCount: 1,
     });
   });
 
