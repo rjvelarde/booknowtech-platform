@@ -116,6 +116,44 @@ export class ConnectStore {
     if (durableOperation) {
       if (durableOperation.request_fingerprint !== fingerprint)
         throw new Error('idempotency_conflict');
+      const legacyKey = `bnt_connect_${input.tenantPublicId}`;
+      if (
+        durableOperation.status === 'failed' &&
+        durableOperation.stripe_account_id === null &&
+        durableOperation.stripe_idempotency_key === legacyKey
+      ) {
+        const upgradedKey = `bnt_connect_v2_${input.tenantPublicId}`;
+        const session = this.db.client.startSession();
+        try {
+          await session.withTransaction(async () => {
+            const result = await this.db.collection('stripe_connect_operations').updateOne(
+              {
+                _id: durableOperation._id,
+                tenant_id: input.tenantId,
+                status: 'failed',
+                stripe_account_id: null,
+                stripe_idempotency_key: legacyKey,
+              },
+              { $set: { stripe_idempotency_key: upgradedKey } },
+              { session },
+            );
+            if (result.modifiedCount === 1)
+              await this.audit(
+                input,
+                'stripe_connect_account_idempotency_namespace_upgraded',
+                {},
+                session,
+              );
+          });
+        } finally {
+          await session.endSession();
+        }
+        const upgraded = await this.db
+          .collection('stripe_connect_operations')
+          .findOne({ _id: durableOperation._id });
+        if (!upgraded) throw new Error('account_operation_missing');
+        return { kind: 'operation' as const, operation: upgraded };
+      }
       return { kind: 'operation' as const, operation: durableOperation };
     }
     const operation = {
@@ -124,7 +162,7 @@ export class ConnectStore {
       request_id: input.requestId,
       operation_type: 'create_account',
       request_fingerprint: fingerprint,
-      stripe_idempotency_key: `bnt_connect_${input.tenantPublicId}`,
+      stripe_idempotency_key: `bnt_connect_v2_${input.tenantPublicId}`,
       status: 'pending',
       stripe_account_id: null,
       result_reference: null,

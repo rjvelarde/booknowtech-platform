@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { MongoClient, ObjectId } from 'mongodb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -80,7 +80,7 @@ suite('Stripe Connect persistence boundaries', () => {
   });
 
   it('reuses the original durable account operation across new HTTP request IDs', async () => {
-    const input = actor();
+    const input = actor(new ObjectId());
     const first = await store.beginAccountOperation(input);
     expect(first.kind).toBe('operation');
     if (first.kind !== 'operation') return;
@@ -99,6 +99,47 @@ suite('Stripe Connect persistence boundaries', () => {
       await db.collection('stripe_connect_operations').countDocuments({
         tenant_id: input.tenantId,
         operation_type: 'create_account',
+      }),
+    ).toBe(1);
+  });
+
+  it('upgrades a failed legacy account operation to the v2 idempotency namespace once', async () => {
+    const input = actor(new ObjectId());
+    const fingerprint = createHash('sha256')
+      .update(`${input.tenantPublicId}|express|US|${input.tenantCurrency}`)
+      .digest('hex');
+    const legacy = {
+      public_id: randomUUID(),
+      tenant_id: input.tenantId,
+      request_id: randomUUID(),
+      operation_type: 'create_account',
+      request_fingerprint: fingerprint,
+      stripe_idempotency_key: `bnt_connect_${input.tenantPublicId}`,
+      status: 'failed',
+      stripe_account_id: null,
+      result_reference: null,
+      failure_category: 'stripe_request_failed',
+      created_by_user_id: input.userId,
+      created_at: new Date(),
+      completed_at: new Date(),
+    };
+    await db.collection('stripe_connect_operations').insertOne(legacy);
+
+    const first = await store.beginAccountOperation(input);
+    const retry = await store.beginAccountOperation({ ...input, requestId: randomUUID() });
+
+    expect(first).toMatchObject({
+      kind: 'operation',
+      operation: { stripe_idempotency_key: `bnt_connect_v2_${input.tenantPublicId}` },
+    });
+    expect(retry).toMatchObject({
+      kind: 'operation',
+      operation: { stripe_idempotency_key: `bnt_connect_v2_${input.tenantPublicId}` },
+    });
+    expect(
+      await db.collection('audit_logs').countDocuments({
+        tenant_id: input.tenantId,
+        event: 'stripe_connect_account_idempotency_namespace_upgraded',
       }),
     ).toBe(1);
   });
