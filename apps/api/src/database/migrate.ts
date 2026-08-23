@@ -85,6 +85,124 @@ const validators: Record<string, Document> = {
       },
     },
   },
+  tenant_booking_hostname_operations: {
+    $jsonSchema: {
+      bsonType: 'object',
+      additionalProperties: false,
+      required: [
+        '_id',
+        'public_id',
+        'request_id',
+        'operation_type',
+        'request_fingerprint',
+        'operator_id',
+        'reason',
+        'environment',
+        'hostname_public_id',
+        'tenant_public_id',
+        'normalized_hostname',
+        'status',
+        'previous_state',
+        'new_state',
+        'failure_category',
+        'result',
+        'created_at',
+        'completed_at',
+      ],
+      properties: {
+        _id: { bsonType: 'objectId' },
+        public_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        request_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        operation_type: {
+          enum: [
+            'issue_challenge',
+            'verify',
+            'begin_provisioning',
+            'activate',
+            'deactivate',
+            'begin_removal',
+            'complete_removal',
+          ],
+        },
+        request_fingerprint: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+        operator_id: {
+          bsonType: 'string',
+          minLength: 3,
+          maxLength: 120,
+          pattern: '^[a-z0-9][a-z0-9._@+-]*$',
+        },
+        reason: { bsonType: 'string', minLength: 10, maxLength: 500 },
+        environment: { enum: ['staging', 'production'] },
+        hostname_public_id: { bsonType: ['string', 'null'], pattern: UUID_PATTERN },
+        tenant_public_id: { bsonType: ['string', 'null'], pattern: UUID_PATTERN },
+        normalized_hostname: {
+          bsonType: 'string',
+          minLength: 4,
+          maxLength: 253,
+          pattern: `^${HOSTNAME_PATTERN}$`,
+        },
+        status: { enum: ['completed', 'refused', 'failed'] },
+        previous_state: {
+          enum: [
+            null,
+            'pending_verification',
+            'verified',
+            'provisioning',
+            'active',
+            'failed',
+            'disabled',
+            'removing',
+            'removed',
+          ],
+        },
+        new_state: {
+          enum: [
+            null,
+            'pending_verification',
+            'verified',
+            'provisioning',
+            'active',
+            'failed',
+            'disabled',
+            'removing',
+            'removed',
+          ],
+        },
+        failure_category: {
+          bsonType: ['string', 'null'],
+          maxLength: 80,
+          pattern: '^[a-z0-9][a-z0-9_]*$',
+        },
+        result: {
+          bsonType: 'object',
+          additionalProperties: false,
+          required: [
+            'txt_record_name',
+            'operator_attested_railway_mapping_reference',
+            'operator_attested_railway_status',
+            'operator_attested_tls_status',
+          ],
+          properties: {
+            txt_record_name: { bsonType: ['string', 'null'], maxLength: 253 },
+            operator_attested_railway_mapping_reference: {
+              bsonType: ['string', 'null'],
+              maxLength: 200,
+            },
+            operator_attested_railway_status: {
+              bsonType: ['string', 'null'],
+              maxLength: 80,
+            },
+            operator_attested_tls_status: {
+              bsonType: ['string', 'null'],
+              maxLength: 80,
+            },
+          },
+        },
+        created_at: { bsonType: 'date' },
+        completed_at: { bsonType: 'date' },
+      },
+    },
+  },
   service_heartbeats: {
     $jsonSchema: {
       bsonType: 'object',
@@ -1209,6 +1327,30 @@ export async function migrateDatabase(db: Db): Promise<void> {
       name: 'tenant_booking_hostnames_one_active_per_tenant',
       unique: true,
       partialFilterExpression: { status: 'active' },
+    },
+  ]);
+  await db.collection('tenant_booking_hostname_operations').createIndexes([
+    {
+      key: { public_id: 1 },
+      name: 'tenant_booking_hostname_operations_public_id_unique',
+      unique: true,
+    },
+    {
+      key: { request_id: 1 },
+      name: 'tenant_booking_hostname_operations_request_id_unique',
+      unique: true,
+    },
+    {
+      key: { hostname_public_id: 1, created_at: -1 },
+      name: 'tenant_booking_hostname_operations_hostname_created',
+    },
+    {
+      key: { tenant_public_id: 1, environment: 1, created_at: -1 },
+      name: 'tenant_booking_hostname_operations_tenant_environment_created',
+    },
+    {
+      key: { status: 1, created_at: 1 },
+      name: 'tenant_booking_hostname_operations_status_created',
     },
   ]);
   await db.collection('users').createIndexes([
