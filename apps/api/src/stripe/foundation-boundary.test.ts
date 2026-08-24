@@ -1,24 +1,29 @@
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import { dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
-describe('PR 14A money-movement boundary', () => {
-  it('does not add a ledger collection or Stripe payment execution calls', () => {
-    const files = [
-      'apps/api/src/stripe/adapter.ts',
-      'apps/api/src/stripe/connect-service.ts',
-      'apps/api/src/stripe/connect-store.ts',
-      'apps/api/src/stripe/webhook-store.ts',
-      'apps/worker/src/stripe-webhook-worker.ts',
-      'apps/api/src/database/migrate.ts',
-    ];
+describe('PR 14B.1 money-movement boundary', () => {
+  it('permits financial snapshots but no Stripe execution call', () => {
+    const files = ['apps/api/src', 'apps/worker/src', 'apps/frontend/src'].flatMap((directory) =>
+      sourceFiles(resolve(root, directory)),
+    );
     const source = files.map((file) => readFileSync(resolve(root, file), 'utf8')).join('\n');
-    expect(source).not.toMatch(/payment_ledger_entries/u);
     expect(source).not.toMatch(
-      /paymentIntents\.|setupIntents\.|charges\.create|refunds\.create|subscriptions\.create|invoices\.|checkout\.sessions|transfers\.create|paymentMethods\.|application_fee|transfer_data|on_behalf_of/u,
+      /paymentIntents\.|setupIntents\.|charges\.create|refunds\.|subscriptions\.create|invoices\.(?:create|pay)|checkout\.sessions|transfers\.create|paymentMethods\.|\.capture\(|@stripe\/stripe-js|PaymentElement|payment_intent\.(?:succeeded|payment_failed|processing|canceled)/u,
     );
   });
 });
+
+function sourceFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = resolve(directory, entry.name);
+    if (entry.isDirectory()) return sourceFiles(path);
+    return ['.ts', '.tsx', '.js', '.jsx'].includes(extname(entry.name)) &&
+      entry.name !== 'foundation-boundary.test.ts'
+      ? [path]
+      : [];
+  });
+}

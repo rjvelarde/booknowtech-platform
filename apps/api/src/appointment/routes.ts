@@ -7,6 +7,7 @@ import {
   type AppointmentDocument,
   type AppointmentStatus,
   type CustomerAddressDocument,
+  type LifecycleAppointmentStatus,
   type VerifiedAdminContext,
 } from '../admin/store.js';
 import { authenticateAdminMutation, authenticateAdminRequest } from '../auth/routes.js';
@@ -514,7 +515,7 @@ async function transitionRoute(
   environment: Environment,
   store: AdminStore,
   hostResolver: TenantHostResolver,
-  status: Exclude<AppointmentStatus, 'scheduled'>,
+  status: Exclude<LifecycleAppointmentStatus, 'scheduled'>,
   body: LifecycleBody | CancelBody,
   event = 'appointment_cancelled',
 ) {
@@ -811,8 +812,8 @@ function nextLocalDate(value: string) {
 function parseStatuses(value: string | undefined): AppointmentStatus[] | undefined {
   if (!value) return undefined;
   const statuses = [...new Set(value.split(',').filter(Boolean))];
-  return statuses.every((item): item is AppointmentStatus =>
-    APPOINTMENT_STATUSES.includes(item as AppointmentStatus),
+  return statuses.every((item): item is (typeof APPOINTMENT_STATUSES)[number] =>
+    APPOINTMENT_STATUSES.includes(item as (typeof APPOINTMENT_STATUSES)[number]),
   )
     ? statuses
     : undefined;

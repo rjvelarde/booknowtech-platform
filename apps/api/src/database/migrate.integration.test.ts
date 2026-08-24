@@ -38,7 +38,7 @@ suite('administrative foundation migration', () => {
     });
   }, 15_000);
 
-  it('creates only the approved PR 14A Connect collections and tenant/idempotency indexes', async () => {
+  it('preserves PR 14A and adds only the approved PR 14B.1 financial foundation', async () => {
     await migrateDatabase(db);
     await migrateDatabase(db);
     const names = (await db.listCollections({}, { nameOnly: true }).toArray()).map(
@@ -50,9 +50,14 @@ suite('administrative foundation migration', () => {
         'tenant_stripe_accounts',
         'stripe_connect_operations',
         'stripe_webhook_events',
+        'tenant_booking_fee_versions',
+        'tenant_booking_fee_active',
+        'service_payment_configuration_versions',
+        'service_payment_configuration_active',
+        'payment_attempts',
+        'payment_ledger_entries',
       ]),
     );
-    expect(names).not.toContain('payment_ledger_entries');
     expect(
       (await db.collection('booknowtech_connect_terms_acceptances').indexes()).map(
         ({ name }) => name,
