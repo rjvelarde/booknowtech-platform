@@ -292,7 +292,14 @@ export interface CustomerDocument {
 }
 
 export const APPOINTMENT_STATUSES = ['scheduled', 'completed', 'cancelled', 'no_show'] as const;
-export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
+export type LifecycleAppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
+export const PROVISIONAL_APPOINTMENT_STATUSES = [
+  'payment_pending',
+  'payment_failed',
+  'payment_expired',
+] as const;
+export type AppointmentStatus =
+  LifecycleAppointmentStatus | (typeof PROVISIONAL_APPOINTMENT_STATUSES)[number];
 
 export interface AppointmentSnapshot {
   customer_display_name: string;
@@ -2010,7 +2017,9 @@ export class AdminStore {
     return this.appointments
       .find({
         tenant_id: input.tenantId,
-        ...(input.statuses?.length ? { status: { $in: input.statuses } } : {}),
+        status: {
+          $in: input.statuses?.length ? input.statuses : [...APPOINTMENT_STATUSES],
+        },
         ...(input.providerId ? { provider_id: input.providerId } : {}),
         ...(input.serviceId ? { service_id: input.serviceId } : {}),
         ...(input.customerIds ? { customer_id: { $in: input.customerIds } } : {}),
@@ -2050,7 +2059,7 @@ export class AdminStore {
         {
           tenant_id: input.tenantId,
           provider_id: input.providerId,
-          status: 'scheduled',
+          status: { $in: ['scheduled', 'payment_pending'] },
           blocked_starts_at: { $lt: input.startsBefore },
           blocked_ends_at: { $gt: input.endsAfter },
           ...(input.excludeAppointmentId ? { _id: { $ne: input.excludeAppointmentId } } : {}),
@@ -2179,7 +2188,7 @@ export class AdminStore {
     tenantId: ObjectId;
     userId: ObjectId | null;
     expectedVersion: number;
-    status: Exclude<AppointmentStatus, 'scheduled'>;
+    status: Exclude<LifecycleAppointmentStatus, 'scheduled'>;
     reason?: AppointmentDocument['cancellation_reason'];
     detail?: string | null;
     session: ClientSession;
