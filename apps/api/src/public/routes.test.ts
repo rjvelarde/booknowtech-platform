@@ -266,7 +266,7 @@ describe('public booking discovery', () => {
   });
 
   it('recovers only with the host-scoped HttpOnly credential and reveals no state otherwise', async () => {
-    const recover = vi.fn().mockResolvedValue(paymentAttemptView());
+    const recover = vi.fn();
     const paidBooking = { recover } as unknown as PublicPaidBookingOrchestrator;
     const { app, store, tenant } = await testApp(testEnvironment, paidBooking);
     vi.spyOn(store, 'getPublicTenantBySlug').mockResolvedValue(tenant);
@@ -280,6 +280,20 @@ describe('public booking discovery', () => {
     expect(missing.json().error.code).toBe('payment_attempt_not_found');
     expect(recover).not.toHaveBeenCalled();
 
+    recover.mockRejectedValueOnce({ status: 404, code: 'payment_attempt_not_found' });
+    const invalid = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/payment-attempts/11111111-1111-4111-8111-111111111111',
+      headers: {
+        host: 'brazilian-wax.booknowtech.com',
+        cookie: '__Secure-bnt_checkout_recovery=invalid_recovery_value',
+      },
+    });
+    expect(invalid.statusCode).toBe(404);
+    expect(invalid.json().error.code).toBe('payment_attempt_not_found');
+
+    recover.mockResolvedValueOnce(paymentAttemptView());
+
     const response = await app.inject({
       method: 'GET',
       url: '/api/v1/public/payment-attempts/11111111-1111-4111-8111-111111111111',
@@ -290,7 +304,7 @@ describe('public booking discovery', () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.headers['cache-control']).toBe('no-store');
-    expect(recover).toHaveBeenCalledWith({
+    expect(recover).toHaveBeenLastCalledWith({
       tenant,
       attemptPublicId: '11111111-1111-4111-8111-111111111111',
       hostname: 'brazilian-wax.booknowtech.com',

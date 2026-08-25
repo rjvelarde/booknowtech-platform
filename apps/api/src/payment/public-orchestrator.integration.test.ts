@@ -327,6 +327,14 @@ suite('PR 14B.2 paid public-booking transaction', () => {
     await expect(
       orchestrator.recover({
         tenant,
+        attemptPublicId: randomUUID(),
+        hostname: input.hostname,
+        token: credential.token,
+      }),
+    ).rejects.toMatchObject({ status: 404, code: 'payment_attempt_not_found' });
+    await expect(
+      orchestrator.recover({
+        tenant,
         attemptPublicId: created.payment_attempt_public_id,
         hostname: 'unrelated.example.test',
         token: credential.token,
@@ -362,6 +370,78 @@ suite('PR 14B.2 paid public-booking transaction', () => {
       client_secret: null,
       continuation_allowed: false,
     });
+
+    await db
+      .collection('payment_attempts')
+      .updateOne(
+        { public_id: created.payment_attempt_public_id },
+        { $set: { state: 'failed_recoverable', expires_at: new Date(Date.now() + 15 * 60_000) } },
+      );
+    await expect(
+      orchestrator.recover({
+        tenant,
+        attemptPublicId: created.payment_attempt_public_id,
+        hostname: input.hostname,
+        token: credential.token,
+      }),
+    ).resolves.toMatchObject({
+      payment_status: 'payment_method_required',
+      client_secret: 'pi_client_secret_return_only',
+      continuation_allowed: true,
+    });
+
+    for (const [state, paymentStatus] of [
+      ['succeeded_unfinalized', 'temporary_recovery'],
+      ['manual_review', 'manual_review'],
+      ['stale', 'terminal_failure'],
+      ['expired', 'expired'],
+    ] as const) {
+      await db
+        .collection('payment_attempts')
+        .updateOne({ public_id: created.payment_attempt_public_id }, { $set: { state } });
+      await expect(
+        orchestrator.recover({
+          tenant,
+          attemptPublicId: created.payment_attempt_public_id,
+          hostname: input.hostname,
+          token: credential.token,
+        }),
+      ).resolves.toMatchObject({
+        payment_status: paymentStatus,
+        client_secret: null,
+        continuation_allowed: false,
+      });
+    }
+
+    await db
+      .collection('payment_attempts')
+      .updateOne(
+        { public_id: created.payment_attempt_public_id },
+        { $set: { state: 'requires_payment_method', expires_at: new Date(Date.now() - 1_000) } },
+      );
+    await expect(
+      orchestrator.recover({
+        tenant,
+        attemptPublicId: created.payment_attempt_public_id,
+        hostname: input.hostname,
+        token: credential.token,
+      }),
+    ).resolves.toMatchObject({ client_secret: null, continuation_allowed: false });
+
+    await db
+      .collection('payment_attempts')
+      .updateOne(
+        { public_id: created.payment_attempt_public_id },
+        { $set: { recovery_expires_at: new Date(Date.now() - 1_000) } },
+      );
+    await expect(
+      orchestrator.recover({
+        tenant,
+        attemptPublicId: created.payment_attempt_public_id,
+        hostname: input.hostname,
+        token: credential.token,
+      }),
+    ).rejects.toMatchObject({ status: 404, code: 'payment_attempt_not_found' });
   });
 
   it('fails closed before local writes or Stripe when execution is disabled', async () => {
