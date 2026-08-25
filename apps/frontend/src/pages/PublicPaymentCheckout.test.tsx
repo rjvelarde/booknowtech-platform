@@ -19,8 +19,34 @@ vi.mock('@stripe/react-stripe-js', () => ({
 describe('PublicPaymentCheckout', () => {
   afterEach(() => {
     cleanup();
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
+
+  it.each([
+    [10000, 2500, 125, 2625, 7500],
+    [10000, 10000, 125, 10125, 0],
+    [50000, 10000, 100, 10100, 40000],
+  ])(
+    'formats the accepted backend snapshot example %# without recalculating it',
+    (service, providerDue, fee, total, remaining) => {
+      renderCheckout(
+        attempt({
+          amounts: {
+            service_price_minor: service,
+            provider_amount_due_now_minor: providerDue,
+            booknowtech_fee_minor: fee,
+            customer_total_due_now_minor: total,
+            application_fee_amount_minor: fee,
+            remaining_service_balance_minor: remaining,
+            currency: 'USD',
+          },
+        }),
+      );
+      for (const value of [service, providerDue, fee, total, remaining])
+        expect(screen.getAllByText(money(value)).length).toBeGreaterThan(0);
+    },
+  );
 
   it('renders the backend amount snapshot and never claims a pending attempt is booked', () => {
     renderCheckout(attempt());
@@ -68,6 +94,16 @@ describe('PublicPaymentCheckout', () => {
     );
     expect(screen.getByRole('heading', { name: 'Appointment confirmed' })).toBeInTheDocument();
   });
+
+  it('uses a bounded decline message and moves focus to the accessible error', async () => {
+    confirmPayment.mockResolvedValueOnce({ error: { message: 'raw processor detail' } });
+    renderCheckout(attempt());
+    fireEvent.click(screen.getByRole('button', { name: 'Pay $21.25' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Your card could not be confirmed');
+    expect(alert).not.toHaveTextContent('raw processor detail');
+    expect(alert).toHaveFocus();
+  });
 });
 
 function renderCheckout(value: PublicPaymentAttemptView, onUpdate = vi.fn()) {
@@ -81,6 +117,10 @@ function renderCheckout(value: PublicPaymentAttemptView, onUpdate = vi.fn()) {
       onRestart={vi.fn()}
     />,
   );
+}
+
+function money(minor: number) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(minor / 100);
 }
 
 function attempt(overrides: Partial<PublicPaymentAttemptView> = {}): PublicPaymentAttemptView {

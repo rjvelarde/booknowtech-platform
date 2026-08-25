@@ -7,7 +7,7 @@ This runbook covers only the isolated Caddy security-header task. It does not ch
 ## Enforced policy
 
 ```text
-Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'; connect-src 'self' https://api.stripe.com https://r.stripe.com; frame-src https://js.stripe.com https://hooks.stripe.com; manifest-src 'self'; upgrade-insecure-requests; block-all-mixed-content
+Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://js.stripe.com https://*.js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'; connect-src 'self' https://api.stripe.com; frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com; manifest-src 'self'; upgrade-insecure-requests; block-all-mixed-content
 Strict-Transport-Security: max-age=300
 X-Content-Type-Options: nosniff
 Referrer-Policy: strict-origin-when-cross-origin

@@ -1,6 +1,6 @@
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   ApiError,
@@ -23,6 +23,7 @@ export function PublicPaymentCheckout({
   onUpdate: (attempt: PublicPaymentAttemptView) => void;
   onRestart: (message: string) => void;
 }) {
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const stripePromise = useMemo(
     () =>
       attempt.stripe_account
@@ -55,9 +56,15 @@ export function PublicPaymentCheckout({
         title="Payment is pending"
         message="Your time is provisionally held, but the appointment is not confirmed yet. Check again for the authoritative booking status."
         action="Check status"
-        onAction={() =>
-          void refreshAttempt(attempt, requestBody, idempotencyKey, onUpdate, onRestart)
-        }
+        error={refreshError}
+        onAction={() => {
+          setRefreshError(null);
+          void refreshAttempt(attempt, requestBody, idempotencyKey, onUpdate, onRestart).catch(() =>
+            setRefreshError(
+              'Payment status could not be checked. Do not submit another payment; try again shortly.',
+            ),
+          );
+        }}
       />
     );
   if (!attempt.client_secret || !stripePromise)
@@ -66,9 +73,15 @@ export function PublicPaymentCheckout({
         title="Checkout temporarily unavailable"
         message="Your appointment is not confirmed. Try checking the payment status again."
         action="Try again"
-        onAction={() =>
-          void refreshAttempt(attempt, requestBody, idempotencyKey, onUpdate, onRestart)
-        }
+        error={refreshError}
+        onAction={() => {
+          setRefreshError(null);
+          void refreshAttempt(attempt, requestBody, idempotencyKey, onUpdate, onRestart).catch(() =>
+            setRefreshError(
+              'Payment status could not be checked. Do not submit another payment; try again shortly.',
+            ),
+          );
+        }}
       />
     );
 
@@ -117,6 +130,11 @@ function PaymentForm({
       ? 'Your card was not accepted. You can retry this same payment while the hold is active.'
       : null,
   );
+  const errorRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (error) errorRef.current?.focus();
+  }, [error]);
 
   return (
     <form
@@ -129,7 +147,7 @@ function PaymentForm({
           .confirmPayment({ elements, redirect: 'if_required' })
           .then(async ({ error: stripeError }) => {
             if (stripeError) {
-              setError(stripeError.message ?? 'Your payment could not be completed. Try again.');
+              setError('Your card could not be confirmed. Review the card details and try again.');
               return;
             }
             await refreshAttempt(attempt, requestBody, idempotencyKey, onUpdate, onRestart);
@@ -142,7 +160,7 @@ function PaymentForm({
     >
       <PaymentElement options={{ paymentMethodOrder: ['card'] }} />
       {error ? (
-        <p className="form-error" role="alert" tabIndex={-1}>
+        <p ref={errorRef} className="form-error" role="alert" tabIndex={-1}>
           {error}
         </p>
       ) : null}
@@ -209,11 +227,13 @@ function CheckoutStatus({
   message,
   action,
   onAction,
+  error,
 }: {
   title: string;
   message: string;
   action?: string;
   onAction?: () => void;
+  error?: string | null;
 }) {
   return (
     <section
@@ -222,6 +242,11 @@ function CheckoutStatus({
     >
       <h2 id="payment-status-title">{title}</h2>
       <p>{message}</p>
+      {error ? (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      ) : null}
       {action && onAction ? (
         <button type="button" onClick={onAction}>
           {action}
