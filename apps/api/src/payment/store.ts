@@ -514,13 +514,18 @@ export class PaymentFoundationStore {
     return { appointment, customer };
   }
 
-  public getSnapshottedStripeAccount(tenantId: ObjectId, associationPublicId: string) {
-    return this.db
-      .collection<TenantStripePaymentAccountDocument>('tenant_stripe_accounts')
-      .findOne({
+  public getSnapshottedStripeAccount(
+    tenantId: ObjectId,
+    associationPublicId: string,
+    session?: ClientSession,
+  ) {
+    return this.db.collection<TenantStripePaymentAccountDocument>('tenant_stripe_accounts').findOne(
+      {
         tenant_id: tenantId,
         public_id: associationPublicId,
-      });
+      },
+      session ? { session } : undefined,
+    );
   }
 
   public async executionSnapshot(tenantId: ObjectId, serviceId: ObjectId, session?: ClientSession) {

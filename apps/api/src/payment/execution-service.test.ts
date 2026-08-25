@@ -116,6 +116,77 @@ describe('PR 14B.2 PaymentIntent execution recovery', () => {
       stripe.createDirectChargePaymentIntent.mock.calls[1]?.[0].idempotencyKey,
     );
   });
+
+  it('retries the immutable request after failure before Stripe creation', async () => {
+    const attempt = attemptFixture();
+    const processing = { ...attempt, state: 'stripe_creation_processing' as const };
+    const store = {
+      transitionAttempt: vi.fn().mockResolvedValue({ attempt: processing }),
+      linkPaymentIntent: vi.fn().mockResolvedValue({
+        ...processing,
+        state: 'requires_payment_method',
+        stripe_payment_intent_id: 'pi_afterretry',
+      }),
+    };
+    const stripe = {
+      createDirectChargePaymentIntent: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('stripe_unreachable_before_creation'))
+        .mockResolvedValueOnce({
+          id: 'pi_afterretry',
+          status: 'requires_payment_method',
+          clientSecret: 'pi_secret_afterretry',
+          amount: 2_625,
+          applicationFeeAmount: 125,
+          currency: 'usd',
+        }),
+      retrievePaymentIntent: vi.fn(),
+      cancelPaymentIntent: vi.fn(),
+    };
+    const service = new PaymentExecutionService(store as unknown as PaymentFoundationStore, stripe);
+    const input = executionInput(attempt);
+
+    await expect(service.ensurePaymentIntent(input)).rejects.toThrow(
+      'stripe_unreachable_before_creation',
+    );
+    await service.ensurePaymentIntent(input);
+
+    expect(stripe.createDirectChargePaymentIntent).toHaveBeenCalledTimes(2);
+    expect(stripe.createDirectChargePaymentIntent.mock.calls[0]?.[0]).toEqual(
+      stripe.createDirectChargePaymentIntent.mock.calls[1]?.[0],
+    );
+    expect(store.linkPaymentIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps synchronous success unfinalized and does not retrieve again on replay', async () => {
+    const attempt = {
+      ...attemptFixture(),
+      state: 'succeeded_unfinalized' as const,
+      stripe_payment_intent_id: 'pi_succeeded',
+      stripe_payment_intent_status: 'succeeded',
+    };
+    const store = {
+      transitionAttempt: vi.fn(),
+      linkPaymentIntent: vi.fn(),
+    };
+    const stripe = {
+      createDirectChargePaymentIntent: vi.fn(),
+      retrievePaymentIntent: vi.fn(),
+      cancelPaymentIntent: vi.fn(),
+    };
+    const service = new PaymentExecutionService(store as unknown as PaymentFoundationStore, stripe);
+
+    const response = await service.ensurePaymentIntent(executionInput(attempt));
+
+    expect(response).toMatchObject({
+      appointment_status: 'payment_pending',
+      payment_status: 'temporary_recovery',
+      client_secret: null,
+    });
+    expect(stripe.createDirectChargePaymentIntent).not.toHaveBeenCalled();
+    expect(stripe.retrievePaymentIntent).not.toHaveBeenCalled();
+    expect(store.linkPaymentIntent).not.toHaveBeenCalled();
+  });
 });
 
 function executionInput(attempt: PaymentAttemptDocument) {

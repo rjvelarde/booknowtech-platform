@@ -24,6 +24,7 @@ suite('PR 14B.2 paid public-booking transaction', () => {
   const serviceId = new ObjectId();
   const providerId = new ObjectId();
   const assignmentId = new ObjectId();
+  const assignmentPublicId = randomUUID();
   const actorId = new ObjectId();
   const tenantPublicId = randomUUID();
   const servicePublicId = randomUUID();
@@ -68,6 +69,7 @@ suite('PR 14B.2 paid public-booking transaction', () => {
   } as never;
   const assignment = {
     _id: assignmentId,
+    public_id: assignmentPublicId,
     tenant_id: tenantId,
     provider_id: providerId,
     service_id: serviceId,
@@ -76,22 +78,22 @@ suite('PR 14B.2 paid public-booking transaction', () => {
     buffer_after_minutes: 0,
   } as never;
   const stripe = {
-    createDirectChargePaymentIntent: vi.fn().mockResolvedValue({
-      id: 'pi_logicalonce',
+    createDirectChargePaymentIntent: vi.fn().mockImplementation((input) => ({
+      id: `pi_${input.metadata.paymentAttemptPublicId.replaceAll('-', '')}`,
       status: 'requires_payment_method',
       clientSecret: 'pi_client_secret_return_only',
       amount: 2_625,
       applicationFeeAmount: 125,
       currency: 'usd',
-    }),
-    retrievePaymentIntent: vi.fn().mockResolvedValue({
-      id: 'pi_logicalonce',
+    })),
+    retrievePaymentIntent: vi.fn().mockImplementation((input) => ({
+      id: input.paymentIntentId,
       status: 'requires_payment_method',
       clientSecret: 'pi_client_secret_return_only',
       amount: 2_625,
       applicationFeeAmount: 125,
       currency: 'usd',
-    }),
+    })),
     cancelPaymentIntent: vi.fn(),
   };
   const environment = {
@@ -292,6 +294,139 @@ suite('PR 14B.2 paid public-booking transaction', () => {
     ).rejects.toMatchObject({ status: 503, code: 'payment_execution_disabled' });
     expect(await db.collection('payment_attempts').countDocuments()).toBe(before);
     expect(stripe.createDirectChargePaymentIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it('converges concurrent requests on one local graph and one Stripe idempotency key', async () => {
+    const beforeAppointments = await db.collection('appointments').countDocuments();
+    const beforeAttempts = await db.collection('payment_attempts').countDocuments();
+    const beforeCreates = stripe.createDirectChargePaymentIntent.mock.calls.length;
+    const orchestrator = new PublicPaidBookingOrchestrator(
+      environment,
+      admin,
+      payments,
+      new PaymentExecutionService(payments, stripe),
+    );
+    const input = {
+      tenant,
+      body: bookingBody(),
+      idempotencyKey: randomUUID(),
+      requestId: randomUUID(),
+      correlationId: randomUUID(),
+      ipAddress: '192.0.2.10',
+      initialService: service,
+      initialProvider: provider,
+      initialAssignment: assignment,
+    };
+
+    const results = await Promise.all([orchestrator.create(input), orchestrator.create(input)]);
+
+    expect(results[0]?.payment_attempt_public_id).toBe(results[1]?.payment_attempt_public_id);
+    expect(await db.collection('appointments').countDocuments()).toBe(beforeAppointments + 1);
+    expect(await db.collection('payment_attempts').countDocuments()).toBe(beforeAttempts + 1);
+    const createCalls = stripe.createDirectChargePaymentIntent.mock.calls.slice(beforeCreates);
+    expect(createCalls.length).toBeGreaterThanOrEqual(1);
+    expect(new Set(createCalls.map(([call]) => String(call.idempotencyKey)))).toHaveLength(1);
+  });
+
+  it('stales on connected-account reassociation and cancels in the snapshotted account', async () => {
+    const orchestrator = new PublicPaidBookingOrchestrator(
+      environment,
+      admin,
+      payments,
+      new PaymentExecutionService(payments, stripe),
+    );
+    const input = {
+      tenant,
+      body: bookingBody(),
+      idempotencyKey: randomUUID(),
+      requestId: randomUUID(),
+      correlationId: randomUUID(),
+      ipAddress: '192.0.2.10',
+      initialService: service,
+      initialProvider: provider,
+      initialAssignment: assignment,
+    };
+    const created = await orchestrator.create(input);
+    const oldAccount = await db.collection('tenant_stripe_accounts').findOne({
+      tenant_id: tenantId,
+      active: true,
+    });
+    expect(oldAccount).toBeTruthy();
+    await db
+      .collection('tenant_stripe_accounts')
+      .updateOne(
+        { _id: oldAccount!._id },
+        { $set: { active: false, updated_at: new Date(), version: 2 } },
+      );
+    await db.collection('tenant_stripe_accounts').insertOne({
+      ...oldAccount,
+      _id: new ObjectId(),
+      public_id: randomUUID(),
+      stripe_account_id: 'acct_reassociated',
+      active: true,
+      created_at: new Date(),
+      updated_at: new Date(),
+      version: 1,
+    });
+
+    await expect(orchestrator.create(input)).rejects.toMatchObject({
+      status: 409,
+      code: 'payment_attempt_stale',
+    });
+    await vi.waitFor(() =>
+      expect(stripe.cancelPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connectedAccountId: 'acct_serveronly',
+          paymentIntentId: expect.stringContaining('pi_'),
+        }),
+      ),
+    );
+    expect(
+      await db.collection('payment_attempts').findOne({
+        public_id: created.payment_attempt_public_id,
+      }),
+    ).toMatchObject({ state: 'stale', slot_released: true });
+  });
+
+  it('stales an existing attempt when approved payment terms change', async () => {
+    const orchestrator = new PublicPaidBookingOrchestrator(
+      environment,
+      admin,
+      payments,
+      new PaymentExecutionService(payments, stripe),
+    );
+    const input = {
+      tenant,
+      body: bookingBody(),
+      idempotencyKey: randomUUID(),
+      requestId: randomUUID(),
+      correlationId: randomUUID(),
+      ipAddress: '192.0.2.10',
+      initialService: service,
+      initialProvider: provider,
+      initialAssignment: assignment,
+    };
+    const created = await orchestrator.create(input);
+    const changedTerms = new PublicPaidBookingOrchestrator(
+      {
+        ...environment,
+        BOOKNOWTECH_PAYMENT_TERMS_VERSION: 'payments-v2',
+        BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256: 'c'.repeat(64),
+      },
+      admin,
+      payments,
+      new PaymentExecutionService(payments, stripe),
+    );
+
+    await expect(changedTerms.create(input)).rejects.toMatchObject({
+      status: 409,
+      code: 'payment_attempt_stale',
+    });
+    expect(
+      await db.collection('payment_attempts').findOne({
+        public_id: created.payment_attempt_public_id,
+      }),
+    ).toMatchObject({ state: 'stale', slot_released: true });
   });
 
   function bookingBody() {

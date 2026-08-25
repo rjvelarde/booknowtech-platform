@@ -47,9 +47,14 @@ export class PaymentExecutionService {
     attempt: PaymentAttemptDocument;
   }): Promise<PublicPaymentAttemptResponse> {
     if (
-      ['failed_terminal', 'expired', 'stale', 'manual_review', 'succeeded'].includes(
-        input.attempt.state,
-      )
+      [
+        'failed_terminal',
+        'expired',
+        'stale',
+        'manual_review',
+        'succeeded_unfinalized',
+        'succeeded',
+      ].includes(input.attempt.state)
     )
       return publicPaymentAttemptResponse({
         attempt: input.attempt,

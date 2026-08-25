@@ -146,8 +146,13 @@ export interface PaymentAttemptFingerprintInput {
   tenantPublicId: string;
   servicePublicId: string;
   providerPublicId: string;
+  providerServiceAssignmentPublicId: string;
   startsAt: Date;
   durationMinutes: number;
+  slotCadenceMinutes: number;
+  bufferBeforeMinutes: number;
+  bufferAfterMinutes: number;
+  deliveryMode: string;
   customerInputHash: string;
   servicePriceMinor: number;
   paymentMode: 'fixed_deposit' | 'full';
@@ -178,9 +183,23 @@ export function paymentAttemptFingerprint(input: PaymentAttemptFingerprintInput)
     if (!uuidPattern.test(value)) throw new Error(code);
   if (input.depositVersionPublicId !== null && !uuidPattern.test(input.depositVersionPublicId))
     throw new Error('invalid_deposit_version_public_id');
+  if (
+    !input.providerServiceAssignmentPublicId ||
+    input.providerServiceAssignmentPublicId.length > 100
+  )
+    throw new Error('invalid_assignment_public_id');
   if (!Number.isFinite(input.startsAt.valueOf())) throw new Error('invalid_starts_at');
   if (!Number.isSafeInteger(input.durationMinutes) || input.durationMinutes <= 0)
     throw new Error('invalid_duration_minutes');
+  if (!Number.isSafeInteger(input.slotCadenceMinutes) || input.slotCadenceMinutes <= 0)
+    throw new Error('invalid_slot_cadence_minutes');
+  for (const [value, code] of [
+    [input.bufferBeforeMinutes, 'invalid_buffer_before_minutes'],
+    [input.bufferAfterMinutes, 'invalid_buffer_after_minutes'],
+  ] as const)
+    if (!Number.isSafeInteger(value) || value < 0) throw new Error(code);
+  if (!['provider_location', 'customer_location', 'virtual'].includes(input.deliveryMode))
+    throw new Error('invalid_delivery_mode');
   assertMoney(input.servicePriceMinor, 'service_price_minor');
   assertMoney(input.feeAmountMinor, 'fee_amount_minor');
   if (!Number.isSafeInteger(input.feeVersion) || input.feeVersion < 1)
@@ -198,12 +217,17 @@ export function paymentAttemptFingerprint(input: PaymentAttemptFingerprintInput)
   assertHash(input.customerInputHash, 'invalid_customer_input_hash');
   assertHash(input.paymentTermsDocumentSha256, 'invalid_payment_terms_hash');
   const canonical = JSON.stringify({
-    schema: 1,
+    schema: 2,
     tenant_public_id: input.tenantPublicId,
     service_public_id: input.servicePublicId,
     provider_public_id: input.providerPublicId,
+    provider_service_assignment_public_id: input.providerServiceAssignmentPublicId,
     starts_at: input.startsAt.toISOString(),
     duration_minutes: input.durationMinutes,
+    slot_cadence_minutes: input.slotCadenceMinutes,
+    buffer_before_minutes: input.bufferBeforeMinutes,
+    buffer_after_minutes: input.bufferAfterMinutes,
+    delivery_mode: input.deliveryMode,
     customer_input_hash: input.customerInputHash,
     service_price_minor: input.servicePriceMinor,
     payment_mode: input.paymentMode,

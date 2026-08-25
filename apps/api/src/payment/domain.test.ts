@@ -130,8 +130,13 @@ describe('PR 14B.1 payment evidence and fingerprinting', () => {
     tenantPublicId: randomUUID(),
     servicePublicId: randomUUID(),
     providerPublicId: randomUUID(),
+    providerServiceAssignmentPublicId: randomUUID(),
     startsAt: new Date('2026-08-24T14:00:00.000Z'),
     durationMinutes: 60,
+    slotCadenceMinutes: 15,
+    bufferBeforeMinutes: 5,
+    bufferAfterMinutes: 10,
+    deliveryMode: 'provider_location',
     customerInputHash: 'a'.repeat(64),
     servicePriceMinor: 10_000,
     paymentMode: 'fixed_deposit',
@@ -169,6 +174,7 @@ describe('PR 14B.1 payment evidence and fingerprinting', () => {
     expect(authoritativeAttemptChanged(before, { ...before, servicePriceMinor: 10_001 })).toBe(
       true,
     );
+    expect(authoritativeAttemptChanged(before, { ...before, bufferAfterMinutes: 15 })).toBe(true);
     expect(
       authoritativeAttemptChanged(before, {
         ...before,

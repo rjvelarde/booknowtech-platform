@@ -148,52 +148,80 @@ export class PublicPaidBookingOrchestrator {
   ) {
     const tenant = await this.admin.getPublicTenantBySlug(input.tenant.slug, session);
     if (!tenant) throw new PaidBookingError(404, 'public_booking_not_found');
-    if (tenant.public_booking_terms.version !== normalized.consent.booking_terms_version)
-      throw new PaidBookingError(409, 'booking_terms_changed');
-    const service = await this.admin.getService(tenant._id, normalized.service_public_id, session);
-    const provider = await this.admin.getProvider(
-      tenant._id,
-      normalized.provider_public_id,
-      session,
-    );
-    if (!service || service.status !== 'active' || !service.publicly_bookable || !provider)
-      throw new PaidBookingError(404, 'public_booking_not_found');
-    if (
-      provider.status !== 'active' ||
-      !provider.customer_selectable ||
-      !provider.accepting_new_clients
-    )
-      throw new PaidBookingError(404, 'public_booking_not_found');
-    const assignment = await this.admin.findAppointmentAssignment(
-      tenant._id,
-      provider._id,
-      service._id,
-      session,
-    );
-    if (!assignment || assignment.status !== 'active')
-      throw new PaidBookingError(404, 'public_booking_not_found');
-    const snapshot = await this.payments.executionSnapshot(tenant._id, service._id, session);
-    assertExecutionReady(this.environment, tenant, service, snapshot);
-    const configuration = snapshot.serviceConfiguration!;
-    const fee = snapshot.fee!;
-    const account = snapshot.account!;
-    const paymentTerms = normalized.payment_terms;
-    if (
-      !paymentTerms?.accepted ||
-      paymentTerms.version !== this.environment.BOOKNOWTECH_PAYMENT_TERMS_VERSION ||
-      paymentTerms.document_sha256 !== this.environment.BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256
-    )
-      throw new PaidBookingError(409, 'payment_terms_changed');
     const idempotencyKeyHash = hashPaymentIdempotencyKey(input.idempotencyKey);
     const replay = await this.payments.getAttemptByIdempotency(
       tenant._id,
       idempotencyKeyHash,
       session,
     );
-    const feeAmountMinor = replay?.amount_snapshot.booknowtech_fee_minor ?? fee.amount_minor;
-    const feeVersion = replay?.configuration_snapshot.fee_version ?? fee.version;
+    const clientRequestFingerprint = publicRequestFingerprint(normalized);
+    if (
+      replay?.client_request_fingerprint !== undefined &&
+      replay.client_request_fingerprint !== clientRequestFingerprint
+    )
+      throw new PaidBookingError(409, 'idempotency_key_reused');
+    if (tenant.public_booking_terms.version !== normalized.consent.booking_terms_version) {
+      if (replay) return this.staleReplay(tenant._id, replay, session);
+      throw new PaidBookingError(409, 'booking_terms_changed');
+    }
+    const service = await this.admin.getService(tenant._id, normalized.service_public_id, session);
+    const provider = await this.admin.getProvider(
+      tenant._id,
+      normalized.provider_public_id,
+      session,
+    );
+    if (!service || service.status !== 'active' || !service.publicly_bookable || !provider) {
+      if (replay) return this.staleReplay(tenant._id, replay, session);
+      throw new PaidBookingError(404, 'public_booking_not_found');
+    }
+    if (
+      provider.status !== 'active' ||
+      !provider.customer_selectable ||
+      !provider.accepting_new_clients
+    ) {
+      if (replay) return this.staleReplay(tenant._id, replay, session);
+      throw new PaidBookingError(404, 'public_booking_not_found');
+    }
+    const assignment = await this.admin.findAppointmentAssignment(
+      tenant._id,
+      provider._id,
+      service._id,
+      session,
+    );
+    if (!assignment || assignment.status !== 'active') {
+      if (replay) return this.staleReplay(tenant._id, replay, session);
+      throw new PaidBookingError(404, 'public_booking_not_found');
+    }
+    const snapshot = await this.payments.executionSnapshot(tenant._id, service._id, session);
+    const paymentTerms = normalized.payment_terms;
+    if (
+      !paymentTerms?.accepted ||
+      paymentTerms.version !== this.environment.BOOKNOWTECH_PAYMENT_TERMS_VERSION ||
+      paymentTerms.document_sha256 !== this.environment.BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256
+    ) {
+      if (replay) return this.staleReplay(tenant._id, replay, session);
+      throw new PaidBookingError(409, 'payment_terms_changed');
+    }
+    if (
+      replay &&
+      (!snapshot.serviceConfiguration ||
+        snapshot.serviceConfiguration.payment_mode === 'none' ||
+        !snapshot.account ||
+        snapshot.account.public_id !== replay.tenant_stripe_account_public_id ||
+        tenant.currency !== 'USD' ||
+        service.currency !== 'USD' ||
+        snapshot.serviceConfiguration.currency !== 'USD' ||
+        snapshot.account.default_currency !== 'USD')
+    )
+      return this.staleReplay(tenant._id, replay, session);
+    assertExecutionReady(this.environment, tenant, service, snapshot, !replay);
+    const configuration = snapshot.serviceConfiguration!;
+    const fee = snapshot.fee;
+    const account = snapshot.account!;
+    const feeAmountMinor = replay?.amount_snapshot.booknowtech_fee_minor ?? fee!.amount_minor;
+    const feeVersion = replay?.configuration_snapshot.fee_version ?? fee!.version;
     const feeConfigurationPublicId =
-      replay?.configuration_snapshot.fee_configuration_public_id ?? fee.fee_version_public_id;
+      replay?.configuration_snapshot.fee_configuration_public_id ?? fee!.fee_version_public_id;
     const amounts = calculatePaymentAmounts({
       servicePriceMinor: service.base_price_minor,
       paymentMode: configuration.payment_mode as 'fixed_deposit' | 'full',
@@ -202,13 +230,17 @@ export class PublicPaidBookingOrchestrator {
       currency: 'USD',
     });
     const customerInputHash = publicRequestFingerprint(normalized.customer);
-    const clientRequestFingerprint = publicRequestFingerprint(normalized);
     const fingerprint = paymentAttemptFingerprint({
       tenantPublicId: tenant.public_id,
       servicePublicId: service.public_id,
       providerPublicId: provider.public_id,
+      providerServiceAssignmentPublicId: assignment.public_id,
       startsAt,
       durationMinutes: service.duration_minutes,
+      slotCadenceMinutes: service.slot_cadence_minutes ?? tenant.default_slot_cadence_minutes,
+      bufferBeforeMinutes: assignment.buffer_before_minutes,
+      bufferAfterMinutes: assignment.buffer_after_minutes,
+      deliveryMode: service.delivery_mode,
       customerInputHash,
       servicePriceMinor: service.base_price_minor,
       paymentMode: amounts.paymentMode,
@@ -224,24 +256,19 @@ export class PublicPaidBookingOrchestrator {
       paymentConfigurationVersion: configuration.version,
     });
     if (replay) {
-      if (replay.client_request_fingerprint !== clientRequestFingerprint)
-        throw new PaidBookingError(409, 'idempotency_key_reused');
-      if (replay.request_fingerprint !== fingerprint) {
-        const snapshottedAccount = await this.payments.getSnapshottedStripeAccount(
-          tenant._id,
-          replay.tenant_stripe_account_public_id,
-        );
-        return {
-          stale: await this.payments.markAttemptStaleInSession(tenant._id, replay, session),
-          attempt: replay,
-          connectedAccountId: snapshottedAccount?.stripe_account_id ?? null,
-        };
-      }
+      if (replay.request_fingerprint !== fingerprint)
+        return this.staleReplay(tenant._id, replay, session);
       const context = await this.payments.getAttemptContext(tenant._id, replay, session);
+      const snapshottedAccount = await this.payments.getSnapshottedStripeAccount(
+        tenant._id,
+        replay.tenant_stripe_account_public_id,
+        session,
+      );
+      if (!snapshottedAccount) return this.staleReplay(tenant._id, replay, session);
       return {
         attempt: replay,
         appointment: context.appointment,
-        connectedAccountId: account.stripe_account_id,
+        connectedAccountId: snapshottedAccount.stripe_account_id,
       };
     }
     const candidate = await validatePublicCandidate(
@@ -332,8 +359,8 @@ export class PublicPaidBookingOrchestrator {
           service_payment_configuration_version: configuration.version,
           deposit_version_public_id:
             amounts.paymentMode === 'fixed_deposit' ? configuration.configuration_public_id : null,
-          fee_configuration_public_id: fee.fee_version_public_id,
-          fee_version: fee.version,
+          fee_configuration_public_id: fee!.fee_version_public_id,
+          fee_version: fee!.version,
         },
         payment_terms_acceptance: createPaymentTermsEvidence({
           version: paymentTerms.version,
@@ -390,6 +417,23 @@ export class PublicPaidBookingOrchestrator {
       connectedAccountId: account.stripe_account_id,
     };
   }
+
+  private async staleReplay(
+    tenantId: TenantDocument['_id'],
+    attempt: NonNullable<Awaited<ReturnType<PaymentFoundationStore['getAttemptByIdempotency']>>>,
+    session: ClientSession,
+  ) {
+    const snapshottedAccount = await this.payments.getSnapshottedStripeAccount(
+      tenantId,
+      attempt.tenant_stripe_account_public_id,
+      session,
+    );
+    return {
+      stale: await this.payments.markAttemptStaleInSession(tenantId, attempt, session),
+      attempt,
+      connectedAccountId: snapshottedAccount?.stripe_account_id ?? null,
+    };
+  }
 }
 
 function assertExecutionReady(
@@ -397,6 +441,7 @@ function assertExecutionReady(
   tenant: TenantDocument,
   service: ServiceDocument,
   snapshot: Awaited<ReturnType<PaymentFoundationStore['executionSnapshot']>>,
+  requireActiveFee: boolean,
 ): void {
   if (!environment.STRIPE_PAYMENT_EXECUTION_ENABLED)
     throw new PaidBookingError(503, 'payment_execution_disabled');
@@ -404,14 +449,15 @@ function assertExecutionReady(
     throw new PaidBookingError(503, 'payment_execution_disabled');
   if (!snapshot.serviceConfiguration || snapshot.serviceConfiguration.payment_mode === 'none')
     throw new PaidBookingError(409, 'payment_configuration_changed');
-  if (!snapshot.fee) throw new PaidBookingError(503, 'payment_configuration_unavailable');
+  if (requireActiveFee && !snapshot.fee)
+    throw new PaidBookingError(503, 'payment_configuration_unavailable');
   const account = snapshot.account;
   if (
     tenant.currency !== 'USD' ||
     service.currency !== 'USD' ||
     snapshot.tenantSetting.currency !== 'USD' ||
     snapshot.serviceConfiguration.currency !== 'USD' ||
-    snapshot.fee.currency !== 'USD' ||
+    (snapshot.fee?.currency !== undefined && snapshot.fee.currency !== 'USD') ||
     account?.default_currency !== 'USD'
   )
     throw new PaidBookingError(409, 'payment_currency_unsupported');

@@ -278,6 +278,53 @@ suite('PR 14B.1 payment persistence foundation', () => {
     ).toBe(0);
   });
 
+  it('prevents cross-tenant PaymentIntent linking and Stripe-ID authority', async () => {
+    const tenantA = await paymentFixture(db);
+    const tenantB = await paymentFixture(db);
+    await store.insertPaymentAttempt(tenantA.attempt);
+    await store.insertPaymentAttempt(tenantB.attempt);
+    const intent = {
+      id: 'pi_crossTenantIsolation',
+      status: 'requires_payment_method' as const,
+      clientSecret: 'pi_secret_transient',
+      amount: 2_625,
+      applicationFeeAmount: 125,
+      currency: 'usd' as const,
+    };
+
+    await store.linkPaymentIntent({
+      tenantId: tenantA.attempt.tenant_id,
+      attemptPublicId: tenantA.attempt.public_id,
+      intent,
+    });
+    await expect(
+      store.linkPaymentIntent({
+        tenantId: tenantB.attempt.tenant_id,
+        attemptPublicId: tenantA.attempt.public_id,
+        intent,
+      }),
+    ).rejects.toThrow('payment_intent_link_conflict');
+    await expect(
+      store.linkPaymentIntent({
+        tenantId: tenantB.attempt.tenant_id,
+        attemptPublicId: tenantB.attempt.public_id,
+        intent,
+      }),
+    ).rejects.toThrow();
+    expect(
+      await db.collection('payment_attempts').countDocuments({
+        stripe_payment_intent_id: intent.id,
+      }),
+    ).toBe(1);
+    expect(
+      JSON.stringify(
+        await db.collection('payment_attempts').findOne({
+          public_id: tenantA.attempt.public_id,
+        }),
+      ),
+    ).not.toContain(intent.clientSecret);
+  });
+
   it('blocks provisional slots and releases terminal transitions exactly once', async () => {
     const fixture = await paymentFixture(db);
     const competing = await paymentFixture(db, {

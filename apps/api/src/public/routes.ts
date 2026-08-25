@@ -14,6 +14,7 @@ import type {
   ServiceDocument,
   TenantDocument,
 } from '../admin/store.js';
+import { PROVISIONAL_APPOINTMENT_STATUSES } from '../admin/store.js';
 import { dateRange, generateSlots, localToUtc, previewDay } from '../availability/routes.js';
 import { authenticateAdminMutation, authenticateAdminRequest } from '../auth/routes.js';
 import type { Environment } from '../config.js';
@@ -369,7 +370,12 @@ export function registerPublicBookingRoutes(
       const keyHash = createHash('sha256').update(key).digest('hex');
       const fingerprint = publicRequestFingerprint(normalized);
       const replay = await store.getPublicAppointmentByIdempotency(tenant._id, keyHash);
-      if (replay && replay.status !== 'payment_pending') {
+      if (
+        replay &&
+        !PROVISIONAL_APPOINTMENT_STATUSES.includes(
+          replay.status as (typeof PROVISIONAL_APPOINTMENT_STATUSES)[number],
+        )
+      ) {
         if (replay.public_submission?.request_fingerprint !== fingerprint)
           return safeError(reply, 409, 'idempotency_key_reused', request.id);
         const replayProvider = await store.getProviderById(tenant._id, replay.provider_id);
