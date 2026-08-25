@@ -26,6 +26,23 @@ export interface VerifiedStripeEvent {
   accountView: ConnectAccountView | null;
 }
 
+export type ReducedPaymentIntentStatus =
+  | 'requires_payment_method'
+  | 'requires_confirmation'
+  | 'requires_action'
+  | 'processing'
+  | 'canceled'
+  | 'succeeded';
+
+export interface PaymentIntentView {
+  id: string;
+  status: ReducedPaymentIntentStatus;
+  clientSecret: string | null;
+  amount: number;
+  applicationFeeAmount: number | null;
+  currency: 'usd';
+}
+
 export interface StripeConnectAdapter {
   createExpressAccount(input: {
     tenantPublicId: string;
@@ -40,6 +57,30 @@ export interface StripeConnectAdapter {
   }): Promise<{ url: string; expiresAt: Date }>;
   retrieveAccount(accountId: string): Promise<ConnectAccountView>;
   verifyWebhook(payload: Buffer, signature: string, secret: string): VerifiedStripeEvent;
+}
+
+export interface StripePaymentAdapter {
+  createDirectChargePaymentIntent(input: {
+    connectedAccountId: string;
+    amountMinor: number;
+    applicationFeeAmountMinor: number;
+    receiptEmail: string;
+    idempotencyKey: string;
+    metadata: {
+      tenantPublicId: string;
+      appointmentPublicId: string;
+      paymentAttemptPublicId: string;
+    };
+  }): Promise<PaymentIntentView>;
+  retrievePaymentIntent(input: {
+    connectedAccountId: string;
+    paymentIntentId: string;
+  }): Promise<PaymentIntentView>;
+  cancelPaymentIntent(input: {
+    connectedAccountId: string;
+    paymentIntentId: string;
+    idempotencyKey: string;
+  }): Promise<PaymentIntentView>;
 }
 
 export class StripeSdkConnectAdapter implements StripeConnectAdapter {
@@ -91,6 +132,62 @@ export class StripeSdkConnectAdapter implements StripeConnectAdapter {
     return accountView(await this.stripe.accounts.retrieve(accountId));
   }
 
+  public async createDirectChargePaymentIntent(input: {
+    connectedAccountId: string;
+    amountMinor: number;
+    applicationFeeAmountMinor: number;
+    receiptEmail: string;
+    idempotencyKey: string;
+    metadata: {
+      tenantPublicId: string;
+      appointmentPublicId: string;
+      paymentAttemptPublicId: string;
+    };
+  }): Promise<PaymentIntentView> {
+    const intent = await this.stripe.paymentIntents.create(
+      {
+        amount: input.amountMinor,
+        application_fee_amount: input.applicationFeeAmountMinor,
+        currency: 'usd',
+        capture_method: 'automatic',
+        payment_method_types: ['card'],
+        receipt_email: input.receiptEmail,
+        metadata: {
+          tenant_public_id: input.metadata.tenantPublicId,
+          appointment_public_id: input.metadata.appointmentPublicId,
+          payment_attempt_public_id: input.metadata.paymentAttemptPublicId,
+          schema_version: '1',
+        },
+      },
+      { stripeAccount: input.connectedAccountId, idempotencyKey: input.idempotencyKey },
+    );
+    return paymentIntentView(intent);
+  }
+
+  public async retrievePaymentIntent(input: {
+    connectedAccountId: string;
+    paymentIntentId: string;
+  }): Promise<PaymentIntentView> {
+    return paymentIntentView(
+      await this.stripe.paymentIntents.retrieve(input.paymentIntentId, undefined, {
+        stripeAccount: input.connectedAccountId,
+      }),
+    );
+  }
+
+  public async cancelPaymentIntent(input: {
+    connectedAccountId: string;
+    paymentIntentId: string;
+    idempotencyKey: string;
+  }): Promise<PaymentIntentView> {
+    return paymentIntentView(
+      await this.stripe.paymentIntents.cancel(input.paymentIntentId, undefined, {
+        stripeAccount: input.connectedAccountId,
+        idempotencyKey: input.idempotencyKey,
+      }),
+    );
+  }
+
   public verifyWebhook(payload: Buffer, signature: string, secret: string): VerifiedStripeEvent {
     const event = this.stripe.webhooks.constructEvent(payload, signature, secret);
     const object = event.data.object;
@@ -104,6 +201,30 @@ export class StripeSdkConnectAdapter implements StripeConnectAdapter {
       accountView: object.object === 'account' ? accountView(object) : null,
     };
   }
+}
+
+function paymentIntentView(intent: Stripe.PaymentIntent): PaymentIntentView {
+  if (intent.currency !== 'usd' || !isReducedPaymentIntentStatus(intent.status))
+    throw new Error('unsupported_payment_intent_projection');
+  return {
+    id: intent.id,
+    status: intent.status,
+    clientSecret: intent.client_secret,
+    amount: intent.amount,
+    applicationFeeAmount: intent.application_fee_amount,
+    currency: 'usd',
+  };
+}
+
+function isReducedPaymentIntentStatus(value: string): value is ReducedPaymentIntentStatus {
+  return [
+    'requires_payment_method',
+    'requires_confirmation',
+    'requires_action',
+    'processing',
+    'canceled',
+    'succeeded',
+  ].includes(value);
 }
 
 function accountView(account: Stripe.Account): ConnectAccountView {

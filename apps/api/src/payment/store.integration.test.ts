@@ -40,6 +40,8 @@ suite('PR 14B.1 payment persistence foundation', () => {
         'tenant_booking_fee_active',
         'service_payment_configuration_versions',
         'service_payment_configuration_active',
+        'tenant_payment_execution_settings',
+        'provisional_payment_customers',
         'payment_attempts',
         'payment_ledger_entries',
       ]),
@@ -83,6 +85,8 @@ suite('PR 14B.1 payment persistence foundation', () => {
     for (const name of [
       'tenant_booking_fee_versions',
       'service_payment_configuration_versions',
+      'tenant_payment_execution_settings',
+      'provisional_payment_customers',
       'payment_attempts',
       'payment_ledger_entries',
     ])
@@ -416,9 +420,11 @@ async function paymentFixture(
       tenant_id: tenantId,
       appointment_id: appointmentId,
       customer_id: customerId,
+      customer_email_normalized: 'customer@example.com',
       tenant_stripe_account_public_id: randomUUID(),
       idempotency_key_hash: idempotencyKeyHash,
       request_fingerprint: randomHex(),
+      client_request_fingerprint: randomHex(),
       amount_snapshot: toAmountSnapshot(amounts),
       configuration_snapshot: {
         service_payment_configuration_public_id: randomUUID(),

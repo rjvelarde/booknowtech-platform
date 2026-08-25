@@ -6,6 +6,9 @@ import { loadEnvironment } from './config.js';
 import { AtlasReadinessProbe } from './readiness.js';
 import { MongoRateLimiter } from './rate-limit/limiter.js';
 import { MongoMonitoringReader } from './monitoring/store.js';
+import { PaymentExecutionService } from './payment/execution-service.js';
+import { PublicPaidBookingOrchestrator } from './payment/public-orchestrator.js';
+import { PaymentFoundationStore } from './payment/store.js';
 import { StripeSdkConnectAdapter } from './stripe/adapter.js';
 import { ConnectStore } from './stripe/connect-store.js';
 import { ConnectService } from './stripe/connect-service.js';
@@ -20,6 +23,17 @@ async function start(): Promise<void> {
   const stripeAdapter = environment.STRIPE_SECRET_KEY
     ? new StripeSdkConnectAdapter(environment.STRIPE_SECRET_KEY)
     : undefined;
+  const adminStore = environment.TENANT_ADMIN_ENABLED ? new AdminStore(database) : undefined;
+  const paymentStore = adminStore ? new PaymentFoundationStore(database) : undefined;
+  const paidBookingOrchestrator =
+    adminStore && paymentStore
+      ? new PublicPaidBookingOrchestrator(
+          environment,
+          adminStore,
+          paymentStore,
+          stripeAdapter ? new PaymentExecutionService(paymentStore, stripeAdapter) : null,
+        )
+      : undefined;
   const app = await buildApplication({
     environment,
     readiness,
@@ -36,10 +50,11 @@ async function start(): Promise<void> {
           ),
         }
       : {}),
-    ...(environment.TENANT_ADMIN_ENABLED
+    ...(adminStore && paidBookingOrchestrator
       ? {
-          adminStore: new AdminStore(database),
+          adminStore,
           rateLimiter: new MongoRateLimiter(database, environment.RATE_LIMIT_KEY_SECRET),
+          paidBookingOrchestrator,
         }
       : {}),
   });

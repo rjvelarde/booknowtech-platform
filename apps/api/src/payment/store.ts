@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { type ClientSession, type Collection, type Db, MongoServerError, ObjectId } from 'mongodb';
 
+import type { AppointmentDocument } from '../admin/store.js';
 import {
   type PaymentAmounts,
   type PaymentAttemptState,
@@ -11,6 +12,7 @@ import {
   normalizeServicePaymentConfiguration,
   transitionPaymentAttempt,
 } from './domain.js';
+import type { PaymentIntentView } from '../stripe/adapter.js';
 
 export interface TenantBookingFeeVersionDocument {
   _id: ObjectId;
@@ -72,15 +74,44 @@ export interface ServicePaymentConfigurationActiveDocument {
   activation_request_id: string;
 }
 
+interface TenantPaymentExecutionSettingDocument {
+  _id: ObjectId;
+  tenant_id: ObjectId;
+  enabled: boolean;
+  currency: 'USD';
+  approved_by_operator_id: string;
+  approval_request_id: string;
+  updated_at: Date;
+}
+
+interface TenantStripePaymentAccountDocument {
+  public_id: string;
+  tenant_id: ObjectId;
+  stripe_account_id: string;
+  active: boolean;
+  default_currency: string;
+  charges_enabled: boolean;
+  capabilities: { card_payments?: string };
+  requirements: {
+    disabled_reason?: string | null;
+    currently_due?: string[];
+    past_due?: string[];
+  };
+  disconnected_at: Date | null;
+  last_synced_at: Date | null;
+}
+
 export interface PaymentAttemptDocument {
   _id: ObjectId;
   public_id: string;
   tenant_id: ObjectId;
   appointment_id: ObjectId;
   customer_id: ObjectId;
+  customer_email_normalized: string;
   tenant_stripe_account_public_id: string;
   idempotency_key_hash: string;
   request_fingerprint: string;
+  client_request_fingerprint: string;
   amount_snapshot: PaymentAmountsSnake;
   configuration_snapshot: {
     service_payment_configuration_public_id: string;
@@ -413,6 +444,200 @@ export class PaymentFoundationStore {
     }
   }
 
+  public getAttemptByPublicId(tenantId: ObjectId, attemptPublicId: string) {
+    return this.attempts.findOne({ tenant_id: tenantId, public_id: attemptPublicId });
+  }
+
+  public getAttemptByIdempotency(
+    tenantId: ObjectId,
+    idempotencyKeyHash: string,
+    session?: ClientSession,
+  ) {
+    return this.attempts.findOne(
+      {
+        tenant_id: tenantId,
+        idempotency_key_hash: idempotencyKeyHash,
+      },
+      session ? { session } : undefined,
+    );
+  }
+
+  public async createProvisionalCustomerEvidence(
+    input: {
+      tenantId: ObjectId;
+      firstName: string;
+      lastName: string;
+      emailNormalized: string;
+      mobilePhoneE164: string;
+      customerInputHash: string;
+    },
+    session: ClientSession,
+  ) {
+    const record = {
+      _id: new ObjectId(),
+      public_id: randomUUID(),
+      tenant_id: input.tenantId,
+      first_name: input.firstName,
+      last_name: input.lastName,
+      email_normalized: input.emailNormalized,
+      mobile_phone_e164: input.mobilePhoneE164,
+      customer_input_hash: input.customerInputHash,
+      created_at: new Date(),
+    };
+    await this.db.collection('provisional_payment_customers').insertOne(record, { session });
+    return record;
+  }
+
+  public async getAttemptContext(
+    tenantId: ObjectId,
+    attempt: PaymentAttemptDocument,
+    session?: ClientSession,
+  ) {
+    const options = session ? { session } : undefined;
+    const [appointment, customer] = await Promise.all([
+      this.db.collection<AppointmentDocument>('appointments').findOne(
+        {
+          _id: attempt.appointment_id,
+          tenant_id: tenantId,
+        },
+        options,
+      ),
+      this.db.collection('provisional_payment_customers').findOne(
+        {
+          _id: attempt.customer_id,
+          tenant_id: tenantId,
+        },
+        options,
+      ),
+    ]);
+    if (!appointment || !customer) throw new Error('payment_attempt_context_missing');
+    return { appointment, customer };
+  }
+
+  public getSnapshottedStripeAccount(tenantId: ObjectId, associationPublicId: string) {
+    return this.db
+      .collection<TenantStripePaymentAccountDocument>('tenant_stripe_accounts')
+      .findOne({
+        tenant_id: tenantId,
+        public_id: associationPublicId,
+      });
+  }
+
+  public async executionSnapshot(tenantId: ObjectId, serviceId: ObjectId, session?: ClientSession) {
+    const options = session ? { session } : undefined;
+    const [tenantSetting, serviceConfiguration, fee, account] = await Promise.all([
+      this.db
+        .collection<TenantPaymentExecutionSettingDocument>('tenant_payment_execution_settings')
+        .findOne({ tenant_id: tenantId, enabled: true }, options),
+      this.serviceActive.findOne({ tenant_id: tenantId, service_id: serviceId }, options),
+      this.activeFees.findOne({ tenant_id: tenantId }, options),
+      this.db
+        .collection<TenantStripePaymentAccountDocument>('tenant_stripe_accounts')
+        .findOne({ tenant_id: tenantId, active: true }, options),
+    ]);
+    return { tenantSetting, serviceConfiguration, fee, account };
+  }
+
+  public async linkPaymentIntent(input: {
+    tenantId: ObjectId;
+    attemptPublicId: string;
+    intent: PaymentIntentView;
+  }): Promise<PaymentAttemptDocument> {
+    const state = paymentIntentAttemptState(input.intent.status);
+    const session = this.db.client.startSession();
+    try {
+      const updated = await session.withTransaction(async () => {
+        const attempt = await this.attempts.findOneAndUpdate(
+          {
+            tenant_id: input.tenantId,
+            public_id: input.attemptPublicId,
+            $or: [
+              { stripe_payment_intent_id: null },
+              { stripe_payment_intent_id: input.intent.id },
+            ],
+            state: {
+              $in: [
+                'requested',
+                'stripe_creation_processing',
+                'requires_payment_method',
+                'requires_customer_action',
+                'processing',
+                'failed_recoverable',
+              ],
+            },
+          },
+          {
+            $set: {
+              stripe_payment_intent_id: input.intent.id,
+              stripe_payment_intent_status: input.intent.status,
+              state,
+              failure_category: input.intent.status === 'canceled' ? 'terminal_payment' : null,
+              updated_at: new Date(),
+            },
+          },
+          { returnDocument: 'after', session },
+        );
+        if (!attempt) throw new Error('payment_intent_link_conflict');
+        if (state !== 'failed_terminal' || attempt.slot_released) return attempt;
+        const released = await this.attempts.findOneAndUpdate(
+          { _id: attempt._id, slot_released: false },
+          { $set: { slot_released: true, updated_at: new Date() } },
+          { returnDocument: 'after', session },
+        );
+        if (!released) throw new Error('payment_attempt_release_conflict');
+        const appointment = await this.appointments.updateOne(
+          { _id: attempt.appointment_id, tenant_id: input.tenantId, status: 'payment_pending' },
+          { $set: { status: 'payment_failed', updated_at: new Date() }, $inc: { version: 1 } },
+          { session },
+        );
+        if (appointment.modifiedCount !== 1) throw new Error('appointment_state_conflict');
+        return released;
+      });
+      if (!updated) throw new Error('payment_intent_link_no_result');
+      return updated;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  public async markAttemptStaleInSession(
+    tenantId: ObjectId,
+    attempt: PaymentAttemptDocument,
+    session: ClientSession,
+  ): Promise<boolean> {
+    if (attempt.slot_released || ['succeeded', 'succeeded_unfinalized'].includes(attempt.state))
+      return false;
+    const updated = await this.attempts.updateOne(
+      {
+        _id: attempt._id,
+        tenant_id: tenantId,
+        state: attempt.state,
+        slot_released: false,
+      },
+      {
+        $set: {
+          state: 'stale',
+          slot_released: true,
+          failure_category: 'stale',
+          updated_at: new Date(),
+        },
+      },
+      { session },
+    );
+    if (updated.modifiedCount !== 1) return false;
+    const appointment = await this.appointments.updateOne(
+      {
+        _id: attempt.appointment_id,
+        tenant_id: tenantId,
+        status: 'payment_pending',
+      },
+      { $set: { status: 'payment_failed', updated_at: new Date() }, $inc: { version: 1 } },
+      { session },
+    );
+    if (appointment.modifiedCount !== 1) throw new Error('appointment_state_conflict');
+    return true;
+  }
+
   public async appendLedgerEntry(
     input: Omit<PaymentLedgerEntryDocument, '_id' | 'public_id' | 'created_at'>,
     session?: ClientSession,
@@ -522,6 +747,8 @@ function assertInitialPaymentAttempt(
     throw new Error('attempt_terms_public_id_mismatch');
   if (input.payment_terms_acceptance.idempotency_key_hash !== input.idempotency_key_hash)
     throw new Error('attempt_terms_idempotency_mismatch');
+  if (!/^[a-f0-9]{64}$/u.test(input.client_request_fingerprint))
+    throw new Error('attempt_client_fingerprint_invalid');
   const expectedAmounts = toAmountSnapshot(
     calculatePaymentAmounts({
       servicePriceMinor: input.amount_snapshot.service_price_minor,
@@ -542,4 +769,20 @@ function assertInitialPaymentAttempt(
 
 function isDuplicate(error: unknown): boolean {
   return error instanceof MongoServerError && error.code === 11_000;
+}
+
+function paymentIntentAttemptState(status: PaymentIntentView['status']): PaymentAttemptState {
+  switch (status) {
+    case 'requires_payment_method':
+    case 'requires_confirmation':
+      return 'requires_payment_method';
+    case 'requires_action':
+      return 'requires_customer_action';
+    case 'processing':
+      return 'processing';
+    case 'canceled':
+      return 'failed_terminal';
+    case 'succeeded':
+      return 'succeeded_unfinalized';
+  }
 }

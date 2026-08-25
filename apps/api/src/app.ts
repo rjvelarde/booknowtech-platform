@@ -20,6 +20,7 @@ import { type RateLimiter, allowAllRateLimiter } from './rate-limit/limiter.js';
 import { registerRateLimitHook } from './rate-limit/routes.js';
 import { registerMonitoringRoute } from './monitoring/routes.js';
 import type { MonitoringReader } from './monitoring/store.js';
+import type { PublicPaidBookingOrchestrator } from './payment/public-orchestrator.js';
 import type { ConnectService } from './stripe/connect-service.js';
 import { registerConnectRoutes } from './stripe/connect-routes.js';
 import type { StripeConnectAdapter } from './stripe/adapter.js';
@@ -38,6 +39,7 @@ interface BuildApplicationOptions {
   connectService?: ConnectService;
   stripeAdapter?: StripeConnectAdapter;
   stripeWebhookStore?: StripeWebhookStore;
+  paidBookingOrchestrator?: PublicPaidBookingOrchestrator;
 }
 
 const dataEnvelopeSchema = {
@@ -60,7 +62,10 @@ export async function buildApplication({
   connectService,
   stripeAdapter,
   stripeWebhookStore,
+  paidBookingOrchestrator,
 }: BuildApplicationOptions): Promise<FastifyInstance> {
+  if (environment.STRIPE_PAYMENT_EXECUTION_ENABLED && !paidBookingOrchestrator)
+    throw new Error('Payment execution enabled without paid-booking orchestration');
   const app = Fastify({
     logger: logger ? createLoggerOptions(environment) : false,
     genReqId: (request) => resolveCorrelationId(request.headers['x-request-id']),
@@ -194,7 +199,7 @@ export async function buildApplication({
     registerAvailabilityRoutes(app, environment, adminStore);
     registerCustomerRoutes(app, environment, adminStore);
     registerAppointmentRoutes(app, environment, adminStore);
-    registerPublicBookingRoutes(app, environment, adminStore);
+    registerPublicBookingRoutes(app, environment, adminStore, paidBookingOrchestrator);
     registerNotificationRoutes(app, environment, adminStore);
     registerPublicAppointmentManagementRoutes(app, environment, adminStore);
     if (connectService) registerConnectRoutes(app, environment, adminStore, connectService);
