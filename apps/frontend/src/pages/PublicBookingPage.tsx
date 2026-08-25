@@ -5,6 +5,7 @@ import {
   ApiError,
   type PublicAppointmentConfirmationView,
   type PublicBookingContextView,
+  type PublicPaymentAttemptView,
   type PublicProviderView,
   type PublicServiceView,
   type PublicStartView,
@@ -13,7 +14,9 @@ import {
   listPublicProviders,
   listPublicServices,
   listPublicStarts,
+  recoverPublicPaymentAttempt,
 } from '../api/client.js';
+import { PublicPaymentCheckout } from './PublicPaymentCheckout.js';
 
 export function PublicBookingPage() {
   const [context, setContext] = useState<PublicBookingContextView | null>(null);
@@ -29,6 +32,7 @@ export function PublicBookingPage() {
   const [logoFailed, setLogoFailed] = useState(false);
   const [review, setReview] = useState<Record<string, string> | null>(null);
   const [confirmation, setConfirmation] = useState<PublicAppointmentConfirmationView | null>(null);
+  const [paymentAttempt, setPaymentAttempt] = useState<PublicPaymentAttemptView | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
 
@@ -48,6 +52,19 @@ export function PublicBookingPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    const match = /^\/book\/checkout\/([0-9a-f-]{36})$/iu.exec(window.location.pathname);
+    if (!match?.[1]) return;
+    setLoading(true);
+    void recoverPublicPaymentAttempt(match[1])
+      .then(setPaymentAttempt)
+      .catch(() => {
+        window.history.replaceState({}, '', '/book');
+        setError('This secure checkout could not be recovered. Please start a new booking.');
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
   const chooseService = async (next: PublicServiceView) => {
     setService(next);
     setProvider(null);
@@ -56,6 +73,7 @@ export function PublicBookingPage() {
     setSelectedStart(null);
     setReview(null);
     setConfirmation(null);
+    setPaymentAttempt(null);
     setLoading(true);
     setError(null);
     try {
@@ -216,6 +234,7 @@ export function PublicBookingPage() {
                     setSelectedStart(item);
                     setReview(null);
                     setConfirmation(null);
+                    setPaymentAttempt(null);
                     setError(null);
                   }}
                 >
@@ -233,7 +252,22 @@ export function PublicBookingPage() {
           </Step>
         ) : null}
 
-        {confirmation ? (
+        {paymentAttempt && context.payment_checkout ? (
+          <PublicPaymentCheckout
+            attempt={paymentAttempt}
+            publishableKey={context.payment_checkout.stripe_publishable_key}
+            recover={() => recoverPublicPaymentAttempt(paymentAttempt.payment_attempt_public_id)}
+            onUpdate={setPaymentAttempt}
+            onRestart={(message) => {
+              setPaymentAttempt(null);
+              setReview(null);
+              setSelectedStart(null);
+              setIdempotencyKey(crypto.randomUUID());
+              window.history.replaceState({}, '', '/book');
+              setError(message);
+            }}
+          />
+        ) : confirmation ? (
           <ConfirmationCard confirmation={confirmation} />
         ) : selectedStart && service && provider ? (
           <section className="public-booking-summary" aria-labelledby="booking-summary-title">
@@ -274,39 +308,57 @@ export function PublicBookingPage() {
                   onClick={() => {
                     setSubmitting(true);
                     setError(null);
-                    void createPublicAppointment(
-                      {
-                        service_public_id: service.public_id,
-                        provider_public_id: provider.public_id,
-                        starts_at: selectedStart.starts_at,
-                        customer: {
-                          first_name: review.first_name,
-                          last_name: review.last_name,
-                          email: review.email,
-                          mobile_phone: review.mobile_phone,
-                          preferred_contact_channel: review.preferred_contact_channel,
-                          customer_location_address:
-                            service.delivery_mode === 'customer_location'
-                              ? {
-                                  line_1: review.line_1,
-                                  line_2: review.line_2 || null,
-                                  city: review.city,
-                                  region: review.region,
-                                  postal_code: review.postal_code,
-                                  country_code: 'US',
-                                }
-                              : null,
-                          appointment_note: review.appointment_note || null,
-                        },
-                        consent: {
-                          booking_terms_version: context.booking_terms.version,
-                          booking_terms_accepted: true,
-                        },
-                        website: '',
+                    const requestBody = {
+                      service_public_id: service.public_id,
+                      provider_public_id: provider.public_id,
+                      starts_at: selectedStart.starts_at,
+                      customer: {
+                        first_name: review.first_name,
+                        last_name: review.last_name,
+                        email: review.email,
+                        mobile_phone: review.mobile_phone,
+                        preferred_contact_channel: review.preferred_contact_channel,
+                        customer_location_address:
+                          service.delivery_mode === 'customer_location'
+                            ? {
+                                line_1: review.line_1,
+                                line_2: review.line_2 || null,
+                                city: review.city,
+                                region: review.region,
+                                postal_code: review.postal_code,
+                                country_code: 'US',
+                              }
+                            : null,
+                        appointment_note: review.appointment_note || null,
                       },
-                      idempotencyKey,
-                    )
-                      .then(setConfirmation)
+                      consent: {
+                        booking_terms_version: context.booking_terms.version,
+                        booking_terms_accepted: true,
+                      },
+                      ...(service.payment_mode &&
+                      service.payment_mode !== 'none' &&
+                      context.payment_checkout
+                        ? {
+                            payment_terms: {
+                              version: context.payment_checkout.terms_version,
+                              document_sha256: context.payment_checkout.terms_document_sha256,
+                              accepted: review.payment_terms_accepted === 'on',
+                            },
+                          }
+                        : {}),
+                      website: '',
+                    };
+                    void createPublicAppointment(requestBody, idempotencyKey)
+                      .then((result) => {
+                        if ('payment_status' in result) {
+                          window.history.replaceState(
+                            {},
+                            '',
+                            `/book/checkout/${result.payment_attempt_public_id}`,
+                          );
+                          setPaymentAttempt(result);
+                        } else setConfirmation(result);
+                      })
                       .catch((reason: unknown) => {
                         if (
                           reason instanceof ApiError &&
@@ -324,17 +376,59 @@ export function PublicBookingPage() {
                         ) {
                           setReview(null);
                           setError('The booking terms changed. Please review them and try again.');
-                        } else setError('Unable to book this appointment. Please try again.');
+                        } else if (
+                          reason instanceof ApiError &&
+                          ['payment_attempt_stale', 'payment_configuration_changed'].includes(
+                            reason.code,
+                          )
+                        ) {
+                          setReview(null);
+                          setSelectedStart(null);
+                          setIdempotencyKey(crypto.randomUUID());
+                          setError(
+                            'Booking details changed. Choose a current time and start a new checkout.',
+                          );
+                        } else if (
+                          reason instanceof ApiError &&
+                          [
+                            'payment_execution_disabled',
+                            'payment_execution_unavailable',
+                            'payment_temporarily_unavailable',
+                            'payment_account_not_ready',
+                          ].includes(reason.code)
+                        )
+                          setError(
+                            'Online payment is temporarily unavailable. No unpaid booking was created.',
+                          );
+                        else setError('Unable to book this appointment. Please try again.');
                       })
                       .finally(() => setSubmitting(false));
                   }}
                 >
-                  {submitting ? 'Booking…' : 'Book appointment'}
+                  {service.payment_mode && service.payment_mode !== 'none'
+                    ? submitting
+                      ? 'Preparing secure checkout…'
+                      : 'Continue to secure payment'
+                    : submitting
+                      ? 'Booking…'
+                      : 'Book appointment'}
                 </button>
               </div>
+            ) : service.payment_mode &&
+              service.payment_mode !== 'none' &&
+              !context.payment_checkout ? (
+              <p className="form-error" role="alert">
+                Online payment is temporarily unavailable. This paid service cannot be booked as an
+                unpaid appointment.
+              </p>
             ) : (
               <GuestDetailsForm
                 terms={context.booking_terms}
+                paymentTerms={
+                  !service.payment_mode || service.payment_mode === 'none'
+                    ? null
+                    : context.payment_checkout
+                }
                 deliveryMode={service.delivery_mode}
                 onReview={(values) => {
                   setReview(values);
@@ -400,10 +494,12 @@ function ProviderAvatar({ provider }: { provider: PublicProviderView }) {
 
 function GuestDetailsForm({
   terms,
+  paymentTerms,
   deliveryMode,
   onReview,
 }: {
   terms: PublicBookingContextView['booking_terms'];
+  paymentTerms: PublicBookingContextView['payment_checkout'];
   deliveryMode: PublicServiceView['delivery_mode'];
   onReview: (values: Record<string, string>) => void;
 }) {
@@ -476,6 +572,15 @@ function GuestDetailsForm({
           ) : null}
         </span>
       </label>
+      {paymentTerms ? (
+        <label className="checkbox-label">
+          <input type="checkbox" name="payment_terms_accepted" required />
+          <span>
+            I accept the BookNowTech payment terms, including the amount disclosure and that the
+            booking fee is normally non-refundable for a customer cancellation.
+          </span>
+        </label>
+      ) : null}
       <label className="public-honeypot" aria-hidden="true">
         <span>Website</span>
         <input name="website" tabIndex={-1} autoComplete="off" />

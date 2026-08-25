@@ -51,6 +51,7 @@ suite('PR 14B.1 payment persistence foundation', () => {
         'payment_attempts_tenant_idempotency_unique',
         'payment_attempts_stripe_intent_unique',
         'payment_attempts_tenant_appointment_unique',
+        'payment_attempts_recovery_token_unique',
         'payment_attempts_worker_poll',
       ]),
     );
@@ -472,6 +473,9 @@ async function paymentFixture(
       idempotency_key_hash: idempotencyKeyHash,
       request_fingerprint: randomHex(),
       client_request_fingerprint: randomHex(),
+      recovery_token_hash: randomHex(),
+      recovery_hostname_hash: randomHex(),
+      recovery_expires_at: new Date(Date.now() + 10_800_000),
       amount_snapshot: toAmountSnapshot(amounts),
       configuration_snapshot: {
         service_payment_configuration_public_id: randomUUID(),

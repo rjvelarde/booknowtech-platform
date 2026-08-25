@@ -20,6 +20,7 @@ export const testEnvironment: Environment = {
   STRIPE_CONNECT_COUNTRY: 'US',
   STRIPE_PAYMENTS_FOUNDATION_ENABLED: false,
   STRIPE_PAYMENT_EXECUTION_ENABLED: false,
+  CHECKOUT_RECOVERY_TOKEN_SECRET: undefined,
 };
 
 export class StubReadinessProbe implements ReadinessProbe {

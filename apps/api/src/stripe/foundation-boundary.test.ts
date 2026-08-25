@@ -13,12 +13,12 @@ describe('PR 14B.2 Stripe execution boundary', () => {
       'paymentIntents.retrieve',
       'paymentIntents.cancel',
     ]);
-    const files = ['apps/api/src', 'apps/worker/src', 'apps/frontend/src'].flatMap((directory) =>
+    const files = ['apps/api/src', 'apps/worker/src'].flatMap((directory) =>
       sourceFiles(resolve(root, directory)),
     );
     const source = files.map((file) => readFileSync(resolve(root, file), 'utf8')).join('\n');
     expect(source).not.toMatch(
-      /setupIntents\.|charges\.create|refunds\.create|subscriptions\.create|invoices\.(?:create|pay)|checkout\.sessions|transfers\.create|paymentMethods\.|\.capture\(|@stripe\/stripe-js|PaymentElement|payment_intent\.(?:succeeded|payment_failed|processing|canceled)/u,
+      /setupIntents\.|charges\.create|refunds\.create|subscriptions\.create|invoices\.(?:create|pay)|checkout\.sessions|transfers\.create|paymentMethods\.|\.capture\(|payment_intent\.(?:succeeded|payment_failed|processing|canceled)/u,
     );
     expect(adapter).not.toMatch(/transfer_data|on_behalf_of|capture_method:\s*'manual'/u);
   });

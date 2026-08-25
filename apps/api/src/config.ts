@@ -28,6 +28,7 @@ const environmentSchema = z.object({
   RATE_LIMIT_KEY_SECRET: z.string().min(32),
   MONITORING_TOKEN: z.string().min(48).max(256),
   STRIPE_SECRET_KEY: z.string().min(16).optional(),
+  STRIPE_PUBLISHABLE_KEY: z.string().min(16).optional(),
   STRIPE_PLATFORM_WEBHOOK_SECRET: z.string().min(16).optional(),
   STRIPE_CONNECT_WEBHOOK_SECRET: z.string().min(16).optional(),
   STRIPE_CONNECT_COUNTRY: z.literal('US').default('US'),
@@ -61,6 +62,7 @@ const environmentSchema = z.object({
     .regex(/^[a-f0-9]{64}$/u)
     .optional(),
   PAYMENT_IP_HASH_SECRET: z.string().min(32).optional(),
+  CHECKOUT_RECOVERY_TOKEN_SECRET: z.string().min(32).optional(),
 });
 
 type ParsedEnvironment = z.infer<typeof environmentSchema>;
@@ -99,6 +101,11 @@ export function loadEnvironment(source: NodeJS.ProcessEnv = process.env): Enviro
     throw new Error('Invalid environment configuration: MONITORING_TOKEN');
   if (environment.PAYMENT_IP_HASH_SECRET && unsafeSecret.test(environment.PAYMENT_IP_HASH_SECRET))
     throw new Error('Invalid environment configuration: PAYMENT_IP_HASH_SECRET');
+  if (
+    environment.CHECKOUT_RECOVERY_TOKEN_SECRET &&
+    unsafeSecret.test(environment.CHECKOUT_RECOVERY_TOKEN_SECRET)
+  )
+    throw new Error('Invalid environment configuration: CHECKOUT_RECOVERY_TOKEN_SECRET');
   if (environment.PUBLIC_APPOINTMENT_TOKEN_SECRET === environment.RATE_LIMIT_KEY_SECRET)
     throw new Error('Invalid environment configuration: environment-specific secrets');
   if (
@@ -116,6 +123,16 @@ export function loadEnvironment(source: NodeJS.ProcessEnv = process.env): Enviro
     ].includes(environment.PAYMENT_IP_HASH_SECRET)
   )
     throw new Error('Invalid environment configuration: PAYMENT_IP_HASH_SECRET separation');
+  if (
+    environment.CHECKOUT_RECOVERY_TOKEN_SECRET &&
+    [
+      environment.PUBLIC_APPOINTMENT_TOKEN_SECRET,
+      environment.RATE_LIMIT_KEY_SECRET,
+      environment.MONITORING_TOKEN,
+      environment.PAYMENT_IP_HASH_SECRET,
+    ].includes(environment.CHECKOUT_RECOVERY_TOKEN_SECRET)
+  )
+    throw new Error('Invalid environment configuration: CHECKOUT_RECOVERY_TOKEN_SECRET separation');
   if (
     ['staging', 'production'].includes(environment.ENVIRONMENT_ID) &&
     !environment.MONITORING_TOKEN.startsWith(`bnt_monitoring_${environment.ENVIRONMENT_ID}_`)
@@ -141,6 +158,8 @@ function validatePaymentExecutionConfiguration(
     'BOOKNOWTECH_PAYMENT_TERMS_VERSION',
     'BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256',
     'PAYMENT_IP_HASH_SECRET',
+    'STRIPE_PUBLISHABLE_KEY',
+    'CHECKOUT_RECOVERY_TOKEN_SECRET',
   ] as const)
     if (environment[name] === undefined)
       throw new Error(`Invalid environment configuration: ${name}`);
@@ -160,10 +179,16 @@ function validateStripeConfiguration(environment: z.infer<typeof environmentSche
   if (environment.STRIPE_PAYMENTS_FOUNDATION_ENABLED && configured === 0)
     throw new Error('Invalid environment configuration: Stripe Connect configuration');
   if (configured === 0) return;
-  if (environment.STRIPE_PLATFORM_WEBHOOK_SECRET === environment.STRIPE_CONNECT_WEBHOOK_SECRET)
-    throw new Error('Invalid environment configuration: Stripe webhook secret separation');
   const live = environment.STRIPE_SECRET_KEY!.startsWith('sk_live_');
   const test = environment.STRIPE_SECRET_KEY!.startsWith('sk_test_');
+  if (environment.STRIPE_PUBLISHABLE_KEY) {
+    const publishableLive = environment.STRIPE_PUBLISHABLE_KEY.startsWith('pk_live_');
+    const publishableTest = environment.STRIPE_PUBLISHABLE_KEY.startsWith('pk_test_');
+    if ((!publishableLive && !publishableTest) || publishableLive !== live)
+      throw new Error('Invalid environment configuration: STRIPE_PUBLISHABLE_KEY');
+  }
+  if (environment.STRIPE_PLATFORM_WEBHOOK_SECRET === environment.STRIPE_CONNECT_WEBHOOK_SECRET)
+    throw new Error('Invalid environment configuration: Stripe webhook secret separation');
   if ((!live && !test) || (environment.ENVIRONMENT_ID === 'production' ? !live : !test))
     throw new Error('Invalid environment configuration: Stripe key mode');
   if (

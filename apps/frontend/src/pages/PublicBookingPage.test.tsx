@@ -8,6 +8,7 @@ describe('PublicBookingPage', () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    window.history.replaceState({}, '', '/book');
   });
 
   it('reviews and creates a public appointment with an accessible confirmation', async () => {
@@ -216,6 +217,80 @@ describe('PublicBookingPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'This booking page is not available',
     );
+  });
+
+  it('recovers a durable processing attempt from the route without browser-stored checkout state', async () => {
+    const attemptId = '11111111-1111-4111-8111-111111111111';
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    window.history.replaceState({}, '', `/book/checkout/${attemptId}`);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          data: {
+            business: {
+              public_id: 'tenant',
+              name: 'Paid Demo',
+              description: null,
+              tagline: null,
+              logo_url: null,
+              primary_color: '#176CAB',
+              website_url: null,
+              phone: null,
+              email: null,
+            },
+            timezone: 'America/New_York',
+            locale: 'en-US',
+            currency: 'USD',
+            booking_terms: {
+              version: 'test-v1',
+              acknowledgment_label: 'I agree.',
+              terms_url: null,
+            },
+            payment_checkout: {
+              stripe_publishable_key: 'pk_test_synthetic',
+              terms_version: 'payments-v1',
+              terms_document_sha256: 'b'.repeat(64),
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { data: { items: [] } }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          data: {
+            appointment_reference: 'BNT-RECOVER',
+            appointment_status: 'payment_pending',
+            payment_attempt_public_id: attemptId,
+            payment_status: 'processing',
+            expires_at: '2026-08-25T19:00:00.000Z',
+            client_secret: null,
+            stripe_account: null,
+            continuation_allowed: false,
+            amounts: {
+              service_price_minor: 10000,
+              provider_amount_due_now_minor: 2500,
+              booknowtech_fee_minor: 125,
+              customer_total_due_now_minor: 2625,
+              application_fee_amount_minor: 125,
+              remaining_service_balance_minor: 7500,
+              currency: 'USD',
+            },
+          },
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<PublicBookingPage />);
+    expect(await screen.findByRole('heading', { name: 'Payment is pending' })).toBeInTheDocument();
+    expect(screen.getByText(/not confirmed/i)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(`/payment-attempts/${attemptId}`),
+      expect.anything(),
+    );
+    expect(window.localStorage).toHaveLength(0);
+    expect(window.sessionStorage).toHaveLength(0);
   });
 });
 

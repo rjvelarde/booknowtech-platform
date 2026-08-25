@@ -22,7 +22,18 @@ import {
   hashPaymentIdempotencyKey,
   paymentAttemptFingerprint,
 } from './domain.js';
-import type { PaymentExecutionService, PublicPaymentAttemptResponse } from './execution-service.js';
+import {
+  type PaymentExecutionService,
+  type PublicPaymentAttemptResponse,
+  publicPaymentAttemptResponse,
+} from './execution-service.js';
+import {
+  CHECKOUT_RECOVERY_MAX_AGE_SECONDS,
+  issueRecoveryToken,
+  recoveryHostnameHash,
+  recoveryTokenHash,
+  recoveryTokenMatches,
+} from './recovery.js';
 import { toAmountSnapshot } from './store.js';
 import type { PaymentFoundationStore } from './store.js';
 
@@ -75,6 +86,7 @@ export class PublicPaidBookingOrchestrator {
       buffer_before_minutes: number;
       buffer_after_minutes: number;
     };
+    hostname: string;
   }): Promise<PublicPaymentAttemptResponse> {
     const normalized = normalizePublicAppointment(input.body);
     if (!normalized) throw new PaidBookingError(400, 'invalid_public_booking_request');
@@ -138,6 +150,97 @@ export class PublicPaidBookingOrchestrator {
     if (response.payment_attempt_public_id !== input.attemptPublicId)
       throw new PaidBookingError(409, 'payment_attempt_mismatch');
     return response;
+  }
+
+  public async recoveryCredential(input: {
+    tenant: TenantDocument;
+    attemptPublicId: string;
+    hostname: string;
+  }) {
+    const attempt = await this.payments.getAttemptByPublicId(
+      input.tenant._id,
+      input.attemptPublicId,
+    );
+    if (
+      !attempt ||
+      !(attempt.recovery_expires_at instanceof Date) ||
+      !/^[a-f0-9]{64}$/u.test(attempt.recovery_token_hash) ||
+      attempt.recovery_hostname_hash !== recoveryHostnameHash(input.hostname)
+    )
+      throw new PaidBookingError(404, 'payment_attempt_not_found');
+    const token = issueRecoveryToken({
+      secret: this.environment.CHECKOUT_RECOVERY_TOKEN_SECRET!,
+      tenantPublicId: input.tenant.public_id,
+      attemptPublicId: attempt.public_id,
+      hostnameHash: attempt.recovery_hostname_hash,
+      expiresAt: attempt.recovery_expires_at,
+    });
+    if (recoveryTokenHash(token) !== attempt.recovery_token_hash)
+      throw new PaidBookingError(404, 'payment_attempt_not_found');
+    return {
+      token,
+      maxAgeSeconds: Math.min(
+        CHECKOUT_RECOVERY_MAX_AGE_SECONDS,
+        Math.max(0, Math.floor((attempt.recovery_expires_at.valueOf() - Date.now()) / 1000)),
+      ),
+    };
+  }
+
+  public async recover(input: {
+    tenant: TenantDocument;
+    attemptPublicId: string;
+    hostname: string;
+    token: string;
+  }): Promise<PublicPaymentAttemptResponse> {
+    const attempt = await this.payments.getAttemptByPublicId(
+      input.tenant._id,
+      input.attemptPublicId,
+    );
+    if (
+      !attempt ||
+      !(attempt.recovery_expires_at instanceof Date) ||
+      attempt.recovery_expires_at <= new Date() ||
+      attempt.recovery_hostname_hash !== recoveryHostnameHash(input.hostname) ||
+      !recoveryTokenMatches(attempt.recovery_token_hash, input.token)
+    )
+      throw new PaidBookingError(404, 'payment_attempt_not_found');
+    const context = await this.payments.getAttemptContext(input.tenant._id, attempt);
+    if (
+      ['requires_payment_method', 'requires_customer_action', 'failed_recoverable'].includes(
+        attempt.state,
+      ) &&
+      attempt.expires_at > new Date()
+    ) {
+      if (!(await this.recoverySnapshotCurrent(input.tenant, attempt, context.appointment))) {
+        await this.payments.markAttemptStale(input.tenant._id, attempt);
+        throw new PaidBookingError(409, 'payment_attempt_stale');
+      }
+      if (!this.execution) throw new PaidBookingError(503, 'payment_execution_unavailable');
+      const account = await this.payments.getSnapshottedStripeAccount(
+        input.tenant._id,
+        attempt.tenant_stripe_account_public_id,
+      );
+      if (!account) throw new PaidBookingError(409, 'payment_attempt_stale');
+      return this.execution.ensurePaymentIntent({
+        tenantId: input.tenant._id,
+        tenantPublicId: input.tenant.public_id,
+        connectedAccountId: account.stripe_account_id,
+        customerEmail: attempt.customer_email_normalized,
+        appointmentPublicId: context.appointment.public_id,
+        appointmentReference: context.appointment.reference,
+        appointmentStatus: context.appointment
+          .status as PublicPaymentAttemptResponse['appointment_status'],
+        attempt,
+      });
+    }
+    return publicPaymentAttemptResponse({
+      attempt,
+      appointmentReference: context.appointment.reference,
+      appointmentStatus: context.appointment
+        .status as PublicPaymentAttemptResponse['appointment_status'],
+      clientSecret: null,
+      connectedAccountId: null,
+    });
   }
 
   private async createLocal(
@@ -342,6 +445,15 @@ export class PublicPaidBookingOrchestrator {
       session,
     );
     const attemptPublicId = randomUUID();
+    const recoveryExpiresAt = new Date(now.valueOf() + CHECKOUT_RECOVERY_MAX_AGE_SECONDS * 1000);
+    const recoveryHostHash = recoveryHostnameHash(input.hostname);
+    const recoveryToken = issueRecoveryToken({
+      secret: this.environment.CHECKOUT_RECOVERY_TOKEN_SECRET!,
+      tenantPublicId: tenant.public_id,
+      attemptPublicId,
+      hostnameHash: recoveryHostHash,
+      expiresAt: recoveryExpiresAt,
+    });
     const inserted = await this.payments.insertPaymentAttempt(
       {
         public_id: attemptPublicId,
@@ -353,6 +465,9 @@ export class PublicPaidBookingOrchestrator {
         idempotency_key_hash: idempotencyKeyHash,
         request_fingerprint: fingerprint,
         client_request_fingerprint: clientRequestFingerprint,
+        recovery_token_hash: recoveryTokenHash(recoveryToken),
+        recovery_hostname_hash: recoveryHostHash,
+        recovery_expires_at: recoveryExpiresAt,
         amount_snapshot: toAmountSnapshot(amounts),
         configuration_snapshot: {
           service_payment_configuration_public_id: configuration.configuration_public_id,
@@ -416,6 +531,68 @@ export class PublicPaidBookingOrchestrator {
       appointment,
       connectedAccountId: account.stripe_account_id,
     };
+  }
+
+  private async recoverySnapshotCurrent(
+    tenant: TenantDocument,
+    attempt: NonNullable<Awaited<ReturnType<PaymentFoundationStore['getAttemptByPublicId']>>>,
+    appointment: Awaited<ReturnType<PaymentFoundationStore['getAttemptContext']>>['appointment'],
+  ) {
+    const [service, provider] = await Promise.all([
+      this.admin.getServiceById(tenant._id, appointment.service_id),
+      this.admin.getProviderById(tenant._id, appointment.provider_id),
+    ]);
+    if (!service || !provider) return false;
+    const assignment = await this.admin.findAppointmentAssignment(
+      tenant._id,
+      provider._id,
+      service._id,
+    );
+    const snapshot = await this.payments.executionSnapshot(tenant._id, service._id);
+    const configuration = snapshot.serviceConfiguration;
+    if (
+      tenant.public_booking_terms.version !== appointment.booking_terms?.version ||
+      this.environment.BOOKNOWTECH_PAYMENT_TERMS_VERSION !==
+        attempt.payment_terms_acceptance.version ||
+      this.environment.BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256 !==
+        attempt.payment_terms_acceptance.document_sha256 ||
+      service.status !== 'active' ||
+      !service.publicly_bookable ||
+      provider.status !== 'active' ||
+      !provider.customer_selectable ||
+      !provider.accepting_new_clients ||
+      !assignment ||
+      assignment.status !== 'active' ||
+      !assignment._id.equals(appointment.provider_service_assignment_id) ||
+      service.base_price_minor !== appointment.snapshot.base_price_minor ||
+      service.duration_minutes !== appointment.snapshot.service_duration_minutes ||
+      service.delivery_mode !== appointment.snapshot.delivery_mode ||
+      assignment.buffer_before_minutes !== appointment.snapshot.buffer_before_minutes ||
+      assignment.buffer_after_minutes !== appointment.snapshot.buffer_after_minutes ||
+      configuration?.configuration_public_id !==
+        attempt.configuration_snapshot.service_payment_configuration_public_id ||
+      configuration.version !==
+        attempt.configuration_snapshot.service_payment_configuration_version ||
+      snapshot.account?.public_id !== attempt.tenant_stripe_account_public_id
+    )
+      return false;
+    try {
+      return (
+        JSON.stringify(
+          toAmountSnapshot(
+            calculatePaymentAmounts({
+              servicePriceMinor: service.base_price_minor,
+              paymentMode: configuration.payment_mode as 'fixed_deposit' | 'full',
+              fixedDepositMinor: configuration.fixed_deposit_minor,
+              booknowtechFeeMinor: attempt.amount_snapshot.booknowtech_fee_minor,
+              currency: 'USD',
+            }),
+          ),
+        ) === JSON.stringify(attempt.amount_snapshot)
+      );
+    } catch {
+      return false;
+    }
   }
 
   private async staleReplay(

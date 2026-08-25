@@ -1012,6 +1012,45 @@ button:disabled {
   color: var(--booking-accent, #1261a0);
 }
 
+.public-payment-checkout {
+  background: #fff;
+  border: 1px solid #d8e1e8;
+  border-radius: 0.75rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+}
+
+.public-payment-breakdown dl {
+  margin: 1rem 0;
+}
+
+.public-payment-breakdown dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+}
+
+.public-payment-breakdown dd {
+  margin: 0;
+  text-align: right;
+}
+
+.public-payment-total {
+  border-top: 2px solid #263746;
+  font-weight: 700;
+}
+
+.public-payment-hold {
+  border-left: 0.3rem solid var(--booking-accent);
+  background: #f4f8fb;
+  padding: 0.75rem 1rem;
+}
+
+.public-payment-checkout form > button {
+  margin-top: 1rem;
+  width: 100%;
+}
+
 /* Manage-appointment primary actions follow the tenant accent, matching the booking flow. */
 .management-content .management-actions button:not(.secondary-button):not(.danger-button) {
   background: var(--booking-accent);
