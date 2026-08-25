@@ -14,6 +14,8 @@
   },
   "dependencies": {
     "@booknowtech/shared": "workspace:*",
+    "@stripe/react-stripe-js": "5.6.0",
+    "@stripe/stripe-js": "8.9.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "sirv-cli": "3.0.1",

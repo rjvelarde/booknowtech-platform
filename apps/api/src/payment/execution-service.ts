@@ -19,6 +19,7 @@ export interface PublicPaymentAttemptResponse {
     | 'succeeded';
   expires_at: string;
   client_secret: string | null;
+  stripe_account: string | null;
   amounts: {
     service_price_minor: number;
     provider_amount_due_now_minor: number;
@@ -61,6 +62,7 @@ export class PaymentExecutionService {
         appointmentReference: input.appointmentReference,
         appointmentStatus: input.appointmentStatus,
         clientSecret: null,
+        connectedAccountId: input.connectedAccountId,
       });
     const attempt = input.attempt.stripe_payment_intent_id
       ? input.attempt
@@ -108,6 +110,7 @@ export class PaymentExecutionService {
       appointmentStatus:
         linked.state === 'failed_terminal' ? 'payment_failed' : input.appointmentStatus,
       clientSecret: intent.clientSecret,
+      connectedAccountId: input.connectedAccountId,
     });
   }
 
@@ -136,6 +139,7 @@ export function publicPaymentAttemptResponse(input: {
   appointmentReference: string;
   appointmentStatus: PublicPaymentAttemptResponse['appointment_status'];
   clientSecret: string | null;
+  connectedAccountId: string;
 }): PublicPaymentAttemptResponse {
   return {
     appointment_reference: input.appointmentReference,
@@ -152,6 +156,7 @@ export function publicPaymentAttemptResponse(input: {
     ].includes(input.attempt.state)
       ? input.clientSecret
       : null,
+    stripe_account: input.clientSecret ? input.connectedAccountId : null,
     amounts: {
       service_price_minor: input.attempt.amount_snapshot.service_price_minor,
       provider_amount_due_now_minor: input.attempt.amount_snapshot.provider_amount_due_now_minor,

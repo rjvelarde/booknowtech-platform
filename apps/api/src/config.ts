@@ -28,6 +28,7 @@ const environmentSchema = z.object({
   RATE_LIMIT_KEY_SECRET: z.string().min(32),
   MONITORING_TOKEN: z.string().min(48).max(256),
   STRIPE_SECRET_KEY: z.string().min(16).optional(),
+  STRIPE_PUBLISHABLE_KEY: z.string().min(16).optional(),
   STRIPE_PLATFORM_WEBHOOK_SECRET: z.string().min(16).optional(),
   STRIPE_CONNECT_WEBHOOK_SECRET: z.string().min(16).optional(),
   STRIPE_CONNECT_COUNTRY: z.literal('US').default('US'),
@@ -141,6 +142,7 @@ function validatePaymentExecutionConfiguration(
     'BOOKNOWTECH_PAYMENT_TERMS_VERSION',
     'BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256',
     'PAYMENT_IP_HASH_SECRET',
+    'STRIPE_PUBLISHABLE_KEY',
   ] as const)
     if (environment[name] === undefined)
       throw new Error(`Invalid environment configuration: ${name}`);
@@ -160,10 +162,16 @@ function validateStripeConfiguration(environment: z.infer<typeof environmentSche
   if (environment.STRIPE_PAYMENTS_FOUNDATION_ENABLED && configured === 0)
     throw new Error('Invalid environment configuration: Stripe Connect configuration');
   if (configured === 0) return;
-  if (environment.STRIPE_PLATFORM_WEBHOOK_SECRET === environment.STRIPE_CONNECT_WEBHOOK_SECRET)
-    throw new Error('Invalid environment configuration: Stripe webhook secret separation');
   const live = environment.STRIPE_SECRET_KEY!.startsWith('sk_live_');
   const test = environment.STRIPE_SECRET_KEY!.startsWith('sk_test_');
+  if (environment.STRIPE_PUBLISHABLE_KEY) {
+    const publishableLive = environment.STRIPE_PUBLISHABLE_KEY.startsWith('pk_live_');
+    const publishableTest = environment.STRIPE_PUBLISHABLE_KEY.startsWith('pk_test_');
+    if ((!publishableLive && !publishableTest) || publishableLive !== live)
+      throw new Error('Invalid environment configuration: STRIPE_PUBLISHABLE_KEY');
+  }
+  if (environment.STRIPE_PLATFORM_WEBHOOK_SECRET === environment.STRIPE_CONNECT_WEBHOOK_SECRET)
+    throw new Error('Invalid environment configuration: Stripe webhook secret separation');
   if ((!live && !test) || (environment.ENVIRONMENT_ID === 'production' ? !live : !test))
     throw new Error('Invalid environment configuration: Stripe key mode');
   if (

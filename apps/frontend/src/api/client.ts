@@ -118,6 +118,11 @@ export interface PublicBookingContextView {
   locale: string;
   currency: string;
   booking_terms: PublicBookingSettingsView['public_booking_terms'];
+  payment_checkout: {
+    stripe_publishable_key: string;
+    terms_version: string;
+    terms_document_sha256: string;
+  } | null;
 }
 
 export interface PublicServiceView {
@@ -130,6 +135,35 @@ export interface PublicServiceView {
   booking_fee_minor: number;
   currency: string;
   policy: { minimum_lead_minutes: number; maximum_advance_days: number };
+  payment_mode: 'none' | 'fixed_deposit' | 'full';
+}
+
+export interface PublicPaymentAttemptView {
+  appointment_reference: string;
+  appointment_status: 'payment_pending' | 'payment_failed' | 'payment_expired' | 'scheduled';
+  payment_attempt_public_id: string;
+  payment_status:
+    | 'payment_method_required'
+    | 'customer_action_required'
+    | 'processing'
+    | 'recoverable_failure'
+    | 'terminal_failure'
+    | 'expired'
+    | 'temporary_recovery'
+    | 'manual_review'
+    | 'succeeded';
+  expires_at: string;
+  client_secret: string | null;
+  stripe_account: string | null;
+  amounts: {
+    service_price_minor: number;
+    provider_amount_due_now_minor: number;
+    booknowtech_fee_minor: number;
+    customer_total_due_now_minor: number;
+    application_fee_amount_minor: number;
+    remaining_service_balance_minor: number;
+    currency: 'USD';
+  };
 }
 
 export interface PublicProviderView {
@@ -698,8 +732,20 @@ export function listPublicStarts(
 export function createPublicAppointment(
   input: Record<string, unknown>,
   idempotencyKey: string,
-): Promise<PublicAppointmentConfirmationView> {
+): Promise<PublicAppointmentConfirmationView | PublicPaymentAttemptView> {
   return request('/v1/public/appointments', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+}
+
+export function continuePublicPaymentAttempt(
+  attemptPublicId: string,
+  input: Record<string, unknown>,
+  idempotencyKey: string,
+): Promise<PublicPaymentAttemptView> {
+  return request(`/v1/public/payment-attempts/${encodeURIComponent(attemptPublicId)}/continue`, {
     method: 'POST',
     body: JSON.stringify(input),
     headers: { 'Idempotency-Key': idempotencyKey },

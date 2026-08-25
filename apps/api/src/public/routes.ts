@@ -173,7 +173,7 @@ export function registerPublicBookingRoutes(
     async (request, reply) => {
       const tenant = await resolvePublicTenant(request, reply, hostResolver);
       if (!tenant) return;
-      return cacheablePublicReply(request, reply, bookingContextView(tenant));
+      return cacheablePublicReply(request, reply, bookingContextView(tenant, environment));
     },
   );
 
@@ -185,7 +185,14 @@ export function registerPublicBookingRoutes(
       if (!tenant) return;
       const services = await store.listPublicServices(tenant._id);
       return cacheablePublicReply(request, reply, {
-        items: services.map((service) => publicServiceView(service, tenant)),
+        items: await Promise.all(
+          services.map(async (service) => ({
+            ...publicServiceView(service, tenant),
+            payment_mode: paidBooking
+              ? await paidBooking.paymentMode(tenant._id, service._id)
+              : 'none',
+          })),
+        ),
       });
     },
   );
@@ -851,7 +858,7 @@ async function publicService(store: AdminStore, tenant: TenantDocument, publicId
   return service?.status === 'active' && service.publicly_bookable ? service : null;
 }
 
-function bookingContextView(tenant: TenantDocument) {
+function bookingContextView(tenant: TenantDocument, environment: Environment) {
   return {
     business: {
       public_id: tenant.public_id,
@@ -868,6 +875,17 @@ function bookingContextView(tenant: TenantDocument) {
     locale: tenant.locale,
     currency: tenant.currency,
     booking_terms: tenant.public_booking_terms,
+    payment_checkout:
+      environment.STRIPE_PAYMENT_EXECUTION_ENABLED &&
+      environment.STRIPE_PUBLISHABLE_KEY &&
+      environment.BOOKNOWTECH_PAYMENT_TERMS_VERSION &&
+      environment.BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256
+        ? {
+            stripe_publishable_key: environment.STRIPE_PUBLISHABLE_KEY,
+            terms_version: environment.BOOKNOWTECH_PAYMENT_TERMS_VERSION,
+            terms_document_sha256: environment.BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256,
+          }
+        : null,
   };
 }
 

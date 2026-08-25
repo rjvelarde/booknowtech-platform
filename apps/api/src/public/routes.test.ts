@@ -90,6 +90,7 @@ describe('public booking discovery', () => {
       locale: 'en-US',
       currency: 'USD',
       booking_terms: tenant.public_booking_terms,
+      payment_checkout: null,
     });
     expect(first.body).not.toContain('legal_name');
     expect(first.body).not.toContain('tenant_id');

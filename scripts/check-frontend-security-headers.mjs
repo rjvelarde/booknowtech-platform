@@ -8,7 +8,7 @@ const apiPort = Number(process.env.FRONTEND_SECURITY_API_PORT ?? 19081);
 const container = `booknowtech-security-headers-${randomUUID()}`;
 const expectedHeaders = {
   'content-security-policy':
-    "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'; connect-src 'self'; frame-src 'none'; manifest-src 'self'; upgrade-insecure-requests; block-all-mixed-content",
+    "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'; connect-src 'self' https://api.stripe.com https://r.stripe.com; frame-src https://js.stripe.com https://hooks.stripe.com; manifest-src 'self'; upgrade-insecure-requests; block-all-mixed-content",
   'strict-transport-security': 'max-age=300',
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'strict-origin-when-cross-origin',
