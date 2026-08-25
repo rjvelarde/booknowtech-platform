@@ -416,6 +416,9 @@ const validators: Record<string, Document> = {
         idempotency_key_hash: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
         request_fingerprint: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
         client_request_fingerprint: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+        recovery_token_hash: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+        recovery_hostname_hash: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+        recovery_expires_at: { bsonType: 'date' },
         amount_snapshot: {
           bsonType: 'object',
           additionalProperties: false,
@@ -2074,6 +2077,12 @@ export async function migrateDatabase(db: Db): Promise<void> {
   ]);
   await db.collection('payment_attempts').createIndexes([
     { key: { public_id: 1 }, name: 'payment_attempts_public_id_unique', unique: true },
+    {
+      key: { recovery_token_hash: 1 },
+      name: 'payment_attempts_recovery_token_unique',
+      unique: true,
+      partialFilterExpression: { recovery_token_hash: { $type: 'string' } },
+    },
     {
       key: { tenant_id: 1, idempotency_key_hash: 1 },
       name: 'payment_attempts_tenant_idempotency_unique',

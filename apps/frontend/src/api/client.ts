@@ -155,6 +155,7 @@ export interface PublicPaymentAttemptView {
   expires_at: string;
   client_secret: string | null;
   stripe_account: string | null;
+  continuation_allowed: boolean;
   amounts: {
     service_price_minor: number;
     provider_amount_due_now_minor: number;
@@ -750,6 +751,12 @@ export function continuePublicPaymentAttempt(
     body: JSON.stringify(input),
     headers: { 'Idempotency-Key': idempotencyKey },
   });
+}
+
+export function recoverPublicPaymentAttempt(
+  attemptPublicId: string,
+): Promise<PublicPaymentAttemptView> {
+  return request(`/v1/public/payment-attempts/${encodeURIComponent(attemptPublicId)}`);
 }
 
 export function getManagedAppointment(

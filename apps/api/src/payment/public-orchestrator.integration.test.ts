@@ -104,6 +104,7 @@ suite('PR 14B.2 paid public-booking transaction', () => {
     BOOKNOWTECH_PAYMENT_TERMS_VERSION: 'payments-v1',
     BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256: 'b'.repeat(64),
     PAYMENT_IP_HASH_SECRET: 'payment-ip-hash-secret-distinct-value',
+    CHECKOUT_RECOVERY_TOKEN_SECRET: 'checkout-recovery-secret-distinct-value',
   } as Environment;
 
   beforeAll(async () => {
@@ -111,7 +112,9 @@ suite('PR 14B.2 paid public-booking transaction', () => {
     await migrateDatabase(db);
     vi.spyOn(admin, 'getPublicTenantBySlug').mockResolvedValue(tenant);
     vi.spyOn(admin, 'getService').mockResolvedValue(service);
+    vi.spyOn(admin, 'getServiceById').mockResolvedValue(service);
     vi.spyOn(admin, 'getProvider').mockResolvedValue(provider);
+    vi.spyOn(admin, 'getProviderById').mockResolvedValue(provider);
     vi.spyOn(admin, 'findAppointmentAssignment').mockResolvedValue(assignment);
     vi.spyOn(admin, 'getAvailabilitySchedule').mockResolvedValue({
       timezone: 'UTC',
@@ -209,6 +212,7 @@ suite('PR 14B.2 paid public-booking transaction', () => {
       initialService: service,
       initialProvider: provider,
       initialAssignment: assignment,
+      hostname: 'brazilian-wax.booknowtech.com',
     };
     const first = await orchestrator.create(input);
     const replay = await orchestrator.create(input);
@@ -270,9 +274,100 @@ suite('PR 14B.2 paid public-booking transaction', () => {
     expect(await db.collection('appointments').countDocuments()).toBe(1);
   });
 
+  it('recovers the same attempt and intent only for the bound tenant, host, and credential', async () => {
+    const orchestrator = new PublicPaidBookingOrchestrator(
+      environment,
+      admin,
+      payments,
+      new PaymentExecutionService(payments, stripe),
+    );
+    const input = {
+      tenant,
+      body: bookingBody(),
+      idempotencyKey: randomUUID(),
+      requestId: randomUUID(),
+      correlationId: randomUUID(),
+      ipAddress: '192.0.2.10',
+      initialService: service,
+      initialProvider: provider,
+      initialAssignment: assignment,
+      hostname: 'brazilian-wax.booknowtech.com',
+    };
+    const created = await orchestrator.create(input);
+    const credential = await orchestrator.recoveryCredential({
+      tenant,
+      attemptPublicId: created.payment_attempt_public_id,
+      hostname: input.hostname,
+    });
+    expect(credential.maxAgeSeconds).toBeGreaterThan(15 * 60);
+    expect(credential.maxAgeSeconds).toBeLessThanOrEqual(3 * 60 * 60);
+
+    const recovered = await orchestrator.recover({
+      tenant,
+      attemptPublicId: created.payment_attempt_public_id,
+      hostname: input.hostname,
+      token: credential.token,
+    });
+    expect(recovered).toMatchObject({
+      payment_attempt_public_id: created.payment_attempt_public_id,
+      client_secret: 'pi_client_secret_return_only',
+      continuation_allowed: true,
+    });
+    expect(stripe.retrievePaymentIntent).toHaveBeenCalledWith(
+      expect.objectContaining({ connectedAccountId: 'acct_serveronly' }),
+    );
+    await expect(
+      orchestrator.recover({
+        tenant,
+        attemptPublicId: created.payment_attempt_public_id,
+        hostname: input.hostname,
+        token: `${credential.token.slice(0, -1)}x`,
+      }),
+    ).rejects.toMatchObject({ status: 404, code: 'payment_attempt_not_found' });
+    await expect(
+      orchestrator.recover({
+        tenant,
+        attemptPublicId: created.payment_attempt_public_id,
+        hostname: 'unrelated.example.test',
+        token: credential.token,
+      }),
+    ).rejects.toMatchObject({ status: 404, code: 'payment_attempt_not_found' });
+    await expect(
+      orchestrator.recover({
+        tenant: Object.assign({}, tenant as object, {
+          _id: new ObjectId(),
+          public_id: randomUUID(),
+        }) as never,
+        attemptPublicId: created.payment_attempt_public_id,
+        hostname: input.hostname,
+        token: credential.token,
+      }),
+    ).rejects.toMatchObject({ status: 404, code: 'payment_attempt_not_found' });
+
+    await db
+      .collection('payment_attempts')
+      .updateOne(
+        { public_id: created.payment_attempt_public_id },
+        { $set: { state: 'processing' } },
+      );
+    await expect(
+      orchestrator.recover({
+        tenant,
+        attemptPublicId: created.payment_attempt_public_id,
+        hostname: input.hostname,
+        token: credential.token,
+      }),
+    ).resolves.toMatchObject({
+      payment_status: 'processing',
+      client_secret: null,
+      continuation_allowed: false,
+    });
+  });
+
   it('fails closed before local writes or Stripe when execution is disabled', async () => {
     serviceRecord.base_price_minor = 10_000;
     const before = await db.collection('payment_attempts').countDocuments();
+    const beforeStripeCreates = stripe.createDirectChargePaymentIntent.mock.calls.length;
     const orchestrator = new PublicPaidBookingOrchestrator(
       { ...environment, STRIPE_PAYMENT_EXECUTION_ENABLED: false },
       admin,
@@ -290,10 +385,11 @@ suite('PR 14B.2 paid public-booking transaction', () => {
         initialService: service,
         initialProvider: provider,
         initialAssignment: assignment,
+        hostname: 'brazilian-wax.booknowtech.com',
       }),
     ).rejects.toMatchObject({ status: 503, code: 'payment_execution_disabled' });
     expect(await db.collection('payment_attempts').countDocuments()).toBe(before);
-    expect(stripe.createDirectChargePaymentIntent).toHaveBeenCalledTimes(1);
+    expect(stripe.createDirectChargePaymentIntent).toHaveBeenCalledTimes(beforeStripeCreates);
   });
 
   it('converges concurrent requests on one local graph and one Stripe idempotency key', async () => {
@@ -316,6 +412,7 @@ suite('PR 14B.2 paid public-booking transaction', () => {
       initialService: service,
       initialProvider: provider,
       initialAssignment: assignment,
+      hostname: 'brazilian-wax.booknowtech.com',
     };
 
     const results = await Promise.all([orchestrator.create(input), orchestrator.create(input)]);
@@ -345,6 +442,7 @@ suite('PR 14B.2 paid public-booking transaction', () => {
       initialService: service,
       initialProvider: provider,
       initialAssignment: assignment,
+      hostname: 'brazilian-wax.booknowtech.com',
     };
     const created = await orchestrator.create(input);
     const oldAccount = await db.collection('tenant_stripe_accounts').findOne({
@@ -405,6 +503,7 @@ suite('PR 14B.2 paid public-booking transaction', () => {
       initialService: service,
       initialProvider: provider,
       initialAssignment: assignment,
+      hostname: 'brazilian-wax.booknowtech.com',
     };
     const created = await orchestrator.create(input);
     const changedTerms = new PublicPaidBookingOrchestrator(

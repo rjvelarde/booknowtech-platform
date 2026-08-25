@@ -62,6 +62,7 @@ const environmentSchema = z.object({
     .regex(/^[a-f0-9]{64}$/u)
     .optional(),
   PAYMENT_IP_HASH_SECRET: z.string().min(32).optional(),
+  CHECKOUT_RECOVERY_TOKEN_SECRET: z.string().min(32).optional(),
 });
 
 type ParsedEnvironment = z.infer<typeof environmentSchema>;
@@ -100,6 +101,11 @@ export function loadEnvironment(source: NodeJS.ProcessEnv = process.env): Enviro
     throw new Error('Invalid environment configuration: MONITORING_TOKEN');
   if (environment.PAYMENT_IP_HASH_SECRET && unsafeSecret.test(environment.PAYMENT_IP_HASH_SECRET))
     throw new Error('Invalid environment configuration: PAYMENT_IP_HASH_SECRET');
+  if (
+    environment.CHECKOUT_RECOVERY_TOKEN_SECRET &&
+    unsafeSecret.test(environment.CHECKOUT_RECOVERY_TOKEN_SECRET)
+  )
+    throw new Error('Invalid environment configuration: CHECKOUT_RECOVERY_TOKEN_SECRET');
   if (environment.PUBLIC_APPOINTMENT_TOKEN_SECRET === environment.RATE_LIMIT_KEY_SECRET)
     throw new Error('Invalid environment configuration: environment-specific secrets');
   if (
@@ -117,6 +123,16 @@ export function loadEnvironment(source: NodeJS.ProcessEnv = process.env): Enviro
     ].includes(environment.PAYMENT_IP_HASH_SECRET)
   )
     throw new Error('Invalid environment configuration: PAYMENT_IP_HASH_SECRET separation');
+  if (
+    environment.CHECKOUT_RECOVERY_TOKEN_SECRET &&
+    [
+      environment.PUBLIC_APPOINTMENT_TOKEN_SECRET,
+      environment.RATE_LIMIT_KEY_SECRET,
+      environment.MONITORING_TOKEN,
+      environment.PAYMENT_IP_HASH_SECRET,
+    ].includes(environment.CHECKOUT_RECOVERY_TOKEN_SECRET)
+  )
+    throw new Error('Invalid environment configuration: CHECKOUT_RECOVERY_TOKEN_SECRET separation');
   if (
     ['staging', 'production'].includes(environment.ENVIRONMENT_ID) &&
     !environment.MONITORING_TOKEN.startsWith(`bnt_monitoring_${environment.ENVIRONMENT_ID}_`)
@@ -143,6 +159,7 @@ function validatePaymentExecutionConfiguration(
     'BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256',
     'PAYMENT_IP_HASH_SECRET',
     'STRIPE_PUBLISHABLE_KEY',
+    'CHECKOUT_RECOVERY_TOKEN_SECRET',
   ] as const)
     if (environment[name] === undefined)
       throw new Error(`Invalid environment configuration: ${name}`);

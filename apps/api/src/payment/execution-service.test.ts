@@ -215,6 +215,9 @@ function attemptFixture(): PaymentAttemptDocument {
     idempotency_key_hash: 'a'.repeat(64),
     request_fingerprint: 'b'.repeat(64),
     client_request_fingerprint: 'e'.repeat(64),
+    recovery_token_hash: '6'.repeat(64),
+    recovery_hostname_hash: '7'.repeat(64),
+    recovery_expires_at: new Date(Date.now() + 10_800_000),
     amount_snapshot: {
       service_price_minor: 10_000,
       payment_mode: 'fixed_deposit',

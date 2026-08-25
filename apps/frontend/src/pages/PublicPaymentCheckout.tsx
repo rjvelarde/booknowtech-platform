@@ -2,24 +2,18 @@ import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-
 import { loadStripe } from '@stripe/stripe-js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  ApiError,
-  type PublicPaymentAttemptView,
-  continuePublicPaymentAttempt,
-} from '../api/client.js';
+import { ApiError, type PublicPaymentAttemptView } from '../api/client.js';
 
 export function PublicPaymentCheckout({
   attempt,
-  requestBody,
-  idempotencyKey,
   publishableKey,
+  recover,
   onUpdate,
   onRestart,
 }: {
   attempt: PublicPaymentAttemptView;
-  requestBody: Record<string, unknown>;
-  idempotencyKey: string;
   publishableKey: string;
+  recover: () => Promise<PublicPaymentAttemptView>;
   onUpdate: (attempt: PublicPaymentAttemptView) => void;
   onRestart: (message: string) => void;
 }) {
@@ -59,12 +53,21 @@ export function PublicPaymentCheckout({
         error={refreshError}
         onAction={() => {
           setRefreshError(null);
-          void refreshAttempt(attempt, requestBody, idempotencyKey, onUpdate, onRestart).catch(() =>
+          void refreshAttempt(recover, onUpdate, onRestart).catch(() =>
             setRefreshError(
               'Payment status could not be checked. Do not submit another payment; try again shortly.',
             ),
           );
         }}
+      />
+    );
+  if (!attempt.continuation_allowed)
+    return (
+      <CheckoutStatus
+        title="Payment can no longer continue"
+        message="This checkout is not payment-actionable. Start again to use current availability and pricing."
+        action="Start again"
+        onAction={() => onRestart('Please choose an available time and start a new checkout.')}
       />
     );
   if (!attempt.client_secret || !stripePromise)
@@ -76,7 +79,7 @@ export function PublicPaymentCheckout({
         error={refreshError}
         onAction={() => {
           setRefreshError(null);
-          void refreshAttempt(attempt, requestBody, idempotencyKey, onUpdate, onRestart).catch(() =>
+          void refreshAttempt(recover, onUpdate, onRestart).catch(() =>
             setRefreshError(
               'Payment status could not be checked. Do not submit another payment; try again shortly.',
             ),
@@ -99,8 +102,7 @@ export function PublicPaymentCheckout({
       >
         <PaymentForm
           attempt={attempt}
-          requestBody={requestBody}
-          idempotencyKey={idempotencyKey}
+          recover={recover}
           onUpdate={onUpdate}
           onRestart={onRestart}
         />
@@ -111,14 +113,12 @@ export function PublicPaymentCheckout({
 
 function PaymentForm({
   attempt,
-  requestBody,
-  idempotencyKey,
+  recover,
   onUpdate,
   onRestart,
 }: {
   attempt: PublicPaymentAttemptView;
-  requestBody: Record<string, unknown>;
-  idempotencyKey: string;
+  recover: () => Promise<PublicPaymentAttemptView>;
   onUpdate: (attempt: PublicPaymentAttemptView) => void;
   onRestart: (message: string) => void;
 }) {
@@ -150,7 +150,7 @@ function PaymentForm({
               setError('Your card could not be confirmed. Review the card details and try again.');
               return;
             }
-            await refreshAttempt(attempt, requestBody, idempotencyKey, onUpdate, onRestart);
+            await refreshAttempt(recover, onUpdate, onRestart);
           })
           .catch(() =>
             setError('Payment status could not be checked. Your appointment is not confirmed.'),
@@ -257,20 +257,12 @@ function CheckoutStatus({
 }
 
 async function refreshAttempt(
-  attempt: PublicPaymentAttemptView,
-  requestBody: Record<string, unknown>,
-  idempotencyKey: string,
+  recover: () => Promise<PublicPaymentAttemptView>,
   onUpdate: (attempt: PublicPaymentAttemptView) => void,
   onRestart: (message: string) => void,
 ) {
   try {
-    onUpdate(
-      await continuePublicPaymentAttempt(
-        attempt.payment_attempt_public_id,
-        requestBody,
-        idempotencyKey,
-      ),
-    );
+    onUpdate(await recover());
   } catch (reason) {
     if (
       reason instanceof ApiError &&

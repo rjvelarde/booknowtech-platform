@@ -14,6 +14,7 @@ import {
   listPublicProviders,
   listPublicServices,
   listPublicStarts,
+  recoverPublicPaymentAttempt,
 } from '../api/client.js';
 import { PublicPaymentCheckout } from './PublicPaymentCheckout.js';
 
@@ -32,7 +33,6 @@ export function PublicBookingPage() {
   const [review, setReview] = useState<Record<string, string> | null>(null);
   const [confirmation, setConfirmation] = useState<PublicAppointmentConfirmationView | null>(null);
   const [paymentAttempt, setPaymentAttempt] = useState<PublicPaymentAttemptView | null>(null);
-  const [paymentRequest, setPaymentRequest] = useState<Record<string, unknown> | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
 
@@ -52,6 +52,19 @@ export function PublicBookingPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    const match = /^\/book\/checkout\/([0-9a-f-]{36})$/iu.exec(window.location.pathname);
+    if (!match?.[1]) return;
+    setLoading(true);
+    void recoverPublicPaymentAttempt(match[1])
+      .then(setPaymentAttempt)
+      .catch(() => {
+        window.history.replaceState({}, '', '/book');
+        setError('This secure checkout could not be recovered. Please start a new booking.');
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
   const chooseService = async (next: PublicServiceView) => {
     setService(next);
     setProvider(null);
@@ -61,7 +74,6 @@ export function PublicBookingPage() {
     setReview(null);
     setConfirmation(null);
     setPaymentAttempt(null);
-    setPaymentRequest(null);
     setLoading(true);
     setError(null);
     try {
@@ -223,7 +235,6 @@ export function PublicBookingPage() {
                     setReview(null);
                     setConfirmation(null);
                     setPaymentAttempt(null);
-                    setPaymentRequest(null);
                     setError(null);
                   }}
                 >
@@ -241,19 +252,18 @@ export function PublicBookingPage() {
           </Step>
         ) : null}
 
-        {paymentAttempt && paymentRequest && context.payment_checkout ? (
+        {paymentAttempt && context.payment_checkout ? (
           <PublicPaymentCheckout
             attempt={paymentAttempt}
-            requestBody={paymentRequest}
-            idempotencyKey={idempotencyKey}
             publishableKey={context.payment_checkout.stripe_publishable_key}
+            recover={() => recoverPublicPaymentAttempt(paymentAttempt.payment_attempt_public_id)}
             onUpdate={setPaymentAttempt}
             onRestart={(message) => {
               setPaymentAttempt(null);
-              setPaymentRequest(null);
               setReview(null);
               setSelectedStart(null);
               setIdempotencyKey(crypto.randomUUID());
+              window.history.replaceState({}, '', '/book');
               setError(message);
             }}
           />
@@ -338,11 +348,16 @@ export function PublicBookingPage() {
                         : {}),
                       website: '',
                     };
-                    setPaymentRequest(requestBody);
                     void createPublicAppointment(requestBody, idempotencyKey)
                       .then((result) => {
-                        if ('payment_status' in result) setPaymentAttempt(result);
-                        else setConfirmation(result);
+                        if ('payment_status' in result) {
+                          window.history.replaceState(
+                            {},
+                            '',
+                            `/book/checkout/${result.payment_attempt_public_id}`,
+                          );
+                          setPaymentAttempt(result);
+                        } else setConfirmation(result);
                       })
                       .catch((reason: unknown) => {
                         if (
@@ -351,7 +366,6 @@ export function PublicBookingPage() {
                         ) {
                           setSelectedStart(null);
                           setReview(null);
-                          setPaymentRequest(null);
                           setIdempotencyKey(crypto.randomUUID());
                           setError(
                             'That time was just taken. Please choose another available time.',
@@ -361,7 +375,6 @@ export function PublicBookingPage() {
                           reason.code === 'booking_terms_changed'
                         ) {
                           setReview(null);
-                          setPaymentRequest(null);
                           setError('The booking terms changed. Please review them and try again.');
                         } else if (
                           reason instanceof ApiError &&
@@ -371,7 +384,6 @@ export function PublicBookingPage() {
                         ) {
                           setReview(null);
                           setSelectedStart(null);
-                          setPaymentRequest(null);
                           setIdempotencyKey(crypto.randomUUID());
                           setError(
                             'Booking details changed. Choose a current time and start a new checkout.',

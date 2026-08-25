@@ -10,6 +10,7 @@ import {
   type TenantDocument,
 } from '../admin/store.js';
 import { buildApplication } from '../app.js';
+import type { PublicPaidBookingOrchestrator } from '../payment/public-orchestrator.js';
 import { StubReadinessProbe, testEnvironment } from '../test-fixtures.js';
 import { publicRequestFingerprint } from './routes.js';
 
@@ -263,9 +264,46 @@ describe('public booking discovery', () => {
     expect(response.body).not.toContain('taylor@example.test');
     await app.close();
   });
+
+  it('recovers only with the host-scoped HttpOnly credential and reveals no state otherwise', async () => {
+    const recover = vi.fn().mockResolvedValue(paymentAttemptView());
+    const paidBooking = { recover } as unknown as PublicPaidBookingOrchestrator;
+    const { app, store, tenant } = await testApp(testEnvironment, paidBooking);
+    vi.spyOn(store, 'getPublicTenantBySlug').mockResolvedValue(tenant);
+
+    const missing = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/payment-attempts/11111111-1111-4111-8111-111111111111',
+      headers: { host: 'brazilian-wax.booknowtech.com' },
+    });
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json().error.code).toBe('payment_attempt_not_found');
+    expect(recover).not.toHaveBeenCalled();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/payment-attempts/11111111-1111-4111-8111-111111111111',
+      headers: {
+        host: 'brazilian-wax.booknowtech.com',
+        cookie: '__Secure-bnt_checkout_recovery=opaque_recovery_value',
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(recover).toHaveBeenCalledWith({
+      tenant,
+      attemptPublicId: '11111111-1111-4111-8111-111111111111',
+      hostname: 'brazilian-wax.booknowtech.com',
+      token: 'opaque_recovery_value',
+    });
+    await app.close();
+  });
 });
 
-async function testApp(environment = testEnvironment) {
+async function testApp(
+  environment = testEnvironment,
+  paidBookingOrchestrator?: PublicPaidBookingOrchestrator,
+) {
   const store = Object.create(AdminStore.prototype) as AdminStore;
   vi.spyOn(store, 'getPublicTenantByCustomHostname').mockResolvedValue(null);
   vi.spyOn(store, 'getSelfServiceTenantByCustomHostname').mockResolvedValue(null);
@@ -275,9 +313,32 @@ async function testApp(environment = testEnvironment) {
     environment: { ...environment, TENANT_ADMIN_ENABLED: true },
     readiness: new StubReadinessProbe(),
     adminStore: store,
+    ...(paidBookingOrchestrator ? { paidBookingOrchestrator } : {}),
     logger: false,
   });
   return { app, store, tenant };
+}
+
+function paymentAttemptView() {
+  return {
+    appointment_reference: 'BNT-RECOVER',
+    appointment_status: 'payment_pending' as const,
+    payment_attempt_public_id: '11111111-1111-4111-8111-111111111111',
+    payment_status: 'payment_method_required' as const,
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+    client_secret: 'pi_test_secret_transient',
+    stripe_account: 'acct_test',
+    continuation_allowed: true,
+    amounts: {
+      service_price_minor: 10_000,
+      provider_amount_due_now_minor: 2_500,
+      booknowtech_fee_minor: 125,
+      customer_total_due_now_minor: 2_625,
+      application_fee_amount_minor: 125,
+      remaining_service_balance_minor: 7_500,
+      currency: 'USD' as const,
+    },
+  };
 }
 
 function tenantFixture(): TenantDocument {

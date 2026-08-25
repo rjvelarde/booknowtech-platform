@@ -19,6 +19,7 @@ import { dateRange, generateSlots, localToUtc, previewDay } from '../availabilit
 import { authenticateAdminMutation, authenticateAdminRequest } from '../auth/routes.js';
 import type { Environment } from '../config.js';
 import type { PublicPaidBookingOrchestrator } from '../payment/public-orchestrator.js';
+import { clearRecoveryCookie, recoveryCookie, recoveryCookieToken } from '../payment/recovery.js';
 import { TenantHostResolver } from './tenant-host-resolver.js';
 
 const managers = new Set(['tenant_owner', 'tenant_admin']);
@@ -415,9 +416,16 @@ export function registerPublicBookingRoutes(
               initialService,
               initialProvider: initialSubject.provider,
               initialAssignment: initialSubject.assignment,
+              hostname: request.hostname,
+            });
+            const credential = await paidBooking.recoveryCredential({
+              tenant,
+              attemptPublicId: payment.payment_attempt_public_id,
+              hostname: request.hostname,
             });
             return reply
               .header('Cache-Control', 'no-store')
+              .header('Set-Cookie', recoveryCookie(credential.token, credential.maxAgeSeconds))
               .status(201)
               .send(envelope(payment, request.id));
           } catch (reason) {
@@ -693,7 +701,61 @@ export function registerPublicBookingRoutes(
           initialService,
           initialProvider: initialSubject.provider,
           initialAssignment: initialSubject.assignment,
+          hostname: request.hostname,
         });
+        const credential = await paidBooking.recoveryCredential({
+          tenant,
+          attemptPublicId: payment.payment_attempt_public_id,
+          hostname: request.hostname,
+        });
+        return reply
+          .header('Cache-Control', 'no-store')
+          .header('Set-Cookie', recoveryCookie(credential.token, credential.maxAgeSeconds))
+          .status(200)
+          .send(envelope(payment, request.id));
+      } catch (reason) {
+        const paymentError = reason as { status?: unknown; code?: unknown };
+        if (typeof paymentError.status === 'number' && typeof paymentError.code === 'string')
+          return safeError(reply, paymentError.status, paymentError.code, request.id);
+        request.log.error({
+          event: 'public_payment_attempt.continue_failed',
+          error_name: errorName(reason),
+        });
+        return safeError(reply, 500, 'payment_attempt_failed', request.id);
+      }
+    },
+  );
+
+  app.get<{ Params: { attemptPublicId: string } }>(
+    '/api/v1/public/payment-attempts/:attemptPublicId',
+    {
+      ...publicSchema('recoverPublicPaymentAttempt'),
+      schema: {
+        operationId: 'recoverPublicPaymentAttempt',
+        tags: ['public-booking'],
+        params: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['attemptPublicId'],
+          properties: { attemptPublicId: { type: 'string', pattern: UUID_PATTERN.source } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const tenant = await resolvePublicTenant(request, reply, hostResolver);
+      if (!tenant) return;
+      if (!paidBooking) return safeError(reply, 404, 'payment_attempt_not_found', request.id);
+      const token = recoveryCookieToken(request.headers.cookie);
+      if (!token) return safeError(reply, 404, 'payment_attempt_not_found', request.id);
+      try {
+        const payment = await paidBooking.recover({
+          tenant,
+          attemptPublicId: request.params.attemptPublicId,
+          hostname: request.hostname,
+          token,
+        });
+        if (payment.appointment_status === 'scheduled')
+          void reply.header('Set-Cookie', clearRecoveryCookie());
         return reply
           .header('Cache-Control', 'no-store')
           .status(200)
@@ -703,7 +765,7 @@ export function registerPublicBookingRoutes(
         if (typeof paymentError.status === 'number' && typeof paymentError.code === 'string')
           return safeError(reply, paymentError.status, paymentError.code, request.id);
         request.log.error({
-          event: 'public_payment_attempt.continue_failed',
+          event: 'public_payment_attempt.recovery_failed',
           error_name: errorName(reason),
         });
         return safeError(reply, 500, 'payment_attempt_failed', request.id);

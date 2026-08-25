@@ -112,6 +112,9 @@ export interface PaymentAttemptDocument {
   idempotency_key_hash: string;
   request_fingerprint: string;
   client_request_fingerprint: string;
+  recovery_token_hash: string;
+  recovery_hostname_hash: string;
+  recovery_expires_at: Date;
   amount_snapshot: PaymentAmountsSnake;
   configuration_snapshot: {
     service_payment_configuration_public_id: string;
@@ -643,6 +646,17 @@ export class PaymentFoundationStore {
     return true;
   }
 
+  public async markAttemptStale(tenantId: ObjectId, attempt: PaymentAttemptDocument) {
+    const session = this.db.client.startSession();
+    try {
+      return await session.withTransaction(() =>
+        this.markAttemptStaleInSession(tenantId, attempt, session),
+      );
+    } finally {
+      await session.endSession();
+    }
+  }
+
   public async appendLedgerEntry(
     input: Omit<PaymentLedgerEntryDocument, '_id' | 'public_id' | 'created_at'>,
     session?: ClientSession,
@@ -754,6 +768,13 @@ function assertInitialPaymentAttempt(
     throw new Error('attempt_terms_idempotency_mismatch');
   if (!/^[a-f0-9]{64}$/u.test(input.client_request_fingerprint))
     throw new Error('attempt_client_fingerprint_invalid');
+  if (
+    !/^[a-f0-9]{64}$/u.test(input.recovery_token_hash) ||
+    !/^[a-f0-9]{64}$/u.test(input.recovery_hostname_hash) ||
+    !Number.isFinite(input.recovery_expires_at.valueOf()) ||
+    input.recovery_expires_at <= input.expires_at
+  )
+    throw new Error('attempt_checkout_recovery_invalid');
   const expectedAmounts = toAmountSnapshot(
     calculatePaymentAmounts({
       servicePriceMinor: input.amount_snapshot.service_price_minor,

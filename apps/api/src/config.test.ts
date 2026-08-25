@@ -151,6 +151,7 @@ describe('loadEnvironment', () => {
       BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256: 'b'.repeat(64),
       PAYMENT_IP_HASH_SECRET: 'distinct-payment-ip-hash-secret-value',
       STRIPE_PUBLISHABLE_KEY: 'pk_test_synthetic_publishable_value',
+      CHECKOUT_RECOVERY_TOKEN_SECRET: 'checkout-recovery-secret-distinct-value',
     };
     expect(loadEnvironment(execution)).toMatchObject({
       STRIPE_PAYMENT_EXECUTION_ENABLED: true,

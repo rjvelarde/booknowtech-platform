@@ -61,15 +61,11 @@ describe('PublicPaymentCheckout', () => {
 
   it('confirms through Stripe then reads the durable attempt before showing confirmation', async () => {
     confirmPayment.mockResolvedValueOnce({});
-    const fetchMock = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () =>
-        Promise.resolve({ data: attempt({ payment_status: 'processing', client_secret: null }) }),
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    const recover = vi
+      .fn()
+      .mockResolvedValueOnce(attempt({ payment_status: 'processing', client_secret: null }));
     const onUpdate = vi.fn();
-    renderCheckout(attempt(), onUpdate);
+    renderCheckout(attempt(), onUpdate, recover);
     fireEvent.click(screen.getByRole('button', { name: 'Pay $21.25' }));
     await waitFor(() =>
       expect(confirmPayment).toHaveBeenCalledWith(
@@ -81,7 +77,7 @@ describe('PublicPaymentCheckout', () => {
         expect.objectContaining({ payment_status: 'processing' }),
       ),
     );
-    expect(fetchMock.mock.calls[0]?.[0]).toContain('/payment-attempts/attempt-id/continue');
+    expect(recover).toHaveBeenCalledOnce();
   });
 
   it('shows confirmation only for backend scheduled and succeeded state', () => {
@@ -106,13 +102,16 @@ describe('PublicPaymentCheckout', () => {
   });
 });
 
-function renderCheckout(value: PublicPaymentAttemptView, onUpdate = vi.fn()) {
+function renderCheckout(
+  value: PublicPaymentAttemptView,
+  onUpdate = vi.fn(),
+  recover = vi.fn(() => Promise.resolve(value)),
+) {
   return render(
     <PublicPaymentCheckout
       attempt={value}
-      requestBody={{ service_public_id: 'service' }}
-      idempotencyKey="11111111-1111-4111-8111-111111111111"
       publishableKey="pk_test_synthetic"
+      recover={recover}
       onUpdate={onUpdate}
       onRestart={vi.fn()}
     />,
@@ -132,6 +131,7 @@ function attempt(overrides: Partial<PublicPaymentAttemptView> = {}): PublicPayme
     expires_at: '2026-08-25T19:00:00.000Z',
     client_secret: 'pi_synthetic_secret_synthetic',
     stripe_account: 'acct_synthetic',
+    continuation_allowed: true,
     amounts: {
       service_price_minor: 5500,
       provider_amount_due_now_minor: 2000,
