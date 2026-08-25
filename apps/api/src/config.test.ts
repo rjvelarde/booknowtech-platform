@@ -120,6 +120,7 @@ describe('loadEnvironment', () => {
 
   it('keeps disabled Stripe optional but requires a complete, separated test-mode configuration when enabled', () => {
     expect(loadEnvironment(valid).STRIPE_PAYMENTS_FOUNDATION_ENABLED).toBe(false);
+    expect(loadEnvironment(valid).STRIPE_PAYMENT_EXECUTION_ENABLED).toBe(false);
     const stripe = {
       ...valid,
       STRIPE_SECRET_KEY: 'sk_test_valid_foundation_key',
@@ -142,5 +143,20 @@ describe('loadEnvironment', () => {
     expect(() =>
       loadEnvironment({ ...stripe, BOOKNOWTECH_CONNECT_TERMS_VERSION: '=connect-v1' }),
     ).toThrow();
+    const execution = {
+      ...stripe,
+      STRIPE_PAYMENT_EXECUTION_ENABLED: 'true',
+      STRIPE_ACCOUNT_READINESS_MAX_AGE_SECONDS: '900',
+      BOOKNOWTECH_PAYMENT_TERMS_VERSION: 'payments-v1',
+      BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256: 'b'.repeat(64),
+      PAYMENT_IP_HASH_SECRET: 'distinct-payment-ip-hash-secret-value',
+    };
+    expect(loadEnvironment(execution)).toMatchObject({
+      STRIPE_PAYMENT_EXECUTION_ENABLED: true,
+      STRIPE_ACCOUNT_READINESS_MAX_AGE_SECONDS: 900,
+    });
+    expect(() =>
+      loadEnvironment({ ...execution, BOOKNOWTECH_PAYMENT_TERMS_VERSION: undefined }),
+    ).toThrow('BOOKNOWTECH_PAYMENT_TERMS_VERSION');
   });
 });

@@ -40,6 +40,8 @@ suite('PR 14B.1 payment persistence foundation', () => {
         'tenant_booking_fee_active',
         'service_payment_configuration_versions',
         'service_payment_configuration_active',
+        'tenant_payment_execution_settings',
+        'provisional_payment_customers',
         'payment_attempts',
         'payment_ledger_entries',
       ]),
@@ -83,6 +85,8 @@ suite('PR 14B.1 payment persistence foundation', () => {
     for (const name of [
       'tenant_booking_fee_versions',
       'service_payment_configuration_versions',
+      'tenant_payment_execution_settings',
+      'provisional_payment_customers',
       'payment_attempts',
       'payment_ledger_entries',
     ])
@@ -274,6 +278,53 @@ suite('PR 14B.1 payment persistence foundation', () => {
     ).toBe(0);
   });
 
+  it('prevents cross-tenant PaymentIntent linking and Stripe-ID authority', async () => {
+    const tenantA = await paymentFixture(db);
+    const tenantB = await paymentFixture(db);
+    await store.insertPaymentAttempt(tenantA.attempt);
+    await store.insertPaymentAttempt(tenantB.attempt);
+    const intent = {
+      id: 'pi_crossTenantIsolation',
+      status: 'requires_payment_method' as const,
+      clientSecret: 'pi_secret_transient',
+      amount: 2_625,
+      applicationFeeAmount: 125,
+      currency: 'usd' as const,
+    };
+
+    await store.linkPaymentIntent({
+      tenantId: tenantA.attempt.tenant_id,
+      attemptPublicId: tenantA.attempt.public_id,
+      intent,
+    });
+    await expect(
+      store.linkPaymentIntent({
+        tenantId: tenantB.attempt.tenant_id,
+        attemptPublicId: tenantA.attempt.public_id,
+        intent,
+      }),
+    ).rejects.toThrow('payment_intent_link_conflict');
+    await expect(
+      store.linkPaymentIntent({
+        tenantId: tenantB.attempt.tenant_id,
+        attemptPublicId: tenantB.attempt.public_id,
+        intent,
+      }),
+    ).rejects.toThrow();
+    expect(
+      await db.collection('payment_attempts').countDocuments({
+        stripe_payment_intent_id: intent.id,
+      }),
+    ).toBe(1);
+    expect(
+      JSON.stringify(
+        await db.collection('payment_attempts').findOne({
+          public_id: tenantA.attempt.public_id,
+        }),
+      ),
+    ).not.toContain(intent.clientSecret);
+  });
+
   it('blocks provisional slots and releases terminal transitions exactly once', async () => {
     const fixture = await paymentFixture(db);
     const competing = await paymentFixture(db, {
@@ -416,9 +467,11 @@ async function paymentFixture(
       tenant_id: tenantId,
       appointment_id: appointmentId,
       customer_id: customerId,
+      customer_email_normalized: 'customer@example.com',
       tenant_stripe_account_public_id: randomUUID(),
       idempotency_key_hash: idempotencyKeyHash,
       request_fingerprint: randomHex(),
+      client_request_fingerprint: randomHex(),
       amount_snapshot: toAmountSnapshot(amounts),
       configuration_snapshot: {
         service_payment_configuration_public_id: randomUUID(),

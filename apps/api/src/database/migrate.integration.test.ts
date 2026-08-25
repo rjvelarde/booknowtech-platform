@@ -54,6 +54,8 @@ suite('administrative foundation migration', () => {
         'tenant_booking_fee_active',
         'service_payment_configuration_versions',
         'service_payment_configuration_active',
+        'tenant_payment_execution_settings',
+        'provisional_payment_customers',
         'payment_attempts',
         'payment_ledger_entries',
       ]),

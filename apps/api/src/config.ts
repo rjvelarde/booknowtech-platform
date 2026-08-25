@@ -45,6 +45,22 @@ const environmentSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
+  STRIPE_PAYMENT_EXECUTION_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  STRIPE_ACCOUNT_READINESS_MAX_AGE_SECONDS: z.coerce.number().int().min(60).max(86_400).optional(),
+  BOOKNOWTECH_PAYMENT_TERMS_VERSION: z
+    .string()
+    .min(1)
+    .max(80)
+    .regex(/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u)
+    .optional(),
+  BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
+    .optional(),
+  PAYMENT_IP_HASH_SECRET: z.string().min(32).optional(),
 });
 
 type ParsedEnvironment = z.infer<typeof environmentSchema>;
@@ -81,6 +97,8 @@ export function loadEnvironment(source: NodeJS.ProcessEnv = process.env): Enviro
     throw new Error('Invalid environment configuration: RATE_LIMIT_KEY_SECRET');
   if (unsafeSecret.test(environment.MONITORING_TOKEN))
     throw new Error('Invalid environment configuration: MONITORING_TOKEN');
+  if (environment.PAYMENT_IP_HASH_SECRET && unsafeSecret.test(environment.PAYMENT_IP_HASH_SECRET))
+    throw new Error('Invalid environment configuration: PAYMENT_IP_HASH_SECRET');
   if (environment.PUBLIC_APPOINTMENT_TOKEN_SECRET === environment.RATE_LIMIT_KEY_SECRET)
     throw new Error('Invalid environment configuration: environment-specific secrets');
   if (
@@ -90,16 +108,42 @@ export function loadEnvironment(source: NodeJS.ProcessEnv = process.env): Enviro
   )
     throw new Error('Invalid environment configuration: MONITORING_TOKEN separation');
   if (
+    environment.PAYMENT_IP_HASH_SECRET &&
+    [
+      environment.PUBLIC_APPOINTMENT_TOKEN_SECRET,
+      environment.RATE_LIMIT_KEY_SECRET,
+      environment.MONITORING_TOKEN,
+    ].includes(environment.PAYMENT_IP_HASH_SECRET)
+  )
+    throw new Error('Invalid environment configuration: PAYMENT_IP_HASH_SECRET separation');
+  if (
     ['staging', 'production'].includes(environment.ENVIRONMENT_ID) &&
     !environment.MONITORING_TOKEN.startsWith(`bnt_monitoring_${environment.ENVIRONMENT_ID}_`)
   )
     throw new Error('Invalid environment configuration: MONITORING_TOKEN environment');
   validateStripeConfiguration(environment);
+  validatePaymentExecutionConfiguration(environment);
 
   return {
     ...environment,
     BUILD_VERSION: buildVersion(environment),
   };
+}
+
+function validatePaymentExecutionConfiguration(
+  environment: z.infer<typeof environmentSchema>,
+): void {
+  if (!environment.STRIPE_PAYMENT_EXECUTION_ENABLED) return;
+  if (!environment.STRIPE_PAYMENTS_FOUNDATION_ENABLED)
+    throw new Error('Invalid environment configuration: STRIPE_PAYMENTS_FOUNDATION_ENABLED');
+  for (const name of [
+    'STRIPE_ACCOUNT_READINESS_MAX_AGE_SECONDS',
+    'BOOKNOWTECH_PAYMENT_TERMS_VERSION',
+    'BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256',
+    'PAYMENT_IP_HASH_SECRET',
+  ] as const)
+    if (environment[name] === undefined)
+      throw new Error(`Invalid environment configuration: ${name}`);
 }
 
 function validateStripeConfiguration(environment: z.infer<typeof environmentSchema>): void {

@@ -14,9 +14,11 @@ import type {
   ServiceDocument,
   TenantDocument,
 } from '../admin/store.js';
+import { PROVISIONAL_APPOINTMENT_STATUSES } from '../admin/store.js';
 import { dateRange, generateSlots, localToUtc, previewDay } from '../availability/routes.js';
 import { authenticateAdminMutation, authenticateAdminRequest } from '../auth/routes.js';
 import type { Environment } from '../config.js';
+import type { PublicPaidBookingOrchestrator } from '../payment/public-orchestrator.js';
 import { TenantHostResolver } from './tenant-host-resolver.js';
 
 const managers = new Set(['tenant_owner', 'tenant_admin']);
@@ -89,6 +91,16 @@ const publicAppointmentSchema = {
         booking_terms_accepted: { const: true },
       },
     },
+    payment_terms: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['version', 'document_sha256', 'accepted'],
+      properties: {
+        version: { type: 'string', minLength: 1, maxLength: 80 },
+        document_sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        accepted: { const: true },
+      },
+    },
   },
 } as const;
 
@@ -116,7 +128,7 @@ interface ServicePublicSettingsBody {
   public_self_service_policy: ServiceDocument['public_self_service_policy'];
 }
 
-interface PublicAppointmentBody {
+export interface PublicAppointmentBody {
   service_public_id: string;
   provider_public_id: string;
   starts_at: string;
@@ -130,6 +142,7 @@ interface PublicAppointmentBody {
     appointment_note?: string | null;
   };
   consent: { booking_terms_version: string; booking_terms_accepted: boolean };
+  payment_terms?: { version: string; document_sha256: string; accepted: boolean };
   website: string;
 }
 
@@ -146,6 +159,7 @@ export function registerPublicBookingRoutes(
   app: FastifyInstance,
   environment: Environment,
   store: AdminStore,
+  paidBooking?: PublicPaidBookingOrchestrator,
 ): void {
   const hostResolver = new TenantHostResolver(
     store,
@@ -356,7 +370,12 @@ export function registerPublicBookingRoutes(
       const keyHash = createHash('sha256').update(key).digest('hex');
       const fingerprint = publicRequestFingerprint(normalized);
       const replay = await store.getPublicAppointmentByIdempotency(tenant._id, keyHash);
-      if (replay) {
+      if (
+        replay &&
+        !PROVISIONAL_APPOINTMENT_STATUSES.includes(
+          replay.status as (typeof PROVISIONAL_APPOINTMENT_STATUSES)[number],
+        )
+      ) {
         if (replay.public_submission?.request_fingerprint !== fingerprint)
           return safeError(reply, 409, 'idempotency_key_reused', request.id);
         const replayProvider = await store.getProviderById(tenant._id, replay.provider_id);
@@ -375,6 +394,37 @@ export function registerPublicBookingRoutes(
         ({ provider }) => provider.public_id === normalized.provider_public_id,
       );
       if (!initialSubject) return safeResourceNotFound(reply, request.id);
+      if (paidBooking) {
+        const paymentMode = await paidBooking.paymentMode(tenant._id, initialService._id);
+        if (paymentMode !== 'none') {
+          try {
+            const payment = await paidBooking.create({
+              tenant,
+              body: request.body,
+              idempotencyKey: key,
+              requestId: request.id,
+              correlationId: request.id,
+              ipAddress: request.ip,
+              initialService,
+              initialProvider: initialSubject.provider,
+              initialAssignment: initialSubject.assignment,
+            });
+            return reply
+              .header('Cache-Control', 'no-store')
+              .status(201)
+              .send(envelope(payment, request.id));
+          } catch (reason) {
+            const paymentError = reason as { status?: unknown; code?: unknown };
+            if (typeof paymentError.status === 'number' && typeof paymentError.code === 'string')
+              return safeError(reply, paymentError.status, paymentError.code, request.id);
+            request.log.error({
+              event: 'public_payment_attempt.create_failed',
+              error_name: errorName(reason),
+            });
+            return safeError(reply, 500, 'payment_attempt_failed', request.id);
+          }
+        }
+      }
       const startsAt = new Date(normalized.starts_at);
       const preliminaryStart = new Date(
         startsAt.valueOf() - initialSubject.assignment.buffer_before_minutes * 60_000,
@@ -428,6 +478,8 @@ export function registerPublicBookingRoutes(
             );
             if (!service || service.status !== 'active' || !service.publicly_bookable)
               throw new PublicBookingError(404, 'public_booking_not_found');
+            if (paidBooking)
+              await paidBooking.assertUnpaidMode(currentTenant._id, service._id, session);
             if (
               !provider ||
               provider.status !== 'active' ||
@@ -581,6 +633,73 @@ export function registerPublicBookingRoutes(
           ...safeMongoErrorDetails(reason),
         });
         return safeError(reply, 500, 'public_booking_failed', request.id);
+      }
+    },
+  );
+
+  app.post<{
+    Params: { attemptPublicId: string };
+    Body: PublicAppointmentBody;
+  }>(
+    '/api/v1/public/payment-attempts/:attemptPublicId/continue',
+    {
+      ...publicSchema('continuePublicPaymentAttempt'),
+      bodyLimit: 16 * 1024,
+      schema: {
+        operationId: 'continuePublicPaymentAttempt',
+        tags: ['public-booking'],
+        params: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['attemptPublicId'],
+          properties: { attemptPublicId: { type: 'string', pattern: UUID_PATTERN.source } },
+        },
+        body: publicAppointmentSchema,
+      },
+    },
+    async (request, reply) => {
+      if (!isPublicJsonRequest(request) || !isSamePublicOrigin(request))
+        return safeError(reply, 403, 'invalid_public_booking_request', request.id);
+      const tenant = await resolvePublicTenant(request, reply, hostResolver);
+      if (!tenant) return;
+      if (!paidBooking) return safeError(reply, 503, 'payment_execution_unavailable', request.id);
+      const key = request.headers['idempotency-key'];
+      if (typeof key !== 'string' || !UUID_PATTERN.test(key) || request.body.website)
+        return safeError(reply, 400, 'invalid_public_booking_request', request.id);
+      const normalized = normalizePublicAppointment(request.body);
+      if (!normalized) return safeError(reply, 400, 'invalid_public_booking_request', request.id);
+      const initialService = await publicService(store, tenant, normalized.service_public_id);
+      if (!initialService) return safeResourceNotFound(reply, request.id);
+      const initialSubject = (
+        await store.listPublicProvidersForService(tenant._id, initialService._id)
+      ).find(({ provider }) => provider.public_id === normalized.provider_public_id);
+      if (!initialSubject) return safeResourceNotFound(reply, request.id);
+      try {
+        const payment = await paidBooking.continue({
+          attemptPublicId: request.params.attemptPublicId,
+          tenant,
+          body: request.body,
+          idempotencyKey: key,
+          requestId: request.id,
+          correlationId: request.id,
+          ipAddress: request.ip,
+          initialService,
+          initialProvider: initialSubject.provider,
+          initialAssignment: initialSubject.assignment,
+        });
+        return reply
+          .header('Cache-Control', 'no-store')
+          .status(200)
+          .send(envelope(payment, request.id));
+      } catch (reason) {
+        const paymentError = reason as { status?: unknown; code?: unknown };
+        if (typeof paymentError.status === 'number' && typeof paymentError.code === 'string')
+          return safeError(reply, paymentError.status, paymentError.code, request.id);
+        request.log.error({
+          event: 'public_payment_attempt.continue_failed',
+          error_name: errorName(reason),
+        });
+        return safeError(reply, 500, 'payment_attempt_failed', request.id);
       }
     },
   );
@@ -766,7 +885,7 @@ function publicServiceView(service: ServiceDocument, tenant: TenantDocument) {
   };
 }
 
-function normalizePublicAppointment(body: PublicAppointmentBody) {
+export function normalizePublicAppointment(body: PublicAppointmentBody) {
   const firstName = body.customer.first_name.trim();
   const lastName = body.customer.last_name.trim();
   const email = body.customer.email.trim().toLowerCase();
@@ -802,6 +921,15 @@ function normalizePublicAppointment(body: PublicAppointmentBody) {
       booking_terms_version: body.consent.booking_terms_version.trim(),
       booking_terms_accepted: true,
     },
+    ...(body.payment_terms
+      ? {
+          payment_terms: {
+            version: body.payment_terms.version.trim(),
+            document_sha256: body.payment_terms.document_sha256,
+            accepted: body.payment_terms.accepted,
+          },
+        }
+      : {}),
   };
 }
 
@@ -829,7 +957,7 @@ function normalizePublicAddress(value: PublicAddressBody) {
     : null;
 }
 
-async function resolvePublicCustomer(
+export async function resolvePublicCustomer(
   store: AdminStore,
   tenantId: ObjectId,
   input: NonNullable<ReturnType<typeof normalizePublicAppointment>>,
@@ -886,7 +1014,7 @@ async function resolvePublicCustomer(
   );
 }
 
-async function validatePublicCandidate(
+export async function validatePublicCandidate(
   store: AdminStore,
   tenant: TenantDocument,
   service: ServiceDocument,
@@ -944,7 +1072,7 @@ async function validatePublicCandidate(
   };
 }
 
-function utcDateScopes(providerId: ObjectId, start: Date, end: Date) {
+export function utcDateScopes(providerId: ObjectId, start: Date, end: Date) {
   const scopes = [];
   for (
     let value = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());

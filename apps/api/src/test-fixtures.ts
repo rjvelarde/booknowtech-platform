@@ -19,6 +19,7 @@ export const testEnvironment: Environment = {
   MONITORING_TOKEN: 'bnt_monitoring_test_0123456789abcdef0123456789abcdef',
   STRIPE_CONNECT_COUNTRY: 'US',
   STRIPE_PAYMENTS_FOUNDATION_ENABLED: false,
+  STRIPE_PAYMENT_EXECUTION_ENABLED: false,
 };
 
 export class StubReadinessProbe implements ReadinessProbe {

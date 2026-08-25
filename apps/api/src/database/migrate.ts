@@ -151,6 +151,30 @@ const validators: Record<string, Document> = {
       },
     },
   },
+  tenant_payment_execution_settings: {
+    $jsonSchema: {
+      bsonType: 'object',
+      additionalProperties: false,
+      required: [
+        '_id',
+        'tenant_id',
+        'enabled',
+        'currency',
+        'approved_by_operator_id',
+        'approval_request_id',
+        'updated_at',
+      ],
+      properties: {
+        _id: { bsonType: 'objectId' },
+        tenant_id: { bsonType: 'objectId' },
+        enabled: { bsonType: 'bool' },
+        currency: { enum: ['USD'] },
+        approved_by_operator_id: { bsonType: 'string', minLength: 3, maxLength: 120 },
+        approval_request_id: { bsonType: 'string', minLength: 1, maxLength: 128 },
+        updated_at: { bsonType: 'date' },
+      },
+    },
+  },
   tenant_booking_fee_versions: {
     $jsonSchema: {
       bsonType: 'object',
@@ -315,6 +339,34 @@ const validators: Record<string, Document> = {
       ],
     },
   },
+  provisional_payment_customers: {
+    $jsonSchema: {
+      bsonType: 'object',
+      additionalProperties: false,
+      required: [
+        '_id',
+        'public_id',
+        'tenant_id',
+        'first_name',
+        'last_name',
+        'email_normalized',
+        'mobile_phone_e164',
+        'customer_input_hash',
+        'created_at',
+      ],
+      properties: {
+        _id: { bsonType: 'objectId' },
+        public_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        tenant_id: { bsonType: 'objectId' },
+        first_name: { bsonType: 'string', minLength: 1, maxLength: 100 },
+        last_name: { bsonType: 'string', minLength: 1, maxLength: 100 },
+        email_normalized: { bsonType: 'string', minLength: 3, maxLength: 320 },
+        mobile_phone_e164: { bsonType: 'string', pattern: '^\\+[1-9][0-9]{7,14}$' },
+        customer_input_hash: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+        created_at: { bsonType: 'date' },
+      },
+    },
+  },
   payment_attempts: {
     $jsonSchema: {
       bsonType: 'object',
@@ -325,9 +377,11 @@ const validators: Record<string, Document> = {
         'tenant_id',
         'appointment_id',
         'customer_id',
+        'customer_email_normalized',
         'tenant_stripe_account_public_id',
         'idempotency_key_hash',
         'request_fingerprint',
+        'client_request_fingerprint',
         'amount_snapshot',
         'configuration_snapshot',
         'payment_terms_acceptance',
@@ -352,9 +406,16 @@ const validators: Record<string, Document> = {
         tenant_id: { bsonType: 'objectId' },
         appointment_id: { bsonType: 'objectId' },
         customer_id: { bsonType: 'objectId' },
+        customer_email_normalized: {
+          bsonType: 'string',
+          minLength: 3,
+          maxLength: 320,
+          pattern: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$',
+        },
         tenant_stripe_account_public_id: { bsonType: 'string', pattern: UUID_PATTERN },
         idempotency_key_hash: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
         request_fingerprint: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+        client_request_fingerprint: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
         amount_snapshot: {
           bsonType: 'object',
           additionalProperties: false,
@@ -1968,6 +2029,12 @@ export async function migrateDatabase(db: Db): Promise<void> {
     },
     { key: { tenant_id: 1, created_at: -1 }, name: 'booking_fee_versions_tenant_created' },
   ]);
+  await db
+    .collection('tenant_payment_execution_settings')
+    .createIndex(
+      { tenant_id: 1 },
+      { name: 'tenant_payment_execution_settings_tenant_unique', unique: true },
+    );
   await db.collection('tenant_booking_fee_active').createIndexes([
     { key: { tenant_id: 1 }, name: 'booking_fee_active_tenant_unique', unique: true },
     {
@@ -2030,6 +2097,13 @@ export async function migrateDatabase(db: Db): Promise<void> {
     {
       key: { state: 1, next_attempt_at: 1, created_at: 1 },
       name: 'payment_attempts_worker_poll',
+    },
+  ]);
+  await db.collection('provisional_payment_customers').createIndexes([
+    { key: { public_id: 1 }, name: 'provisional_payment_customers_public_unique', unique: true },
+    {
+      key: { tenant_id: 1, customer_input_hash: 1 },
+      name: 'provisional_payment_customers_tenant_input',
     },
   ]);
   await db.collection('payment_ledger_entries').createIndexes([
