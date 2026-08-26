@@ -186,6 +186,8 @@ suite('Stripe Connect persistence boundaries', () => {
       apiVersion: '2025-01-01',
       livemode: false,
       accountView: null,
+      paymentIntentView: null,
+      financialEvidenceView: null,
     };
     expect(
       (

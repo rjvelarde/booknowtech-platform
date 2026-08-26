@@ -36,6 +36,12 @@ suite('Mongo monitoring reader', () => {
         { processing_status: 1, next_attempt_at: 1, received_at: 1 },
         { name: 'stripe_webhook_events_worker_poll' },
       );
+    await db
+      .collection('payment_attempts')
+      .createIndex(
+        { state: 1, failure_category: 1, updated_at: 1 },
+        { name: 'payment_attempts_operations_monitor' },
+      );
   });
 
   afterAll(async () => {
@@ -81,6 +87,18 @@ suite('Mongo monitoring reader', () => {
       { processing_status: 'processing', received_at: new Date(now.valueOf() - 20_000) },
       { processing_status: 'failed', received_at: new Date(now.valueOf() - 10_000) },
     ]);
+    await db.collection('payment_attempts').insertMany([
+      {
+        state: 'manual_review',
+        failure_category: 'local_finalization',
+        updated_at: new Date(now.valueOf() - 90_000),
+      },
+      {
+        state: 'manual_review',
+        failure_category: 'unknown',
+        updated_at: new Date(now.valueOf() - 30_000),
+      },
+    ]);
 
     const result = await new MongoMonitoringReader(db).read('staging', now);
 
@@ -101,6 +119,9 @@ suite('Mongo monitoring reader', () => {
       stripeOldestPendingAt: new Date(now.valueOf() - 45_000),
       stripeProcessingCount: 1,
       stripeFailedCount: 1,
+      paymentManualReviewCount: 2,
+      paymentOldestManualReviewAt: new Date(now.valueOf() - 90_000),
+      paymentFinalizationFailureCount: 1,
     });
   });
 

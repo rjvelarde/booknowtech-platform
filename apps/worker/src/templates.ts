@@ -12,6 +12,11 @@ export interface AppointmentEmailTemplateData {
   ends_at: Date;
   timezone: string;
   location_mode: 'provider_location' | 'customer_location' | 'virtual';
+  service_price_minor?: number;
+  provider_amount_paid_online_minor?: number;
+  booknowtech_fee_minor?: number;
+  remaining_service_balance_minor?: number;
+  currency?: 'USD';
 }
 
 export type AppointmentEmailType =
@@ -56,12 +61,33 @@ export function renderAppointmentEmail(
     ? `<img src="${escapeAttribute(data.business_logo_url)}" alt="${escapeAttribute(data.business_name)}" style="max-height:72px;max-width:220px">`
     : '';
   const summary = `${data.service_name} with ${data.provider_name} on ${when}`;
+  const payment = paymentSummary(data);
   const action = managementUrl
     ? `<p><a href="${escapeAttribute(managementUrl)}" style="display:inline-block;padding:12px 18px;background:#1261a0;color:#fff;text-decoration:none;border-radius:6px">Manage appointment</a></p>`
     : '';
-  const html = `<!doctype html><html><body style="margin:0;background:#f4f7fb;font-family:Arial,sans-serif;color:#12203d"><table role="presentation" width="100%"><tr><td align="center" style="padding:24px"><table role="presentation" width="100%" style="max-width:620px;background:#fff;border:1px solid #dbe4f0;border-radius:12px"><tr><td style="padding:32px">${logo}<h1>${escapeHtml(data.business_name)}</h1><h2>${escapeHtml(heading)}</h2><p>Hello ${escapeHtml(data.customer_name)},</p><p>${escapeHtml(summary)}.</p><table role="presentation" width="100%" style="background:#eef4fb;border-radius:8px"><tr><td style="padding:18px"><strong>${escapeHtml(data.service_name)}</strong><br>${escapeHtml(when)}<br>Provider: ${escapeHtml(data.provider_name)}<br>Reference: <strong>${escapeHtml(reference)}</strong></td></tr></table>${action}${contactHtml ? `<p style="color:#50617d">${contactHtml}</p>` : ''}</td></tr></table></td></tr></table></body></html>`;
-  const text = `${data.business_name}\n\n${heading}\n\nHello ${data.customer_name},\n\n${summary}.\nReference: ${reference}${managementUrl ? `\n\nManage appointment: ${managementUrl}` : ''}${contactText ? `\n\n${contactText}` : ''}`;
+  const html = `<!doctype html><html><body style="margin:0;background:#f4f7fb;font-family:Arial,sans-serif;color:#12203d"><table role="presentation" width="100%"><tr><td align="center" style="padding:24px"><table role="presentation" width="100%" style="max-width:620px;background:#fff;border:1px solid #dbe4f0;border-radius:12px"><tr><td style="padding:32px">${logo}<h1>${escapeHtml(data.business_name)}</h1><h2>${escapeHtml(heading)}</h2><p>Hello ${escapeHtml(data.customer_name)},</p><p>${escapeHtml(summary)}.</p><table role="presentation" width="100%" style="background:#eef4fb;border-radius:8px"><tr><td style="padding:18px"><strong>${escapeHtml(data.service_name)}</strong><br>${escapeHtml(when)}<br>Provider: ${escapeHtml(data.provider_name)}<br>Reference: <strong>${escapeHtml(reference)}</strong>${payment ? `<br><br>${payment.html}` : ''}</td></tr></table>${action}${contactHtml ? `<p style="color:#50617d">${contactHtml}</p>` : ''}</td></tr></table></td></tr></table></body></html>`;
+  const text = `${data.business_name}\n\n${heading}\n\nHello ${data.customer_name},\n\n${summary}.\nReference: ${reference}${payment ? `\n\n${payment.text}` : ''}${managementUrl ? `\n\nManage appointment: ${managementUrl}` : ''}${contactText ? `\n\n${contactText}` : ''}`;
   return { subject: `${heading} — ${data.business_name}`, html, text };
+}
+
+function paymentSummary(data: AppointmentEmailTemplateData) {
+  const values = [
+    data.service_price_minor,
+    data.provider_amount_paid_online_minor,
+    data.booknowtech_fee_minor,
+    data.remaining_service_balance_minor,
+  ];
+  if (data.currency !== 'USD' || values.some((value) => !Number.isSafeInteger(value) || value! < 0))
+    return null;
+  const money = (value: number) =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value / 100);
+  const lines = [
+    `Service price: ${money(data.service_price_minor!)}`,
+    `Paid online toward service: ${money(data.provider_amount_paid_online_minor!)}`,
+    `BookNowTech booking fee: ${money(data.booknowtech_fee_minor!)}`,
+    `Remaining service balance: ${money(data.remaining_service_balance_minor!)}`,
+  ];
+  return { text: lines.join('\n'), html: lines.map((line) => escapeHtml(line)).join('<br>') };
 }
 
 function escapeHtml(value: string): string {

@@ -4,6 +4,7 @@ const calls = vi.hoisted(() => ({
   create: vi.fn(),
   retrieve: vi.fn(),
   cancel: vi.fn(),
+  constructEvent: vi.fn(),
 }));
 
 vi.mock('stripe', () => ({
@@ -11,7 +12,7 @@ vi.mock('stripe', () => ({
     public readonly paymentIntents = calls;
     public readonly accounts = {};
     public readonly accountLinks = {};
-    public readonly webhooks = {};
+    public readonly webhooks = { constructEvent: calls.constructEvent };
   },
 }));
 
@@ -75,6 +76,33 @@ describe('PR 14B.2 PaymentIntent adapter', () => {
     expect(calls.cancel).toHaveBeenCalledWith('pi_synthetic', undefined, {
       stripeAccount: 'acct_server_resolved',
       idempotencyKey: 'bnt_cancel_v1_attempt',
+    });
+  });
+
+  it('projects only bounded payment facts from a verified PaymentIntent event', () => {
+    calls.constructEvent.mockReturnValue({
+      id: 'evt_payment',
+      type: 'payment_intent.succeeded',
+      account: 'acct_server_resolved',
+      created: 1_788_000_000,
+      api_version: '2025-01-01',
+      livemode: false,
+      data: { object: { object: 'payment_intent', ...intent({ status: 'succeeded' }) } },
+    });
+    const adapter = new StripeSdkConnectAdapter('sk_test_synthetic');
+    expect(adapter.verifyWebhook(Buffer.from('{}'), 'signature', 'whsec_test')).toMatchObject({
+      id: 'evt_payment',
+      type: 'payment_intent.succeeded',
+      account: 'acct_server_resolved',
+      accountView: null,
+      paymentIntentView: {
+        id: 'pi_synthetic',
+        status: 'succeeded',
+        amount: 2_625,
+        applicationFeeAmount: 125,
+        currency: 'usd',
+        lastPaymentErrorCode: null,
+      },
     });
   });
 });

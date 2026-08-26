@@ -26,6 +26,9 @@ function snapshot(overrides: Partial<MonitoringSnapshot> = {}): MonitoringSnapsh
     stripeOldestPendingAt: null,
     stripeProcessingCount: 0,
     stripeFailedCount: 0,
+    paymentManualReviewCount: 0,
+    paymentOldestManualReviewAt: null,
+    paymentFinalizationFailureCount: 0,
     ...overrides,
   };
 }
@@ -88,6 +91,11 @@ describe('internal monitoring route', () => {
           oldest_pending_age_seconds: null,
           processing_count: 0,
           failed_count: 0,
+        },
+        payments: {
+          manual_review_count: 0,
+          oldest_manual_review_age_seconds: null,
+          local_finalization_failure_count: 0,
         },
       },
     });
@@ -156,6 +164,7 @@ describe('internal monitoring route', () => {
       'worker',
       'outbox',
       'stripe_webhooks',
+      'payments',
     ]);
   });
 

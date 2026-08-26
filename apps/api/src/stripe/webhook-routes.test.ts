@@ -13,6 +13,8 @@ describe('Stripe webhook raw-body boundary', () => {
       apiVersion: '2025-01-01',
       livemode: false,
       accountView: null,
+      paymentIntentView: null,
+      financialEvidenceView: null,
     });
     const ingest = vi.fn().mockResolvedValue({ duplicate: false, publicId: 'event-public' });
     const app = await buildApplication({

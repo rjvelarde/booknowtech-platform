@@ -24,6 +24,26 @@ export interface VerifiedStripeEvent {
   apiVersion: string | null;
   livemode: boolean;
   accountView: ConnectAccountView | null;
+  paymentIntentView: PaymentIntentWebhookView | null;
+  financialEvidenceView: ExternalFinancialEvidenceView | null;
+}
+
+export interface PaymentIntentWebhookView {
+  id: string;
+  status: ReducedPaymentIntentStatus;
+  amount: number;
+  applicationFeeAmount: number | null;
+  currency: string;
+  lastPaymentErrorCode: string | null;
+}
+
+export interface ExternalFinancialEvidenceView {
+  objectType: 'refund' | 'dispute' | 'charge';
+  id: string;
+  paymentIntentId: string | null;
+  amount: number;
+  currency: string;
+  status: string | null;
 }
 
 export type ReducedPaymentIntentStatus =
@@ -199,8 +219,68 @@ export class StripeSdkConnectAdapter implements StripeConnectAdapter {
       apiVersion: event.api_version ?? null,
       livemode: event.livemode,
       accountView: object.object === 'account' ? accountView(object) : null,
+      paymentIntentView:
+        object.object === 'payment_intent' && isReducedPaymentIntentStatus(object.status)
+          ? {
+              id: object.id,
+              status: object.status,
+              amount: object.amount,
+              applicationFeeAmount: object.application_fee_amount,
+              currency: object.currency,
+              lastPaymentErrorCode: object.last_payment_error?.code ?? null,
+            }
+          : null,
+      financialEvidenceView: externalFinancialEvidenceView(object),
     };
   }
+}
+
+function externalFinancialEvidenceView(value: unknown): ExternalFinancialEvidenceView | null {
+  if (!value || typeof value !== 'object' || !('object' in value)) return null;
+  const objectType = Reflect.get(value, 'object');
+  if (objectType === 'refund') {
+    const refund = value as Stripe.Refund;
+    return {
+      objectType: 'refund',
+      id: refund.id,
+      paymentIntentId:
+        typeof refund.payment_intent === 'string'
+          ? refund.payment_intent
+          : (refund.payment_intent?.id ?? null),
+      amount: refund.amount,
+      currency: refund.currency,
+      status: refund.status,
+    };
+  }
+  if (objectType === 'dispute') {
+    const dispute = value as Stripe.Dispute;
+    return {
+      objectType: 'dispute',
+      id: dispute.id,
+      paymentIntentId:
+        typeof dispute.payment_intent === 'string'
+          ? dispute.payment_intent
+          : (dispute.payment_intent?.id ?? null),
+      amount: dispute.amount,
+      currency: dispute.currency,
+      status: dispute.status,
+    };
+  }
+  if (objectType === 'charge') {
+    const charge = value as Stripe.Charge;
+    return {
+      objectType: 'charge',
+      id: charge.id,
+      paymentIntentId:
+        typeof charge.payment_intent === 'string'
+          ? charge.payment_intent
+          : (charge.payment_intent?.id ?? null),
+      amount: charge.amount_refunded,
+      currency: charge.currency,
+      status: charge.refunded ? 'refunded' : 'partially_refunded',
+    };
+  }
+  return null;
 }
 
 function paymentIntentView(intent: Stripe.PaymentIntent): PaymentIntentView {

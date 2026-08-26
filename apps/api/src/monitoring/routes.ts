@@ -13,7 +13,7 @@ const nullableInteger = { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null
 const monitoringDataSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['environment', 'api_sha', 'worker', 'outbox', 'stripe_webhooks'],
+  required: ['environment', 'api_sha', 'worker', 'outbox', 'stripe_webhooks', 'payments'],
   properties: {
     environment: { type: 'string', enum: ['development', 'test', 'staging', 'production'] },
     api_sha: { type: 'string' },
@@ -57,6 +57,20 @@ const monitoringDataSchema = {
         oldest_pending_age_seconds: nullableInteger,
         processing_count: nullableInteger,
         failed_count: nullableInteger,
+      },
+    },
+    payments: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'manual_review_count',
+        'oldest_manual_review_age_seconds',
+        'local_finalization_failure_count',
+      ],
+      properties: {
+        manual_review_count: nullableInteger,
+        oldest_manual_review_age_seconds: nullableInteger,
+        local_finalization_failure_count: nullableInteger,
       },
     },
   },
@@ -170,6 +184,11 @@ function monitoringResponse(environment: Environment, snapshot: MonitoringSnapsh
         processing_count: snapshot.stripeProcessingCount,
         failed_count: snapshot.stripeFailedCount,
       },
+      payments: {
+        manual_review_count: snapshot.paymentManualReviewCount,
+        oldest_manual_review_age_seconds: age(now, snapshot.paymentOldestManualReviewAt),
+        local_finalization_failure_count: snapshot.paymentFinalizationFailureCount,
+      },
     },
   };
 }
@@ -192,6 +211,11 @@ function unavailableData(environment: Environment) {
       oldest_pending_age_seconds: null,
       processing_count: null,
       failed_count: null,
+    },
+    payments: {
+      manual_review_count: null,
+      oldest_manual_review_age_seconds: null,
+      local_finalization_failure_count: null,
     },
   };
 }

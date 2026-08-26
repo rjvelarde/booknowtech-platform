@@ -382,6 +382,7 @@ const validators: Record<string, Document> = {
         'idempotency_key_hash',
         'request_fingerprint',
         'client_request_fingerprint',
+        'public_booking_origin',
         'amount_snapshot',
         'configuration_snapshot',
         'payment_terms_acceptance',
@@ -416,6 +417,11 @@ const validators: Record<string, Document> = {
         idempotency_key_hash: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
         request_fingerprint: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
         client_request_fingerprint: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+        public_booking_origin: {
+          bsonType: ['string', 'null'],
+          maxLength: 262,
+          pattern: `^https://${HOSTNAME_PATTERN}$`,
+        },
         recovery_token_hash: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
         recovery_hostname_hash: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
         recovery_expires_at: { bsonType: 'date' },
@@ -580,6 +586,7 @@ const validators: Record<string, Document> = {
             'intent_requested',
             'payment_succeeded',
             'payment_failed_recoverable',
+            'payment_processing',
             'payment_failed_terminal',
             'payment_expired',
             'payment_stale',
@@ -1012,6 +1019,7 @@ const validators: Record<string, Document> = {
         'updated_at',
       ],
       properties: {
+        financial_finalization_key: { bsonType: 'string', minLength: 1, maxLength: 200 },
         public_booking_origin: {
           bsonType: ['string', 'null'],
           maxLength: 262,
@@ -1904,6 +1912,14 @@ export async function migrateDatabase(db: Db): Promise<void> {
       ],
     );
   }
+  if (existing.has('payment_attempts')) {
+    await db
+      .collection('payment_attempts')
+      .updateMany(
+        { public_booking_origin: { $exists: false } },
+        { $set: { public_booking_origin: null } },
+      );
+  }
   for (const [name, validator] of Object.entries(validators)) {
     if (existing.has(name)) {
       await db.command({ collMod: name, validator, validationLevel: 'strict' });
@@ -2106,6 +2122,10 @@ export async function migrateDatabase(db: Db): Promise<void> {
     {
       key: { state: 1, next_attempt_at: 1, created_at: 1 },
       name: 'payment_attempts_worker_poll',
+    },
+    {
+      key: { state: 1, failure_category: 1, updated_at: 1 },
+      name: 'payment_attempts_operations_monitor',
     },
   ]);
   await db.collection('provisional_payment_customers').createIndexes([
@@ -2420,6 +2440,12 @@ export async function migrateDatabase(db: Db): Promise<void> {
   ]);
   await db.collection('notification_outbox').createIndexes([
     { key: { public_id: 1 }, name: 'notification_outbox_public_id_unique', unique: true },
+    {
+      key: { tenant_id: 1, appointment_id: 1, financial_finalization_key: 1 },
+      name: 'notification_outbox_payment_finalization_once',
+      unique: true,
+      partialFilterExpression: { financial_finalization_key: { $type: 'string' } },
+    },
     {
       key: { status: 1, next_attempt_at: 1, created_at: 1 },
       name: 'notification_outbox_worker_poll',

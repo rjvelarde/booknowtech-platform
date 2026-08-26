@@ -39,6 +39,11 @@ async function start(): Promise<void> {
         mongo.db(environment.MONGODB_DATABASE),
         environment.STRIPE_SECRET_KEY,
         logger,
+        {
+          publicAppointmentTokenSecret: environment.PUBLIC_APPOINTMENT_TOKEN_SECRET,
+          paymentTermsVersion: environment.BOOKNOWTECH_PAYMENT_TERMS_VERSION,
+          paymentTermsDocumentSha256: environment.BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256,
+        },
       )
     : null;
 

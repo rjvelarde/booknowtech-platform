@@ -2,6 +2,13 @@ import { randomUUID } from 'node:crypto';
 import type { ClientSession, Collection, Db, ObjectId } from 'mongodb';
 import type { Logger } from 'pino';
 import Stripe from 'stripe';
+import {
+  type ExternalEvidenceProjection,
+  type PaymentEventProjection,
+  type PaymentFinalizationOptions,
+  applyExternalFinancialEvidence,
+  applyPaymentEvent,
+} from './payment-event-finalizer.js';
 
 const POLL_MILLISECONDS = 1_000;
 const STALE_MILLISECONDS = 5 * 60_000;
@@ -29,7 +36,7 @@ interface StripeWebhookEventDocument {
   stripe_account_id: string | null;
   event_type: string;
   stripe_created_at: Date;
-  sanitized_payload: StripeProjection;
+  sanitized_payload: StripeProjection | PaymentEventProjection | ExternalEvidenceProjection;
   processing_status: string;
   attempt_count: number;
   next_attempt_at: Date;
@@ -62,7 +69,12 @@ interface TenantStripeAccountDocument {
   version: number;
 }
 
-export function startStripeWebhookWorker(db: Db, stripeSecretKey: string, logger: Logger) {
+export function startStripeWebhookWorker(
+  db: Db,
+  stripeSecretKey: string,
+  logger: Logger,
+  paymentOptions: PaymentFinalizationOptions,
+) {
   const stripe = new Stripe(stripeSecretKey, { maxNetworkRetries: 2, timeout: 10_000 });
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
@@ -73,6 +85,7 @@ export function startStripeWebhookWorker(db: Db, stripeSecretKey: string, logger
       db,
       { retrieveAccount: (id) => stripe.accounts.retrieve(id) },
       logger,
+      paymentOptions,
     ).catch((error: unknown) =>
       logger.error({
         event: 'stripe_webhook.poll_failed',
@@ -100,6 +113,7 @@ export async function processStripeWebhookEvent(
   db: Db,
   stripe: StripeAccountReader,
   logger: Logger,
+  paymentOptions?: PaymentFinalizationOptions,
 ) {
   const events = db.collection<StripeWebhookEventDocument>('stripe_webhook_events');
   const now = new Date();
@@ -128,20 +142,51 @@ export async function processStripeWebhookEvent(
   try {
     const accountId = event.stripe_account_id;
     if (!accountId) throw new Error('unresolved_account');
+    const paymentEvent = event.event_type.startsWith('payment_intent.');
+    const externalEvidenceEvent =
+      event.event_type === 'charge.refunded' ||
+      event.event_type === 'refund.updated' ||
+      event.event_type.startsWith('charge.dispute.');
     const accountRecord = await db
       .collection<TenantStripeAccountDocument>('tenant_stripe_accounts')
-      .findOne({ stripe_account_id: accountId, active: true });
+      .findOne({
+        stripe_account_id: accountId,
+        ...(paymentEvent || externalEvidenceEvent ? {} : { active: true }),
+      });
     if (!accountRecord) throw new Error('unresolved_account');
-    let projection = event.sanitized_payload;
+    let projection = event.sanitized_payload as StripeProjection;
     const lastCreated = accountRecord.last_stripe_event_created_at;
     const ambiguousOrder =
       lastCreated &&
       event.stripe_created_at.valueOf() === lastCreated.valueOf() &&
       accountRecord.last_stripe_event_id !== event.stripe_event_id;
-    if (ambiguousOrder) projection = sanitize(await stripe.retrieveAccount(accountId));
+    if (!paymentEvent && !externalEvidenceEvent && ambiguousOrder)
+      projection = sanitize(await stripe.retrieveAccount(accountId));
     const session = db.client.startSession();
     try {
       await session.withTransaction(async () => {
+        if (paymentEvent) {
+          if (!paymentOptions) throw new Error('payment_finalization_unconfigured');
+          await applyPaymentEvent(
+            db,
+            event as StripeWebhookEventDocument & { sanitized_payload: PaymentEventProjection },
+            paymentOptions,
+            session,
+          );
+          await markProcessed(events, event, processingToken, accountRecord.tenant_id, session);
+          return;
+        }
+        if (externalEvidenceEvent) {
+          await applyExternalFinancialEvidence(
+            db,
+            event as StripeWebhookEventDocument & {
+              sanitized_payload: ExternalEvidenceProjection;
+            },
+            session,
+          );
+          await markProcessed(events, event, processingToken, accountRecord.tenant_id, session);
+          return;
+        }
         const current = await db
           .collection<TenantStripeAccountDocument>('tenant_stripe_accounts')
           .findOne({ _id: accountRecord._id, active: true }, { session });
@@ -192,26 +237,7 @@ export async function processStripeWebhookEvent(
               session,
             );
         }
-        await events
-          .updateOne(
-            { _id: event._id, processing_status: 'processing', processing_token: processingToken },
-            {
-              $set: {
-                processing_status: 'processed',
-                tenant_id: accountRecord.tenant_id,
-                processed_at: new Date(),
-                processing_started_at: null,
-                processing_token: null,
-                failure_category: null,
-                updated_at: new Date(),
-              },
-              $inc: { attempt_count: 1 },
-            },
-            { session },
-          )
-          .then((result) => {
-            if (result.matchedCount !== 1) throw new Error('claim_lost');
-          });
+        await markProcessed(events, event, processingToken, accountRecord.tenant_id, session);
       });
     } finally {
       await session.endSession();
@@ -251,6 +277,32 @@ function failureCategory(reason: unknown): string {
   if (reason instanceof Error && ['unresolved_account', 'claim_lost'].includes(reason.message))
     return reason.message;
   return 'stripe_processing_failed';
+}
+
+async function markProcessed(
+  events: Collection<StripeWebhookEventDocument>,
+  event: StripeWebhookEventDocument,
+  processingToken: string,
+  tenantId: ObjectId,
+  session: ClientSession,
+) {
+  const result = await events.updateOne(
+    { _id: event._id, processing_status: 'processing', processing_token: processingToken },
+    {
+      $set: {
+        processing_status: 'processed',
+        tenant_id: tenantId,
+        processed_at: new Date(),
+        processing_started_at: null,
+        processing_token: null,
+        failure_category: null,
+        updated_at: new Date(),
+      },
+      $inc: { attempt_count: 1 },
+    },
+    { session },
+  );
+  if (result.matchedCount !== 1) throw new Error('claim_lost');
 }
 
 function sanitize(account: Stripe.Account): StripeProjection {
