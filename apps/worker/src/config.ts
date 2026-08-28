@@ -25,6 +25,8 @@ const environmentSchema = z.object({
   POSTMARK_SERVER_ID: z.coerce.number().int().positive(),
   PUBLIC_APPOINTMENT_TOKEN_SECRET: z.string().min(32),
   STRIPE_SECRET_KEY: z.string().min(16).optional(),
+  BOOKNOWTECH_PAYMENT_TERMS_VERSION: z.string().min(1).max(80),
+  BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256: z.string().regex(/^[a-f0-9]{64}$/u),
 });
 
 type ParsedWorkerEnvironment = z.infer<typeof environmentSchema>;

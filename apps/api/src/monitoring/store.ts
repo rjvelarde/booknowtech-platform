@@ -13,6 +13,7 @@ interface OldestDocument {
   created_at?: Date;
   received_at?: Date;
   processing_started_at?: Date | null;
+  updated_at?: Date;
 }
 
 export interface MonitoringSnapshot {
@@ -27,6 +28,10 @@ export interface MonitoringSnapshot {
   stripeOldestPendingAt: Date | null;
   stripeProcessingCount: number;
   stripeFailedCount: number;
+  stripeHistoricalTerminalFailedCount: number;
+  paymentManualReviewCount: number;
+  paymentOldestManualReviewAt: Date | null;
+  paymentFinalizationFailureCount: number;
 }
 
 export interface MonitoringReader {
@@ -43,6 +48,10 @@ export class MongoMonitoringReader implements MonitoringReader {
     const heartbeats = this.database.collection<HeartbeatDocument>('service_heartbeats');
     const outbox = this.database.collection<OldestDocument>('notification_outbox');
     const stripeEvents = this.database.collection<OldestDocument>('stripe_webhook_events');
+    const stripeAcknowledgements = this.database.collection(
+      'stripe_webhook_failure_acknowledgements',
+    );
+    const paymentAttempts = this.database.collection<OldestDocument>('payment_attempts');
     const maxTimeMS = this.queryTimeoutMilliseconds;
     const fifteenMinutesAgo = new Date(now.valueOf() - 15 * 60_000);
     const twentyFourHoursAgo = new Date(now.valueOf() - 24 * 60 * 60_000);
@@ -84,7 +93,34 @@ export class MongoMonitoringReader implements MonitoringReader {
         { sort: { received_at: 1 }, projection: { _id: 0, received_at: 1 }, maxTimeMS },
       ),
       stripeEvents.countDocuments({ processing_status: 'processing' }, { maxTimeMS }),
-      stripeEvents.countDocuments({ processing_status: 'failed' }, { maxTimeMS }),
+      stripeEvents
+        .aggregate<{ count: number }>(
+          [
+            { $match: { processing_status: 'failed' } },
+            {
+              $lookup: {
+                from: 'stripe_webhook_failure_acknowledgements',
+                localField: '_id',
+                foreignField: 'stripe_webhook_event_id',
+                as: 'operational_acknowledgements',
+              },
+            },
+            { $match: { operational_acknowledgements: { $eq: [] } } },
+            { $count: 'count' },
+          ],
+          { maxTimeMS },
+        )
+        .next(),
+      stripeAcknowledgements.countDocuments({}, { maxTimeMS }),
+      paymentAttempts.countDocuments({ state: 'manual_review' }, { maxTimeMS }),
+      paymentAttempts.findOne(
+        { state: 'manual_review' },
+        { sort: { updated_at: 1 }, projection: { _id: 0, updated_at: 1 }, maxTimeMS },
+      ),
+      paymentAttempts.countDocuments(
+        { state: 'manual_review', failure_category: 'local_finalization' },
+        { maxTimeMS },
+      ),
     ]);
 
     let timer: NodeJS.Timeout | undefined;
@@ -104,7 +140,11 @@ export class MongoMonitoringReader implements MonitoringReader {
       stripePendingCount,
       stripeOldestPending,
       stripeProcessingCount,
-      stripeFailedCount,
+      stripeActionableFailed,
+      stripeHistoricalTerminalFailedCount,
+      paymentManualReviewCount,
+      paymentOldestManualReview,
+      paymentFinalizationFailureCount,
     ] = await Promise.race([query, timeout]).finally(() => {
       if (timer) clearTimeout(timer);
     });
@@ -120,7 +160,11 @@ export class MongoMonitoringReader implements MonitoringReader {
       stripePendingCount,
       stripeOldestPendingAt: stripeOldestPending?.received_at ?? null,
       stripeProcessingCount,
-      stripeFailedCount,
+      stripeFailedCount: stripeActionableFailed?.count ?? 0,
+      stripeHistoricalTerminalFailedCount,
+      paymentManualReviewCount,
+      paymentOldestManualReviewAt: paymentOldestManualReview?.updated_at ?? null,
+      paymentFinalizationFailureCount,
     };
   }
 }

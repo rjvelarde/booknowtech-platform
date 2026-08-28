@@ -19,11 +19,32 @@ export class StripeWebhookStore {
           .collection<{ tenant_id: ObjectId }>('tenant_stripe_accounts')
           .findOne({ stripe_account_id: account, active: true }, { projection: { tenant_id: 1 } })
       : null;
+    const supportedTypes = [
+      'account.updated',
+      'account.application.deauthorized',
+      'payment_intent.succeeded',
+      'payment_intent.payment_failed',
+      'payment_intent.canceled',
+      'payment_intent.processing',
+      'charge.refunded',
+      'refund.updated',
+      'charge.dispute.created',
+      'charge.dispute.updated',
+      'charge.dispute.closed',
+    ];
     const supported =
       input.endpointKind === 'connect' &&
       account !== null &&
-      ['account.updated', 'account.application.deauthorized'].includes(input.event.type);
-    const sanitizedPayload = input.event.accountView ? sanitize(input.event.accountView) : {};
+      supportedTypes.includes(input.event.type) &&
+      (!input.event.type.startsWith('payment_intent.') || input.event.paymentIntentView !== null) &&
+      (!isExternalEvidenceType(input.event.type) || input.event.financialEvidenceView !== null);
+    const sanitizedPayload = input.event.accountView
+      ? sanitize(input.event.accountView)
+      : input.event.paymentIntentView
+        ? sanitizePaymentIntent(input.event.paymentIntentView)
+        : input.event.financialEvidenceView
+          ? sanitizeExternalEvidence(input.event.financialEvidenceView)
+          : {};
     const document = {
       public_id: randomUUID(),
       stripe_event_id: input.event.id,
@@ -63,6 +84,34 @@ export class StripeWebhookStore {
       return { duplicate: true, publicId: existing?.public_id as string };
     }
   }
+}
+
+function isExternalEvidenceType(type: string) {
+  return (
+    type === 'charge.refunded' || type === 'refund.updated' || type.startsWith('charge.dispute.')
+  );
+}
+
+function sanitizeExternalEvidence(view: NonNullable<VerifiedStripeEvent['financialEvidenceView']>) {
+  return {
+    object_type: view.objectType,
+    id: view.id,
+    payment_intent_id: view.paymentIntentId,
+    amount: view.amount,
+    currency: view.currency,
+    status: view.status,
+  };
+}
+
+function sanitizePaymentIntent(view: NonNullable<VerifiedStripeEvent['paymentIntentView']>) {
+  return {
+    id: view.id,
+    status: view.status,
+    amount: view.amount,
+    application_fee_amount: view.applicationFeeAmount,
+    currency: view.currency,
+    last_payment_error_code: view.lastPaymentErrorCode,
+  };
 }
 
 function sanitize(view: NonNullable<VerifiedStripeEvent['accountView']>) {

@@ -16,6 +16,8 @@ describe('loadWorkerEnvironment', () => {
     TRANSACTIONAL_EMAIL_FROM: 'appointments@example.com',
     POSTMARK_SERVER_ID: '12345',
     PUBLIC_APPOINTMENT_TOKEN_SECRET: 'test-secret-that-is-at-least-thirty-two-bytes-long',
+    BOOKNOWTECH_PAYMENT_TERMS_VERSION: 'payment-v1',
+    BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256: 'a'.repeat(64),
   } as const;
 
   it('loads valid worker settings', () => {

@@ -6,7 +6,11 @@ import { MongoMonitoringReader } from './store.js';
 describe('Mongo monitoring query timeout', () => {
   it('rejects a monitoring read when Mongo operations do not complete within the bound', async () => {
     const never = new Promise<never>(() => undefined);
-    const collection = { findOne: () => never, countDocuments: () => never };
+    const collection = {
+      findOne: () => never,
+      countDocuments: () => never,
+      aggregate: () => ({ next: () => never }),
+    };
     const database = { collection: () => collection } as unknown as Db;
 
     await expect(

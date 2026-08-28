@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
-import { MongoClient } from 'mongodb';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { MongoClient, ObjectId } from 'mongodb';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { acknowledgeTerminalWebhookFailure } from './failure-acknowledgement.js';
 import { MongoMonitoringReader } from './store.js';
 
 const uri = process.env.MONGODB_TEST_URI;
@@ -36,6 +37,26 @@ suite('Mongo monitoring reader', () => {
         { processing_status: 1, next_attempt_at: 1, received_at: 1 },
         { name: 'stripe_webhook_events_worker_poll' },
       );
+    await db
+      .collection('stripe_webhook_failure_acknowledgements')
+      .createIndex({ stripe_webhook_event_id: 1 }, { unique: true });
+    await db
+      .collection('payment_attempts')
+      .createIndex(
+        { state: 1, failure_category: 1, updated_at: 1 },
+        { name: 'payment_attempts_operations_monitor' },
+      );
+  });
+
+  beforeEach(async () => {
+    await Promise.all([
+      db.collection('service_heartbeats').deleteMany({}),
+      db.collection('notification_outbox').deleteMany({}),
+      db.collection('stripe_webhook_events').deleteMany({}),
+      db.collection('stripe_webhook_failure_acknowledgements').deleteMany({}),
+      db.collection('payment_attempts').deleteMany({}),
+      db.collection('audit_logs').deleteMany({}),
+    ]);
   });
 
   afterAll(async () => {
@@ -81,6 +102,18 @@ suite('Mongo monitoring reader', () => {
       { processing_status: 'processing', received_at: new Date(now.valueOf() - 20_000) },
       { processing_status: 'failed', received_at: new Date(now.valueOf() - 10_000) },
     ]);
+    await db.collection('payment_attempts').insertMany([
+      {
+        state: 'manual_review',
+        failure_category: 'local_finalization',
+        updated_at: new Date(now.valueOf() - 90_000),
+      },
+      {
+        state: 'manual_review',
+        failure_category: 'unknown',
+        updated_at: new Date(now.valueOf() - 30_000),
+      },
+    ]);
 
     const result = await new MongoMonitoringReader(db).read('staging', now);
 
@@ -101,7 +134,80 @@ suite('Mongo monitoring reader', () => {
       stripeOldestPendingAt: new Date(now.valueOf() - 45_000),
       stripeProcessingCount: 1,
       stripeFailedCount: 1,
+      stripeHistoricalTerminalFailedCount: 0,
+      paymentManualReviewCount: 2,
+      paymentOldestManualReviewAt: new Date(now.valueOf() - 90_000),
+      paymentFinalizationFailureCount: 1,
     });
+  });
+
+  it('preserves acknowledged terminal evidence while excluding it from actionable failures', async () => {
+    const historicalId = new ObjectId();
+    const historical = {
+      _id: historicalId,
+      public_id: randomUUID(),
+      stripe_event_id: 'evt_historicalterminal',
+      processing_status: 'failed',
+      attempt_count: 8,
+      processing_started_at: null,
+      processed_at: null,
+      failure_category: 'unresolved_account',
+      received_at: new Date(now.valueOf() - 7 * 86_400_000),
+      updated_at: new Date(now.valueOf() - 7 * 86_400_000),
+    };
+    const actionable = {
+      ...historical,
+      _id: new ObjectId(),
+      public_id: randomUUID(),
+      stripe_event_id: 'evt_currentactionable',
+      received_at: now,
+      updated_at: now,
+    };
+    await db.collection('stripe_webhook_events').insertMany([historical, actionable]);
+    const before = await db.collection('stripe_webhook_events').findOne({ _id: historicalId });
+    await acknowledgeTerminalWebhookFailure({
+      client,
+      database: db,
+      stripeEventId: historical.stripe_event_id,
+      operatorId: 'booknowtech-operator',
+      reason: 'Reviewed historical pre-association event; no tenant attribution is authorized.',
+      requestId: randomUUID(),
+    });
+    const after = await db.collection('stripe_webhook_events').findOne({ _id: historicalId });
+    expect(after).toEqual(before);
+    expect(
+      await db.collection('audit_logs').countDocuments({
+        event: 'stripe_webhook_failure.acknowledged_non_actionable',
+      }),
+    ).toBe(1);
+
+    const result = await new MongoMonitoringReader(db).read('staging', now);
+    expect(result.stripeFailedCount).toBe(1);
+    expect(result.stripeHistoricalTerminalFailedCount).toBe(1);
+  });
+
+  it('refuses acknowledgement unless the original evidence is terminal and failed', async () => {
+    await db.collection('stripe_webhook_events').insertOne({
+      _id: new ObjectId(),
+      public_id: randomUUID(),
+      stripe_event_id: 'evt_retryablepending',
+      processing_status: 'pending',
+      attempt_count: 3,
+      processing_started_at: null,
+      processed_at: null,
+      failure_category: 'unresolved_account',
+    });
+    await expect(
+      acknowledgeTerminalWebhookFailure({
+        client,
+        database: db,
+        stripeEventId: 'evt_retryablepending',
+        operatorId: 'booknowtech-operator',
+        reason: 'This must be rejected because the event remains retryable.',
+        requestId: randomUUID(),
+      }),
+    ).rejects.toThrow('webhook_failure_not_terminal');
+    expect(await db.collection('stripe_webhook_failure_acknowledgements').countDocuments()).toBe(0);
   });
 
   it('uses the named heartbeat and outbox indexes for the bounded query shapes', async () => {

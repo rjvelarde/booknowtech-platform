@@ -468,6 +468,7 @@ export class PublicPaidBookingOrchestrator {
         recovery_token_hash: recoveryTokenHash(recoveryToken),
         recovery_hostname_hash: recoveryHostHash,
         recovery_expires_at: recoveryExpiresAt,
+        public_booking_origin: `https://${input.hostname}`,
         amount_snapshot: toAmountSnapshot(amounts),
         configuration_snapshot: {
           service_payment_configuration_public_id: configuration.configuration_public_id,

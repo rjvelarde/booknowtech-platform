@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
-describe('PR 14B.2 Stripe execution boundary', () => {
+describe('PR 14B Stripe execution boundary', () => {
   it('allows only create, retrieve, and cancel PaymentIntent operations', () => {
     const adapter = readFileSync(resolve(root, 'apps/api/src/stripe/adapter.ts'), 'utf8');
     expect(adapter.match(/paymentIntents\.(?:create|retrieve|cancel)/gu)).toEqual([
@@ -18,7 +18,16 @@ describe('PR 14B.2 Stripe execution boundary', () => {
     );
     const source = files.map((file) => readFileSync(resolve(root, file), 'utf8')).join('\n');
     expect(source).not.toMatch(
-      /setupIntents\.|charges\.create|refunds\.create|subscriptions\.create|invoices\.(?:create|pay)|checkout\.sessions|transfers\.create|paymentMethods\.|\.capture\(|payment_intent\.(?:succeeded|payment_failed|processing|canceled)/u,
+      /setupIntents\.|charges\.create|refunds\.create|subscriptions\.create|invoices\.(?:create|pay)|checkout\.sessions|transfers\.create|paymentMethods\.|\.capture\(/u,
+    );
+    const paymentEvents = [...source.matchAll(/payment_intent\.[a-z_]+/gu)].map(([value]) => value);
+    expect(new Set(paymentEvents)).toEqual(
+      new Set([
+        'payment_intent.succeeded',
+        'payment_intent.payment_failed',
+        'payment_intent.processing',
+        'payment_intent.canceled',
+      ]),
     );
     expect(adapter).not.toMatch(/transfer_data|on_behalf_of|capture_method:\s*'manual'/u);
   });

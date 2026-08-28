@@ -26,6 +26,10 @@ function snapshot(overrides: Partial<MonitoringSnapshot> = {}): MonitoringSnapsh
     stripeOldestPendingAt: null,
     stripeProcessingCount: 0,
     stripeFailedCount: 0,
+    stripeHistoricalTerminalFailedCount: 0,
+    paymentManualReviewCount: 0,
+    paymentOldestManualReviewAt: null,
+    paymentFinalizationFailureCount: 0,
     ...overrides,
   };
 }
@@ -88,6 +92,12 @@ describe('internal monitoring route', () => {
           oldest_pending_age_seconds: null,
           processing_count: 0,
           failed_count: 0,
+          historical_terminal_failed_count: 0,
+        },
+        payments: {
+          manual_review_count: 0,
+          oldest_manual_review_age_seconds: null,
+          local_finalization_failure_count: 0,
         },
       },
     });
@@ -126,6 +136,8 @@ describe('internal monitoring route', () => {
     ['malformed SHA', { worker: { ...snapshot().worker!, commit_sha: 'not-a-sha' } }],
     ['mismatched SHA', { worker: { ...snapshot().worker!, commit_sha: 'b'.repeat(40) } }],
     ['failed Stripe webhook', { stripeFailedCount: 1 }],
+    ['pending Stripe webhook', { stripePendingCount: 1, stripeOldestPendingAt: now }],
+    ['processing Stripe webhook', { stripeProcessingCount: 1 }],
   ])('fails closed for %s', async (_label, overrides) => {
     const app = await application({ read: () => Promise.resolve(snapshot(overrides)) });
     const response = await app.inject({
@@ -135,6 +147,22 @@ describe('internal monitoring route', () => {
     });
     expect(response.statusCode).toBe(503);
     expect(response.headers['cache-control']).toBe('no-store');
+  });
+
+  it('keeps acknowledged terminal history visible without degrading current health', async () => {
+    const app = await application({
+      read: () => Promise.resolve(snapshot({ stripeHistoricalTerminalFailedCount: 2 })),
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/internal/monitoring',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.stripe_webhooks).toMatchObject({
+      failed_count: 0,
+      historical_terminal_failed_count: 2,
+    });
   });
 
   it('fails closed on Mongo/query failure without exposing error or business data', async () => {
@@ -156,6 +184,7 @@ describe('internal monitoring route', () => {
       'worker',
       'outbox',
       'stripe_webhooks',
+      'payments',
     ]);
   });
 

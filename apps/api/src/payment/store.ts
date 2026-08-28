@@ -115,6 +115,7 @@ export interface PaymentAttemptDocument {
   recovery_token_hash: string;
   recovery_hostname_hash: string;
   recovery_expires_at: Date;
+  public_booking_origin?: string | null;
   amount_snapshot: PaymentAmountsSnake;
   configuration_snapshot: {
     service_payment_configuration_public_id: string;
@@ -158,6 +159,7 @@ export interface PaymentLedgerEntryDocument {
     | 'intent_requested'
     | 'payment_succeeded'
     | 'payment_failed_recoverable'
+    | 'payment_processing'
     | 'payment_failed_terminal'
     | 'payment_expired'
     | 'payment_stale'
@@ -428,6 +430,7 @@ export class PaymentFoundationStore {
     const now = new Date();
     const attempt: PaymentAttemptDocument = {
       ...input,
+      public_booking_origin: input.public_booking_origin ?? null,
       _id: new ObjectId(),
       created_at: now,
       updated_at: now,
