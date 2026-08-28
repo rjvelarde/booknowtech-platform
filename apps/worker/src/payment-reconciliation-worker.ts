@@ -249,6 +249,7 @@ async function finalizeRetrievedSuccess(
         .collection<Attempt>('payment_attempts')
         .findOne({ _id: attempt._id, claim_token: claimToken }, { session });
       if (!owned) throw new Error('reconciliation_claim_lost');
+      if (await repairAlreadyScheduledSuccess(db, owned, claimToken, now, session)) return;
       const projection: PaymentEventProjection = {
         id: intent.id,
         status: 'succeeded',
@@ -296,6 +297,70 @@ async function finalizeRetrievedSuccess(
   } finally {
     await session.endSession();
   }
+}
+
+async function repairAlreadyScheduledSuccess(
+  db: Db,
+  attempt: Attempt,
+  claimToken: string,
+  now: Date,
+  session: ClientSession,
+): Promise<boolean> {
+  if (attempt.state !== 'manual_review' || !attempt.reconciliation_requeue_request_id) return false;
+  const [appointment, succeededEvidence] = await Promise.all([
+    db
+      .collection('appointments')
+      .findOne(
+        { _id: attempt.appointment_id, tenant_id: attempt.tenant_id, status: 'scheduled' },
+        { session, projection: { _id: 1 } },
+      ),
+    db
+      .collection('payment_ledger_entries')
+      .findOne(
+        { payment_attempt_id: attempt._id, entry_kind: 'payment_succeeded' },
+        { session, projection: { _id: 1 } },
+      ),
+  ]);
+  if (!appointment || !succeededEvidence) return false;
+  const repaired = await db.collection<Attempt>('payment_attempts').updateOne(
+    {
+      _id: attempt._id,
+      state: 'manual_review',
+      slot_released: false,
+      claim_token: claimToken,
+      reconciliation_requeue_request_id: attempt.reconciliation_requeue_request_id,
+    },
+    {
+      $set: {
+        state: 'succeeded',
+        stripe_payment_intent_status: 'succeeded',
+        failure_category: null,
+        claim_token: null,
+        claim_started_at: null,
+        reconciliation_requeue_request_id: null,
+        updated_at: now,
+      },
+      $inc: { attempt_count: 1 },
+    },
+    { session },
+  );
+  if (repaired.modifiedCount !== 1) throw new Error('reconciliation_claim_lost');
+  await db
+    .collection('payment_operations_alerts')
+    .updateMany(
+      { payment_attempt_id: attempt._id, status: 'open' },
+      { $set: { status: 'acknowledged', acknowledged_at: now } },
+      { session },
+    );
+  await appendAudit(
+    db,
+    attempt,
+    session,
+    'payment_reconciliation_scheduled_success_repaired',
+    'success',
+    'authoritative_success_with_existing_scheduled_evidence',
+  );
+  return true;
 }
 
 async function rescheduleKnownState(

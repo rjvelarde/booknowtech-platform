@@ -138,6 +138,65 @@ suite('payment reconciliation worker', () => {
     });
   });
 
+  it('repairs an explicitly requeued paid attempt whose booking was already finalized', async () => {
+    const seeded = await seed({ state: 'manual_review', expired: true });
+    const requestId = randomUUID();
+    await db
+      .collection('appointments')
+      .updateOne({ _id: seeded.appointmentId }, { $set: { status: 'scheduled', version: 3 } });
+    await db.collection('payment_attempts').updateOne(
+      { _id: seeded.attemptId },
+      {
+        $set: {
+          stripe_payment_intent_status: 'succeeded',
+          failure_category: 'local_finalization',
+          reconciliation_requeue_request_id: requestId,
+        },
+      },
+    );
+    await db.collection('payment_ledger_entries').insertOne({
+      payment_attempt_id: seeded.attemptId,
+      entry_kind: 'payment_succeeded',
+    });
+
+    await processPaymentReconciliation(
+      db,
+      adapter({ status: 'succeeded' } as never),
+      options,
+      seeded.now,
+    );
+
+    expect(
+      await db.collection('payment_attempts').findOne({ _id: seeded.attemptId }),
+    ).toMatchObject({
+      state: 'succeeded',
+      slot_released: false,
+      failure_category: null,
+      reconciliation_requeue_request_id: null,
+      claim_token: null,
+      attempt_count: 1,
+    });
+    expect(
+      await db.collection('appointments').findOne({ _id: seeded.appointmentId }),
+    ).toMatchObject({ status: 'scheduled', version: 3 });
+    expect(await db.collection('management_tokens').countDocuments()).toBe(0);
+    expect(await db.collection('notification_outbox').countDocuments()).toBe(0);
+    expect(
+      await db.collection('payment_ledger_entries').countDocuments({
+        payment_attempt_id: seeded.attemptId,
+        entry_kind: 'payment_succeeded',
+      }),
+    ).toBe(1);
+    expect(
+      await db.collection('audit_logs').findOne({
+        event: 'payment_reconciliation_scheduled_success_repaired',
+        'metadata.payment_attempt_public_id': {
+          $type: 'string',
+        },
+      }),
+    ).toMatchObject({ outcome: 'success' });
+  });
+
   it('uses atomic claim ownership across concurrent workers', async () => {
     const seeded = await seed({ state: 'requires_payment_method', expired: true });
     let retrievals = 0;
