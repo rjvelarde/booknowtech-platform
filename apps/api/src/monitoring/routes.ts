@@ -51,12 +51,19 @@ const monitoringDataSchema = {
     stripe_webhooks: {
       type: 'object',
       additionalProperties: false,
-      required: ['pending_count', 'oldest_pending_age_seconds', 'processing_count', 'failed_count'],
+      required: [
+        'pending_count',
+        'oldest_pending_age_seconds',
+        'processing_count',
+        'failed_count',
+        'historical_terminal_failed_count',
+      ],
       properties: {
         pending_count: nullableInteger,
         oldest_pending_age_seconds: nullableInteger,
         processing_count: nullableInteger,
         failed_count: nullableInteger,
+        historical_terminal_failed_count: nullableInteger,
       },
     },
     payments: {
@@ -160,6 +167,8 @@ function monitoringResponse(environment: Environment, snapshot: MonitoringSnapsh
       environmentMatches &&
       apiShaValid &&
       shaMatches &&
+      snapshot.stripePendingCount === 0 &&
+      snapshot.stripeProcessingCount === 0 &&
       snapshot.stripeFailedCount === 0,
     data: {
       environment: environment.ENVIRONMENT_ID,
@@ -183,6 +192,7 @@ function monitoringResponse(environment: Environment, snapshot: MonitoringSnapsh
         oldest_pending_age_seconds: age(now, snapshot.stripeOldestPendingAt),
         processing_count: snapshot.stripeProcessingCount,
         failed_count: snapshot.stripeFailedCount,
+        historical_terminal_failed_count: snapshot.stripeHistoricalTerminalFailedCount,
       },
       payments: {
         manual_review_count: snapshot.paymentManualReviewCount,
@@ -211,6 +221,7 @@ function unavailableData(environment: Environment) {
       oldest_pending_age_seconds: null,
       processing_count: null,
       failed_count: null,
+      historical_terminal_failed_count: null,
     },
     payments: {
       manual_review_count: null,

@@ -158,6 +158,20 @@ suite('administrative foundation migration', () => {
         }),
       ]),
     );
+    expect(await db.collection('stripe_webhook_failure_acknowledgements').indexes()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'stripe_webhook_failure_ack_event_unique',
+          key: { stripe_webhook_event_id: 1 },
+          unique: true,
+        }),
+        expect.objectContaining({
+          name: 'stripe_webhook_failure_ack_request_unique',
+          key: { request_id: 1 },
+          unique: true,
+        }),
+      ]),
+    );
   });
 
   it('backfills canonical origins and keeps orphaned legacy notices processable', async () => {

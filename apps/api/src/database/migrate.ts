@@ -151,6 +151,34 @@ const validators: Record<string, Document> = {
       },
     },
   },
+  stripe_webhook_failure_acknowledgements: {
+    $jsonSchema: {
+      bsonType: 'object',
+      additionalProperties: false,
+      required: [
+        '_id',
+        'public_id',
+        'stripe_webhook_event_id',
+        'stripe_event_id',
+        'failure_category',
+        'operator_id',
+        'reason',
+        'request_id',
+        'created_at',
+      ],
+      properties: {
+        _id: { bsonType: 'objectId' },
+        public_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        stripe_webhook_event_id: { bsonType: 'objectId' },
+        stripe_event_id: { bsonType: 'string', pattern: '^evt_[A-Za-z0-9]+$' },
+        failure_category: { bsonType: 'string', minLength: 1, maxLength: 120 },
+        operator_id: { bsonType: 'string', minLength: 3, maxLength: 120 },
+        reason: { bsonType: 'string', minLength: 10, maxLength: 500 },
+        request_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        created_at: { bsonType: 'date' },
+      },
+    },
+  },
   tenant_payment_execution_settings: {
     $jsonSchema: {
       bsonType: 'object',
@@ -2033,6 +2061,20 @@ export async function migrateDatabase(db: Db): Promise<void> {
       key: { stripe_account_id: 1, received_at: -1 },
       name: 'stripe_webhook_events_account_received',
     },
+  ]);
+  await db.collection('stripe_webhook_failure_acknowledgements').createIndexes([
+    {
+      key: { stripe_webhook_event_id: 1 },
+      name: 'stripe_webhook_failure_ack_event_unique',
+      unique: true,
+    },
+    {
+      key: { stripe_event_id: 1 },
+      name: 'stripe_webhook_failure_ack_stripe_event_unique',
+      unique: true,
+    },
+    { key: { request_id: 1 }, name: 'stripe_webhook_failure_ack_request_unique', unique: true },
+    { key: { created_at: -1 }, name: 'stripe_webhook_failure_ack_created' },
   ]);
   await db.collection('tenant_booking_fee_versions').createIndexes([
     { key: { public_id: 1 }, name: 'booking_fee_versions_public_id_unique', unique: true },

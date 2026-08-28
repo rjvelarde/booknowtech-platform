@@ -10,6 +10,7 @@
     "db:seed:staging": "tsx --env-file-if-exists=../../.env src/database/seed-development.ts",
     "tenant-provision": "tsx --env-file-if-exists=../../.env src/provisioning/command.ts",
     "booking-domain": "tsx --env-file-if-exists=../../.env src/domain-management/command.ts",
+    "monitoring-acknowledge-webhook": "tsx --env-file-if-exists=../../.env src/monitoring/acknowledge-command.ts",
     "start": "node --env-file-if-exists=../../.env dist/server.js",
     "test": "vitest run",
     "test:unit": "vitest run --exclude '**/*.integration.test.ts'",
