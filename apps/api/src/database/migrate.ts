@@ -568,6 +568,11 @@ const validators: Record<string, Document> = {
             'unknown',
           ],
         },
+        reconciliation_requeue_request_id: {
+          bsonType: ['string', 'null'],
+          minLength: 1,
+          maxLength: 128,
+        },
         request_id: { bsonType: 'string', minLength: 1, maxLength: 128 },
         correlation_id: { bsonType: 'string', minLength: 1, maxLength: 128 },
         created_at: { bsonType: 'date' },
@@ -642,6 +647,69 @@ const validators: Record<string, Document> = {
         request_id: { bsonType: 'string', minLength: 1, maxLength: 128 },
         correlation_id: { bsonType: 'string', minLength: 1, maxLength: 128 },
         created_at: { bsonType: 'date' },
+      },
+    },
+  },
+  payment_reconciliation_requeues: {
+    $jsonSchema: {
+      bsonType: 'object',
+      additionalProperties: false,
+      required: [
+        '_id',
+        'public_id',
+        'payment_attempt_id',
+        'payment_attempt_public_id',
+        'tenant_id',
+        'operator_id',
+        'reason',
+        'request_id',
+        'environment',
+        'created_at',
+      ],
+      properties: {
+        _id: { bsonType: 'objectId' },
+        public_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        payment_attempt_id: { bsonType: 'objectId' },
+        payment_attempt_public_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        tenant_id: { bsonType: 'objectId' },
+        operator_id: { bsonType: 'string', minLength: 1, maxLength: 128 },
+        reason: { bsonType: 'string', minLength: 10, maxLength: 500 },
+        request_id: { bsonType: 'string', minLength: 1, maxLength: 128 },
+        environment: { enum: ['staging', 'production'] },
+        created_at: { bsonType: 'date' },
+      },
+    },
+  },
+  payment_operations_alerts: {
+    $jsonSchema: {
+      bsonType: 'object',
+      additionalProperties: false,
+      required: [
+        '_id',
+        'public_id',
+        'tenant_id',
+        'payment_attempt_id',
+        'payment_attempt_public_id',
+        'category',
+        'priority',
+        'resolution_target',
+        'status',
+        'reason',
+        'created_at',
+      ],
+      properties: {
+        _id: { bsonType: 'objectId' },
+        public_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        tenant_id: { bsonType: 'objectId' },
+        payment_attempt_id: { bsonType: 'objectId' },
+        payment_attempt_public_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        category: { enum: ['reconciliation_actionable'] },
+        priority: { enum: ['highest', 'standard'] },
+        resolution_target: { enum: ['one_hour_during_operating_hours', 'same_business_day'] },
+        status: { enum: ['open', 'acknowledged'] },
+        reason: { bsonType: 'string', minLength: 1, maxLength: 160 },
+        created_at: { bsonType: 'date' },
+        acknowledged_at: { bsonType: 'date' },
       },
     },
   },
@@ -2166,6 +2234,10 @@ export async function migrateDatabase(db: Db): Promise<void> {
       name: 'payment_attempts_worker_poll',
     },
     {
+      key: { state: 1, slot_released: 1, next_attempt_at: 1, claim_started_at: 1 },
+      name: 'payment_attempts_reconciliation_poll',
+    },
+    {
       key: { state: 1, failure_category: 1, updated_at: 1 },
       name: 'payment_attempts_operations_monitor',
     },
@@ -2193,6 +2265,21 @@ export async function migrateDatabase(db: Db): Promise<void> {
       key: { tenant_id: 1, appointment_id: 1, effective_at: 1 },
       name: 'payment_ledger_appointment_history',
     },
+  ]);
+  await db.collection('payment_reconciliation_requeues').createIndexes([
+    { key: { request_id: 1 }, name: 'payment_reconciliation_requeue_request_unique', unique: true },
+    {
+      key: { payment_attempt_id: 1, created_at: -1 },
+      name: 'payment_reconciliation_requeue_attempt_history',
+    },
+  ]);
+  await db.collection('payment_operations_alerts').createIndexes([
+    {
+      key: { payment_attempt_id: 1, category: 1 },
+      name: 'payment_operations_alert_attempt_category_unique',
+      unique: true,
+    },
+    { key: { status: 1, priority: 1, created_at: 1 }, name: 'payment_operations_alert_queue' },
   ]);
   await db.collection('users').createIndexes([
     { key: { public_id: 1 }, name: 'users_public_id_unique', unique: true },

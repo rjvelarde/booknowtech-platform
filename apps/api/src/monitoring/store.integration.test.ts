@@ -138,6 +138,12 @@ suite('Mongo monitoring reader', () => {
       paymentManualReviewCount: 2,
       paymentOldestManualReviewAt: new Date(now.valueOf() - 90_000),
       paymentFinalizationFailureCount: 1,
+      paymentExpiryCandidateCount: 0,
+      paymentReconciliationPendingCount: 0,
+      paymentReconciliationProcessingCount: 0,
+      paymentSucceededUnfinalizedCount: 0,
+      paymentOldestSucceededUnfinalizedAt: null,
+      paymentRetryExhaustedCount: 0,
     });
   });
 

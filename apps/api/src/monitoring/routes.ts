@@ -73,11 +73,23 @@ const monitoringDataSchema = {
         'manual_review_count',
         'oldest_manual_review_age_seconds',
         'local_finalization_failure_count',
+        'expiry_candidate_count',
+        'reconciliation_pending_count',
+        'reconciliation_processing_count',
+        'succeeded_unfinalized_count',
+        'oldest_succeeded_unfinalized_age_seconds',
+        'retry_exhausted_count',
       ],
       properties: {
         manual_review_count: nullableInteger,
         oldest_manual_review_age_seconds: nullableInteger,
         local_finalization_failure_count: nullableInteger,
+        expiry_candidate_count: nullableInteger,
+        reconciliation_pending_count: nullableInteger,
+        reconciliation_processing_count: nullableInteger,
+        succeeded_unfinalized_count: nullableInteger,
+        oldest_succeeded_unfinalized_age_seconds: nullableInteger,
+        retry_exhausted_count: nullableInteger,
       },
     },
   },
@@ -169,7 +181,13 @@ function monitoringResponse(environment: Environment, snapshot: MonitoringSnapsh
       shaMatches &&
       snapshot.stripePendingCount === 0 &&
       snapshot.stripeProcessingCount === 0 &&
-      snapshot.stripeFailedCount === 0,
+      snapshot.stripeFailedCount === 0 &&
+      snapshot.paymentExpiryCandidateCount === 0 &&
+      snapshot.paymentReconciliationPendingCount === 0 &&
+      snapshot.paymentReconciliationProcessingCount === 0 &&
+      snapshot.paymentSucceededUnfinalizedCount === 0 &&
+      snapshot.paymentManualReviewCount === 0 &&
+      snapshot.paymentRetryExhaustedCount === 0,
     data: {
       environment: environment.ENVIRONMENT_ID,
       api_sha: environment.BUILD_VERSION,
@@ -198,6 +216,15 @@ function monitoringResponse(environment: Environment, snapshot: MonitoringSnapsh
         manual_review_count: snapshot.paymentManualReviewCount,
         oldest_manual_review_age_seconds: age(now, snapshot.paymentOldestManualReviewAt),
         local_finalization_failure_count: snapshot.paymentFinalizationFailureCount,
+        expiry_candidate_count: snapshot.paymentExpiryCandidateCount,
+        reconciliation_pending_count: snapshot.paymentReconciliationPendingCount,
+        reconciliation_processing_count: snapshot.paymentReconciliationProcessingCount,
+        succeeded_unfinalized_count: snapshot.paymentSucceededUnfinalizedCount,
+        oldest_succeeded_unfinalized_age_seconds: age(
+          now,
+          snapshot.paymentOldestSucceededUnfinalizedAt,
+        ),
+        retry_exhausted_count: snapshot.paymentRetryExhaustedCount,
       },
     },
   };
@@ -227,6 +254,12 @@ function unavailableData(environment: Environment) {
       manual_review_count: null,
       oldest_manual_review_age_seconds: null,
       local_finalization_failure_count: null,
+      expiry_candidate_count: null,
+      reconciliation_pending_count: null,
+      reconciliation_processing_count: null,
+      succeeded_unfinalized_count: null,
+      oldest_succeeded_unfinalized_age_seconds: null,
+      retry_exhausted_count: null,
     },
   };
 }

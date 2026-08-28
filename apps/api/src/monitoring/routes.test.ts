@@ -30,6 +30,12 @@ function snapshot(overrides: Partial<MonitoringSnapshot> = {}): MonitoringSnapsh
     paymentManualReviewCount: 0,
     paymentOldestManualReviewAt: null,
     paymentFinalizationFailureCount: 0,
+    paymentExpiryCandidateCount: 0,
+    paymentReconciliationPendingCount: 0,
+    paymentReconciliationProcessingCount: 0,
+    paymentSucceededUnfinalizedCount: 0,
+    paymentOldestSucceededUnfinalizedAt: null,
+    paymentRetryExhaustedCount: 0,
     ...overrides,
   };
 }
@@ -98,6 +104,12 @@ describe('internal monitoring route', () => {
           manual_review_count: 0,
           oldest_manual_review_age_seconds: null,
           local_finalization_failure_count: 0,
+          expiry_candidate_count: 0,
+          reconciliation_pending_count: 0,
+          reconciliation_processing_count: 0,
+          succeeded_unfinalized_count: 0,
+          oldest_succeeded_unfinalized_age_seconds: null,
+          retry_exhausted_count: 0,
         },
       },
     });
@@ -138,6 +150,12 @@ describe('internal monitoring route', () => {
     ['failed Stripe webhook', { stripeFailedCount: 1 }],
     ['pending Stripe webhook', { stripePendingCount: 1, stripeOldestPendingAt: now }],
     ['processing Stripe webhook', { stripeProcessingCount: 1 }],
+    ['expired payment hold', { paymentExpiryCandidateCount: 1 }],
+    ['reconciliation pending', { paymentReconciliationPendingCount: 1 }],
+    ['reconciliation processing', { paymentReconciliationProcessingCount: 1 }],
+    ['paid unfinalized', { paymentSucceededUnfinalizedCount: 1 }],
+    ['manual review', { paymentManualReviewCount: 1 }],
+    ['retry exhausted', { paymentRetryExhaustedCount: 1 }],
   ])('fails closed for %s', async (_label, overrides) => {
     const app = await application({ read: () => Promise.resolve(snapshot(overrides)) });
     const response = await app.inject({
@@ -147,6 +165,30 @@ describe('internal monitoring route', () => {
     });
     expect(response.statusCode).toBe(503);
     expect(response.headers['cache-control']).toBe('no-store');
+  });
+
+  it('exposes paid-unfinalized age without sensitive payment data', async () => {
+    const app = await application({
+      read: () =>
+        Promise.resolve(
+          snapshot({
+            paymentSucceededUnfinalizedCount: 1,
+            paymentOldestSucceededUnfinalizedAt: new Date(now.valueOf() - 3_600_000),
+          }),
+        ),
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/internal/monitoring',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.json().data.payments).toMatchObject({
+      succeeded_unfinalized_count: 1,
+      oldest_succeeded_unfinalized_age_seconds: 3_600,
+    });
+    expect(response.body).not.toContain('client_secret');
+    expect(response.body).not.toContain('customer_email');
   });
 
   it('keeps acknowledged terminal history visible without degrading current health', async () => {

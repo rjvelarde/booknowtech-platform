@@ -58,6 +58,8 @@ suite('administrative foundation migration', () => {
         'provisional_payment_customers',
         'payment_attempts',
         'payment_ledger_entries',
+        'payment_reconciliation_requeues',
+        'payment_operations_alerts',
       ]),
     );
     expect(
@@ -167,6 +169,23 @@ suite('administrative foundation migration', () => {
         }),
         expect.objectContaining({
           name: 'stripe_webhook_failure_ack_request_unique',
+          key: { request_id: 1 },
+          unique: true,
+        }),
+      ]),
+    );
+    expect(await db.collection('payment_attempts').indexes()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'payment_attempts_reconciliation_poll',
+          key: { state: 1, slot_released: 1, next_attempt_at: 1, claim_started_at: 1 },
+        }),
+      ]),
+    );
+    expect(await db.collection('payment_reconciliation_requeues').indexes()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'payment_reconciliation_requeue_request_unique',
           key: { request_id: 1 },
           unique: true,
         }),
