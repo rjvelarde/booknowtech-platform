@@ -67,6 +67,8 @@ interface Attempt {
   stripe_payment_intent_id: string;
   state: string;
   slot_released: boolean;
+  expires_at: Date;
+  claim_token: string | null;
   correlation_id: string;
   request_fingerprint: string;
   public_booking_origin?: string | null;
@@ -404,11 +406,8 @@ async function canceled(
   appointment: Appointment,
   session: ClientSession,
 ) {
-  if (
-    attempt.state === 'succeeded' ||
-    (attempt.state === 'failed_terminal' && attempt.slot_released)
-  )
-    return;
+  if (attempt.state === 'succeeded' || attempt.slot_released) return;
+  if (attempt.claim_token && attempt.expires_at <= new Date()) return;
   await appendLedger(
     db,
     event,
