@@ -148,7 +148,7 @@ suite('payment webhook financial finalization', () => {
     ).toBe(1);
   });
 
-  it('defers expiry cancellation webhooks to the active reconciliation claim', async () => {
+  it('classifies cancellation after the hold deadline as expiry exactly once', async () => {
     const seeded = await seed('requires_payment_method');
     await db.collection('payment_attempts').updateOne(
       { _id: seeded.attemptId },
@@ -163,29 +163,16 @@ suite('payment webhook financial finalization', () => {
     await apply(seeded, 'payment_intent.canceled', 'canceled');
     expect(
       await db.collection('payment_attempts').findOne({ _id: seeded.attemptId }),
-    ).toMatchObject({ state: 'requires_payment_method', slot_released: false });
+    ).toMatchObject({ state: 'expired', slot_released: true, failure_category: 'expired' });
     expect(
       await db.collection('appointments').findOne({ _id: seeded.appointmentId }),
-    ).toMatchObject({ status: 'payment_pending', version: 1 });
+    ).toMatchObject({ status: 'payment_expired', version: 2 });
     expect(
       await db.collection('payment_ledger_entries').countDocuments({
         payment_attempt_id: seeded.attemptId,
-        entry_kind: 'payment_failed_terminal',
+        entry_kind: 'payment_expired',
       }),
-    ).toBe(0);
-
-    await db
-      .collection('payment_attempts')
-      .updateOne(
-        { _id: seeded.attemptId },
-        { $set: { state: 'expired', slot_released: true, claim_token: null } },
-      );
-    await db
-      .collection('appointments')
-      .updateOne(
-        { _id: seeded.appointmentId },
-        { $set: { status: 'payment_expired', version: 2 } },
-      );
+    ).toBe(1);
     await apply(seeded, 'payment_intent.canceled', 'canceled');
     expect(
       await db.collection('payment_attempts').findOne({ _id: seeded.attemptId }),
@@ -193,9 +180,9 @@ suite('payment webhook financial finalization', () => {
     expect(
       await db.collection('payment_ledger_entries').countDocuments({
         payment_attempt_id: seeded.attemptId,
-        entry_kind: 'payment_failed_terminal',
+        entry_kind: 'payment_expired',
       }),
-    ).toBe(0);
+    ).toBe(1);
   });
 
   it('fails closed to manual review on amount or account attribution mismatch', async () => {
