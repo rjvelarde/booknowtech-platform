@@ -31,6 +31,24 @@
     }
   }
 
+  @stripe_webhook {
+    method POST
+    host admin.booknowtech.com admin.staging.booknowtech.com
+    path /webhooks/stripe/platform /webhooks/stripe/connect
+  }
+
+  handle @stripe_webhook {
+    reverse_proxy {$API_PRIVATE_ORIGIN} {
+      header_up -X-Forwarded-*
+      header_up -X-Real-IP
+      header_up X-BookNowTech-Client-IP {client_ip}
+    }
+  }
+
+  handle /webhooks/stripe/* {
+    respond "Not Found" 404
+  }
+
   handle /api/* {
     reverse_proxy {$API_PRIVATE_ORIGIN} {
       header_up -X-Forwarded-*
