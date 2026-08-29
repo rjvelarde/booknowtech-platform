@@ -32,6 +32,12 @@ export interface MonitoringSnapshot {
   paymentManualReviewCount: number;
   paymentOldestManualReviewAt: Date | null;
   paymentFinalizationFailureCount: number;
+  paymentExpiryCandidateCount: number;
+  paymentReconciliationPendingCount: number;
+  paymentReconciliationProcessingCount: number;
+  paymentSucceededUnfinalizedCount: number;
+  paymentOldestSucceededUnfinalizedAt: Date | null;
+  paymentRetryExhaustedCount: number;
 }
 
 export interface MonitoringReader {
@@ -121,6 +127,42 @@ export class MongoMonitoringReader implements MonitoringReader {
         { state: 'manual_review', failure_category: 'local_finalization' },
         { maxTimeMS },
       ),
+      paymentAttempts.countDocuments(
+        {
+          slot_released: false,
+          expires_at: { $lte: now },
+          state: { $nin: ['succeeded', 'expired', 'stale', 'failed_terminal', 'manual_review'] },
+        },
+        { maxTimeMS },
+      ),
+      paymentAttempts.countDocuments(
+        {
+          slot_released: false,
+          next_attempt_at: { $lte: now },
+          claim_token: null,
+          state: {
+            $in: [
+              'stripe_creation_processing',
+              'requires_payment_method',
+              'requires_customer_action',
+              'failed_recoverable',
+              'processing',
+              'succeeded_unfinalized',
+            ],
+          },
+        },
+        { maxTimeMS },
+      ),
+      paymentAttempts.countDocuments({ claim_token: { $type: 'string' } }, { maxTimeMS }),
+      paymentAttempts.countDocuments({ state: 'succeeded_unfinalized' }, { maxTimeMS }),
+      paymentAttempts.findOne(
+        { state: 'succeeded_unfinalized' },
+        { sort: { updated_at: 1 }, projection: { _id: 0, updated_at: 1 }, maxTimeMS },
+      ),
+      paymentAttempts.countDocuments(
+        { state: 'manual_review', attempt_count: { $gte: 5 } },
+        { maxTimeMS },
+      ),
     ]);
 
     let timer: NodeJS.Timeout | undefined;
@@ -145,6 +187,12 @@ export class MongoMonitoringReader implements MonitoringReader {
       paymentManualReviewCount,
       paymentOldestManualReview,
       paymentFinalizationFailureCount,
+      paymentExpiryCandidateCount,
+      paymentReconciliationPendingCount,
+      paymentReconciliationProcessingCount,
+      paymentSucceededUnfinalizedCount,
+      paymentOldestSucceededUnfinalized,
+      paymentRetryExhaustedCount,
     ] = await Promise.race([query, timeout]).finally(() => {
       if (timer) clearTimeout(timer);
     });
@@ -165,6 +213,12 @@ export class MongoMonitoringReader implements MonitoringReader {
       paymentManualReviewCount,
       paymentOldestManualReviewAt: paymentOldestManualReview?.updated_at ?? null,
       paymentFinalizationFailureCount,
+      paymentExpiryCandidateCount,
+      paymentReconciliationPendingCount,
+      paymentReconciliationProcessingCount,
+      paymentSucceededUnfinalizedCount,
+      paymentOldestSucceededUnfinalizedAt: paymentOldestSucceededUnfinalized?.updated_at ?? null,
+      paymentRetryExhaustedCount,
     };
   }
 }

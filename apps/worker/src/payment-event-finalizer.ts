@@ -67,6 +67,8 @@ interface Attempt {
   stripe_payment_intent_id: string;
   state: string;
   slot_released: boolean;
+  expires_at: Date;
+  claim_token: string | null;
   correlation_id: string;
   request_fingerprint: string;
   public_booking_origin?: string | null;
@@ -404,11 +406,53 @@ async function canceled(
   appointment: Appointment,
   session: ClientSession,
 ) {
-  if (
-    attempt.state === 'succeeded' ||
-    (attempt.state === 'failed_terminal' && attempt.slot_released)
-  )
+  if (attempt.state === 'succeeded' || attempt.slot_released) return;
+  const now = new Date();
+  if (attempt.expires_at <= now) {
+    const expired = await db.collection<Attempt>('payment_attempts').updateOne(
+      { _id: attempt._id, slot_released: false },
+      {
+        $set: {
+          state: 'expired',
+          slot_released: true,
+          stripe_payment_intent_status: 'canceled',
+          claim_token: null,
+          claim_started_at: null,
+          failure_category: 'expired',
+          updated_at: now,
+        },
+      },
+      { session },
+    );
+    if (expired.modifiedCount !== 1) return;
+    const released = await db
+      .collection<Appointment>('appointments')
+      .updateOne(
+        { _id: appointment._id, status: 'payment_pending' },
+        { $set: { status: 'payment_expired', updated_at: now }, $inc: { version: 1 } },
+        { session },
+      );
+    if (released.modifiedCount !== 1) throw new Error('appointment_state_conflict');
+    await appendLedger(
+      db,
+      event,
+      attempt,
+      session,
+      'payment_expired',
+      `payment_expired:${event.sanitized_payload.id}`,
+    );
+    await audit(
+      db,
+      attempt.tenant_id,
+      event,
+      appointment.public_id,
+      'payment_hold_expired',
+      'success',
+      session,
+      'authoritative_unpaid',
+    );
     return;
+  }
   await appendLedger(
     db,
     event,
@@ -425,7 +469,7 @@ async function canceled(
         slot_released: true,
         stripe_payment_intent_status: 'canceled',
         failure_category: 'terminal_payment',
-        updated_at: new Date(),
+        updated_at: now,
       },
     },
     { session },
@@ -434,7 +478,7 @@ async function canceled(
     .collection<Appointment>('appointments')
     .updateOne(
       { _id: appointment._id, status: 'payment_pending' },
-      { $set: { status: 'payment_failed', updated_at: new Date() }, $inc: { version: 1 } },
+      { $set: { status: 'payment_failed', updated_at: now }, $inc: { version: 1 } },
       { session },
     );
 }

@@ -148,6 +148,43 @@ suite('payment webhook financial finalization', () => {
     ).toBe(1);
   });
 
+  it('classifies cancellation after the hold deadline as expiry exactly once', async () => {
+    const seeded = await seed('requires_payment_method');
+    await db.collection('payment_attempts').updateOne(
+      { _id: seeded.attemptId },
+      {
+        $set: {
+          expires_at: new Date(Date.now() - 1_000),
+          claim_token: randomUUID(),
+          claim_started_at: new Date(),
+        },
+      },
+    );
+    await apply(seeded, 'payment_intent.canceled', 'canceled');
+    expect(
+      await db.collection('payment_attempts').findOne({ _id: seeded.attemptId }),
+    ).toMatchObject({ state: 'expired', slot_released: true, failure_category: 'expired' });
+    expect(
+      await db.collection('appointments').findOne({ _id: seeded.appointmentId }),
+    ).toMatchObject({ status: 'payment_expired', version: 2 });
+    expect(
+      await db.collection('payment_ledger_entries').countDocuments({
+        payment_attempt_id: seeded.attemptId,
+        entry_kind: 'payment_expired',
+      }),
+    ).toBe(1);
+    await apply(seeded, 'payment_intent.canceled', 'canceled');
+    expect(
+      await db.collection('payment_attempts').findOne({ _id: seeded.attemptId }),
+    ).toMatchObject({ state: 'expired', slot_released: true });
+    expect(
+      await db.collection('payment_ledger_entries').countDocuments({
+        payment_attempt_id: seeded.attemptId,
+        entry_kind: 'payment_expired',
+      }),
+    ).toBe(1);
+  });
+
   it('fails closed to manual review on amount or account attribution mismatch', async () => {
     const seeded = await seed('succeeded_unfinalized');
     await apply(seeded, 'payment_intent.succeeded', 'succeeded', 1);
@@ -372,6 +409,8 @@ suite('payment webhook financial finalization', () => {
       stripe_payment_intent_id: intentId,
       state,
       slot_released: released,
+      expires_at: new Date(now.valueOf() + 900_000),
+      claim_token: null,
       correlation_id: randomUUID(),
       request_fingerprint: fingerprint({
         tenantPublicId,
