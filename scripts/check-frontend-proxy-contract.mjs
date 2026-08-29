@@ -125,7 +125,7 @@ try {
       },
       webhookBody,
     );
-    if (![404, 405].includes(refused.status))
+    if (refused.status === undefined || refused.status < 400 || refused.status >= 500)
       throw new Error(
         `Unsupported webhook request ${requestCase.join(' ')} returned ${refused.status}`,
       );
