@@ -45,6 +45,10 @@
     }
   }
 
+  handle /webhooks/stripe/* {
+    respond 404
+  }
+
   handle /api/* {
     reverse_proxy {$API_PRIVATE_ORIGIN} {
       header_up -X-Forwarded-*
