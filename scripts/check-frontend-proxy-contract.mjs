@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { createServer, request } from 'node:http';
 
 const image = process.env.FRONTEND_PROXY_IMAGE ?? 'booknowtech-frontend-security-test';
@@ -8,8 +8,11 @@ const apiPort = Number(process.env.FRONTEND_PROXY_API_PORT ?? 19083);
 const container = `booknowtech-proxy-contract-${randomUUID()}`;
 const received = [];
 
-const api = createServer((incoming, response) => {
+const webhookSecret = 'whsec_proxy_contract_fixture';
+const api = createServer(async (incoming, response) => {
+  const body = await readBody(incoming);
   received.push({
+    body,
     headers: incoming.headers,
     method: incoming.method,
     rawHeaders: incoming.rawHeaders,
@@ -28,6 +31,24 @@ const api = createServer((incoming, response) => {
   }
   if (incoming.url === '/api/v1/proxy-contract') {
     response.end(JSON.stringify({ data: { status: 'captured' } }));
+    return;
+  }
+  if (
+    incoming.method === 'POST' &&
+    ['/webhooks/stripe/platform', '/webhooks/stripe/connect'].includes(incoming.url ?? '')
+  ) {
+    const signature = incoming.headers['stripe-signature'];
+    const timestamp =
+      typeof signature === 'string' ? signature.match(/(?:^|,)t=([0-9]+)/u)?.[1] : null;
+    const expected = timestamp
+      ? createHmac('sha256', webhookSecret).update(`${timestamp}.`).update(body).digest('hex')
+      : null;
+    if (typeof signature !== 'string' || !expected || !signature.includes(`v1=${expected}`)) {
+      response.statusCode = 400;
+      response.end(JSON.stringify({ error: { code: 'invalid_signature' } }));
+      return;
+    }
+    response.end(JSON.stringify({ received: true }));
     return;
   }
   response.statusCode = 404;
@@ -52,6 +73,63 @@ try {
   ]);
 
   await waitUntilReady();
+  const webhookBody = Buffer.from('{"id":"evt_proxy","nested":{"spacing":"preserved"}}\n');
+  const timestamp = '1724929200';
+  const digest = createHmac('sha256', webhookSecret)
+    .update(`${timestamp}.`)
+    .update(webhookBody)
+    .digest('hex');
+  for (const path of ['/webhooks/stripe/platform', '/webhooks/stripe/connect']) {
+    const webhook = await requestFrontend(
+      'POST',
+      path,
+      {
+        host: 'admin.booknowtech.com',
+        'content-type': 'application/json',
+        'stripe-signature': `t=${timestamp},v1=${digest}`,
+        'x-forwarded-for': '192.0.2.200',
+        'x-forwarded-host': 'attacker.example',
+        'x-forwarded-proto': 'ftp',
+        'x-real-ip': '198.51.100.25',
+        'x-booknowtech-client-ip': '192.0.2.202',
+      },
+      webhookBody,
+    );
+    assertResponse(webhook, 200, { received: true });
+    const capturedWebhook = received.at(-1);
+    if (
+      capturedWebhook?.method !== 'POST' ||
+      capturedWebhook.url !== path ||
+      !capturedWebhook.body.equals(webhookBody) ||
+      capturedWebhook.headers['content-type'] !== 'application/json' ||
+      capturedWebhook.headers['stripe-signature'] !== `t=${timestamp},v1=${digest}`
+    )
+      throw new Error(
+        'Webhook method, path, raw body, content type, or signature was not preserved',
+      );
+    assertSanitizedForwardingHeaders(capturedWebhook, '198.51.100.25');
+  }
+
+  const webhookUpstreamCount = received.length;
+  for (const requestCase of [
+    ['GET', '/webhooks/stripe/platform', 'admin.booknowtech.com'],
+    ['POST', '/webhooks/stripe/unknown', 'admin.booknowtech.com'],
+    ['POST', '/webhooks/stripe/platform', 'tenant.booknowtech.com'],
+  ]) {
+    const refused = await requestFrontend(
+      requestCase[0],
+      requestCase[1],
+      {
+        host: requestCase[2],
+        'content-type': 'application/json',
+      },
+      webhookBody,
+    );
+    if (![404, 405].includes(refused.status))
+      throw new Error('Unsupported webhook request did not fail safely');
+  }
+  if (received.length !== webhookUpstreamCount)
+    throw new Error('Unsupported method, path, or hostname reached the webhook API');
   const normalApi = await requestFrontend('GET', '/api/v1/proxy-contract', {
     host: 'admin.booknowtech.com',
     'x-forwarded-for': '192.0.2.200, 203.0.113.99, 100.64.0.5',
@@ -204,7 +282,7 @@ function assertPrivateOriginAbsent(response) {
   }
 }
 
-function requestFrontend(method, path, headers) {
+function requestFrontend(method, path, headers, body) {
   return new Promise((resolve, reject) => {
     const outgoing = request(
       { hostname: '127.0.0.1', port: frontendPort, path, method, headers },
@@ -221,7 +299,16 @@ function requestFrontend(method, path, headers) {
       },
     );
     outgoing.on('error', reject);
-    outgoing.end();
+    outgoing.end(body);
+  });
+}
+
+function readBody(incoming) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    incoming.on('data', (chunk) => chunks.push(chunk));
+    incoming.on('end', () => resolve(Buffer.concat(chunks)));
+    incoming.on('error', reject);
   });
 }
 

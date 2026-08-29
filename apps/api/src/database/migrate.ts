@@ -284,8 +284,6 @@ const validators: Record<string, Document> = {
         'request_id',
         'idempotency_key_hash',
         'request_fingerprint',
-        'changed_by_user_id',
-        'changed_by_membership_id',
         'created_at',
       ],
       properties: {
@@ -303,20 +301,36 @@ const validators: Record<string, Document> = {
         request_fingerprint: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
         changed_by_user_id: { bsonType: 'objectId' },
         changed_by_membership_id: { bsonType: 'objectId' },
+        changed_by_operator_id: {
+          bsonType: 'string',
+          minLength: 3,
+          maxLength: 120,
+          pattern: '^[a-z0-9][a-z0-9._@+-]*$',
+        },
         created_at: { bsonType: 'date' },
       },
-      oneOf: [
+      allOf: [
         {
-          properties: {
-            payment_mode: { enum: ['none', 'full'] },
-            fixed_deposit_minor: { bsonType: 'null' },
-          },
+          oneOf: [
+            {
+              properties: {
+                payment_mode: { enum: ['none', 'full'] },
+                fixed_deposit_minor: { bsonType: 'null' },
+              },
+            },
+            {
+              properties: {
+                payment_mode: { enum: ['fixed_deposit'] },
+                fixed_deposit_minor: { bsonType: ['int', 'long'], minimum: 1 },
+              },
+            },
+          ],
         },
         {
-          properties: {
-            payment_mode: { enum: ['fixed_deposit'] },
-            fixed_deposit_minor: { bsonType: ['int', 'long'], minimum: 1 },
-          },
+          oneOf: [
+            { required: ['changed_by_user_id', 'changed_by_membership_id'] },
+            { required: ['changed_by_operator_id'] },
+          ],
         },
       ],
     },
@@ -710,6 +724,62 @@ const validators: Record<string, Document> = {
         reason: { bsonType: 'string', minLength: 1, maxLength: 160 },
         created_at: { bsonType: 'date' },
         acknowledged_at: { bsonType: 'date' },
+      },
+    },
+  },
+  payment_configuration_operations: {
+    $jsonSchema: {
+      bsonType: 'object',
+      additionalProperties: false,
+      required: [
+        '_id',
+        'public_id',
+        'request_id',
+        'operation_type',
+        'request_fingerprint',
+        'operator_id',
+        'reason',
+        'environment',
+        'tenant_public_id',
+        'service_public_id',
+        'status',
+        'result',
+        'created_at',
+        'completed_at',
+      ],
+      properties: {
+        _id: { bsonType: 'objectId' },
+        public_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        request_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        operation_type: {
+          enum: ['activate_booking_fee', 'activate_service_configuration', 'set_tenant_execution'],
+        },
+        request_fingerprint: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
+        operator_id: {
+          bsonType: 'string',
+          minLength: 3,
+          maxLength: 120,
+          pattern: '^[a-z0-9][a-z0-9._@+-]*$',
+        },
+        reason: { bsonType: 'string', minLength: 10, maxLength: 500 },
+        environment: { enum: ['staging', 'production'] },
+        tenant_public_id: { bsonType: 'string', pattern: UUID_PATTERN },
+        service_public_id: { bsonType: ['string', 'null'], pattern: UUID_PATTERN },
+        status: { enum: ['completed'] },
+        result: {
+          bsonType: 'object',
+          additionalProperties: false,
+          required: ['version', 'public_id', 'enabled', 'payment_mode', 'amount_minor'],
+          properties: {
+            version: { bsonType: ['int', 'long', 'null'], minimum: 1 },
+            public_id: { bsonType: ['string', 'null'], pattern: UUID_PATTERN },
+            enabled: { bsonType: ['bool', 'null'] },
+            payment_mode: { enum: [null, 'none', 'fixed_deposit', 'full'] },
+            amount_minor: { bsonType: ['int', 'long', 'null'], minimum: 0 },
+          },
+        },
+        created_at: { bsonType: 'date' },
+        completed_at: { bsonType: 'date' },
       },
     },
   },
@@ -2280,6 +2350,17 @@ export async function migrateDatabase(db: Db): Promise<void> {
       unique: true,
     },
     { key: { status: 1, priority: 1, created_at: 1 }, name: 'payment_operations_alert_queue' },
+  ]);
+  await db.collection('payment_configuration_operations').createIndexes([
+    {
+      key: { request_id: 1 },
+      name: 'payment_configuration_operations_request_unique',
+      unique: true,
+    },
+    {
+      key: { tenant_public_id: 1, created_at: -1 },
+      name: 'payment_configuration_operations_tenant_created',
+    },
   ]);
   await db.collection('users').createIndexes([
     { key: { public_id: 1 }, name: 'users_public_id_unique', unique: true },
