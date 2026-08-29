@@ -126,7 +126,9 @@ try {
       webhookBody,
     );
     if (![404, 405].includes(refused.status))
-      throw new Error('Unsupported webhook request did not fail safely');
+      throw new Error(
+        `Unsupported webhook request ${requestCase.join(' ')} returned ${refused.status}`,
+      );
   }
   if (received.length !== webhookUpstreamCount)
     throw new Error('Unsupported method, path, or hostname reached the webhook API');

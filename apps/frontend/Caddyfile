@@ -46,7 +46,7 @@
   }
 
   handle /webhooks/stripe/* {
-    respond 404
+    respond "Not Found" 404
   }
 
   handle /api/* {
