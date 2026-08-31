@@ -6,12 +6,14 @@ time window, rollback owner, and evidence location before changing configuration
 
 ## Required owner record
 
-- Primary payment operations owner: `<name and contact>`
-- Backup payment operations owner: `<name and contact>`
-- Operating-hours timezone: `<IANA timezone>`
-- Operating days and holiday calendar: `<published calendar>`
-- Highest-priority escalation channel: `<channel and paging target>`
-- Same-business-day manual-review queue owner: `<name and queue>`
+- Primary payment operations owner: Robert Velarde
+- Backup payment operations owner: Allan Miranda
+- Operating-hours timezone: `America/New_York`
+- Operating days: Monday through Friday
+- Holiday calendar: U.S. federal holidays excluded
+- Highest-priority escalation channel: telephone call to `843-324-3301`
+- Secondary escalation channel: email; no address is recorded because none has been approved
+- Same-business-day manual-review queue owner: Robert Velarde
 
 Do not enable production execution until every placeholder above has an approved value.
 
