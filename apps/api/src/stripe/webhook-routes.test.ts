@@ -21,7 +21,6 @@ describe('Stripe webhook raw-body boundary', () => {
       environment: {
         ...testEnvironment,
         STRIPE_SECRET_KEY: 'sk_test_foundation',
-        STRIPE_PLATFORM_WEBHOOK_SECRET: 'whsec_platform_secret',
         STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_connect_secret',
         BOOKNOWTECH_CONNECT_TERMS_VERSION: 'connect-v1',
         BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256: 'a'.repeat(64),
@@ -53,6 +52,16 @@ describe('Stripe webhook raw-body boundary', () => {
       'whsec_connect_secret',
     );
     expect(ingest).toHaveBeenCalledOnce();
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/webhooks/stripe/platform',
+          headers: { 'content-type': 'application/json', 'stripe-signature': 'signed' },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(404);
     await app.close();
   });
 
@@ -62,7 +71,6 @@ describe('Stripe webhook raw-body boundary', () => {
       environment: {
         ...testEnvironment,
         STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_connect_secret',
-        STRIPE_PLATFORM_WEBHOOK_SECRET: 'whsec_platform_secret',
       },
       readiness: new StubReadinessProbe(),
       logger: false,

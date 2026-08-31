@@ -20,46 +20,45 @@ export function registerStripeWebhookRoutes(
       { parseAs: 'buffer', bodyLimit: MAX_WEBHOOK_BYTES },
       (_request, body, done) => done(null, body),
     );
-    for (const endpointKind of ['platform', 'connect'] as const) {
-      scope.post<{ Body: Buffer }>(
-        `/webhooks/stripe/${endpointKind}`,
-        { bodyLimit: MAX_WEBHOOK_BYTES },
-        async (request, reply) => {
-          const signature = request.headers['stripe-signature'];
-          if (typeof signature !== 'string')
+    const endpointKind = 'connect' as const;
+    scope.post<{ Body: Buffer }>(
+      '/webhooks/stripe/connect',
+      { bodyLimit: MAX_WEBHOOK_BYTES },
+      async (request, reply) => {
+        const signature = request.headers['stripe-signature'];
+        if (typeof signature !== 'string')
+          return reply
+            .status(400)
+            .send({ error: { code: 'invalid_signature', message: 'Invalid webhook.' } });
+        try {
+          const event = stripe.verifyWebhook(
+            request.body,
+            signature,
+            environment.STRIPE_CONNECT_WEBHOOK_SECRET!,
+          );
+          if (event.livemode !== (environment.ENVIRONMENT_ID === 'production'))
             return reply
               .status(400)
-              .send({ error: { code: 'invalid_signature', message: 'Invalid webhook.' } });
-          try {
-            const secret =
-              endpointKind === 'platform'
-                ? environment.STRIPE_PLATFORM_WEBHOOK_SECRET!
-                : environment.STRIPE_CONNECT_WEBHOOK_SECRET!;
-            const event = stripe.verifyWebhook(request.body, signature, secret);
-            if (event.livemode !== (environment.ENVIRONMENT_ID === 'production'))
-              return reply
-                .status(400)
-                .send({ error: { code: 'mode_mismatch', message: 'Invalid webhook.' } });
-            await store.ingest({
-              event,
-              endpointKind,
-              requestId: request.id,
-              payloadHash: createHash('sha256').update(request.body).digest('hex'),
-            });
-            return reply.status(200).send({ received: true });
-          } catch (reason) {
-            request.log.warn({
-              event: 'stripe.webhook_rejected',
-              endpoint_kind: endpointKind,
-              error_name: reason instanceof Error ? reason.name : 'unknown',
-            });
-            return reply
-              .status(400)
-              .send({ error: { code: 'invalid_webhook', message: 'Invalid webhook.' } });
-          }
-        },
-      );
-    }
+              .send({ error: { code: 'mode_mismatch', message: 'Invalid webhook.' } });
+          await store.ingest({
+            event,
+            endpointKind,
+            requestId: request.id,
+            payloadHash: createHash('sha256').update(request.body).digest('hex'),
+          });
+          return reply.status(200).send({ received: true });
+        } catch (reason) {
+          request.log.warn({
+            event: 'stripe.webhook_rejected',
+            endpoint_kind: endpointKind,
+            error_name: reason instanceof Error ? reason.name : 'unknown',
+          });
+          return reply
+            .status(400)
+            .send({ error: { code: 'invalid_webhook', message: 'Invalid webhook.' } });
+        }
+      },
+    );
     return Promise.resolve();
   });
 }

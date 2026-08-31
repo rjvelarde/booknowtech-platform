@@ -1,7 +1,11 @@
 import type { ObjectId } from 'mongodb';
 
 import type { StripePaymentAdapter } from '../stripe/adapter.js';
-import type { PaymentAttemptDocument, PaymentFoundationStore } from './store.js';
+import type {
+  PaymentAttemptDocument,
+  PaymentFoundationStore,
+  PaymentReadinessGrant,
+} from './store.js';
 
 export interface PublicPaymentAttemptResponse {
   appointment_reference: string;
@@ -36,6 +40,7 @@ export class PaymentExecutionService {
   public constructor(
     private readonly store: PaymentFoundationStore,
     private readonly stripe: StripePaymentAdapter,
+    private readonly requireReadinessGrant = false,
   ) {}
 
   public async ensurePaymentIntent(input: {
@@ -47,6 +52,7 @@ export class PaymentExecutionService {
     appointmentReference: string;
     appointmentStatus: PublicPaymentAttemptResponse['appointment_status'];
     attempt: PaymentAttemptDocument;
+    readinessGrant?: PaymentReadinessGrant | null;
   }): Promise<PublicPaymentAttemptResponse> {
     if (
       [
@@ -65,6 +71,17 @@ export class PaymentExecutionService {
         clientSecret: null,
         connectedAccountId: input.connectedAccountId,
       });
+    if (this.requireReadinessGrant && !input.readinessGrant)
+      throw new Error('payment_readiness_grant_required');
+    if (input.readinessGrant) {
+      const current = await this.store.readinessGrantCurrent(input.readinessGrant);
+      if (
+        !current ||
+        input.readinessGrant.connectedAccountId !== input.connectedAccountId ||
+        input.readinessGrant.accountPublicId !== input.attempt.tenant_stripe_account_public_id
+      )
+        throw new Error('payment_readiness_grant_invalid');
+    }
     const attempt = input.attempt.stripe_payment_intent_id
       ? input.attempt
       : (

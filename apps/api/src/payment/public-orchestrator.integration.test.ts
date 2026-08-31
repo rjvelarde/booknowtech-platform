@@ -472,6 +472,46 @@ suite('PR 14B.2 paid public-booking transaction', () => {
     expect(stripe.createDirectChargePaymentIntent).toHaveBeenCalledTimes(beforeStripeCreates);
   });
 
+  it('creates zero provisional or financial artifacts when authoritative readiness refresh fails', async () => {
+    const before = await Promise.all([
+      db.collection('provisional_payment_customers').countDocuments(),
+      db.collection('appointments').countDocuments(),
+      db.collection('payment_attempts').countDocuments(),
+      db.collection('payment_ledger_entries').countDocuments(),
+    ]);
+    const beforeStripeCreates = stripe.createDirectChargePaymentIntent.mock.calls.length;
+    const orchestrator = new PublicPaidBookingOrchestrator(
+      environment,
+      admin,
+      payments,
+      new PaymentExecutionService(payments, stripe),
+      { ensureFresh: vi.fn().mockRejectedValue(new Error('stripe_timeout')) } as never,
+    );
+    await expect(
+      orchestrator.create({
+        tenant,
+        body: bookingBody(),
+        idempotencyKey: randomUUID(),
+        requestId: randomUUID(),
+        correlationId: randomUUID(),
+        ipAddress: '192.0.2.10',
+        initialService: service,
+        initialProvider: provider,
+        initialAssignment: assignment,
+        hostname: 'brazilian-wax.booknowtech.com',
+      }),
+    ).rejects.toMatchObject({ status: 503, code: 'payment_account_not_ready' });
+    await expect(
+      Promise.all([
+        db.collection('provisional_payment_customers').countDocuments(),
+        db.collection('appointments').countDocuments(),
+        db.collection('payment_attempts').countDocuments(),
+        db.collection('payment_ledger_entries').countDocuments(),
+      ]),
+    ).resolves.toEqual(before);
+    expect(stripe.createDirectChargePaymentIntent).toHaveBeenCalledTimes(beforeStripeCreates);
+  });
+
   it('converges concurrent requests on one local graph and one Stripe idempotency key', async () => {
     const beforeAppointments = await db.collection('appointments').countDocuments();
     const beforeAttempts = await db.collection('payment_attempts').countDocuments();

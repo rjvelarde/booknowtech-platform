@@ -541,3 +541,28 @@ The contract is therefore **Accepted — implementation authorized**. Production
 11. **Stage and release safely.** Configure test-mode Stripe endpoints and terms, deploy one exact SHA with execution disabled, migrate, validate one approved staging tenant across `none`, deposit, full, decline/retry, expiry, stale, late-success, refund-evidence, dispute, reconciliation, and kill-switch cases, then obtain release approval before any production enablement.
 
 Approval of PR 14A or Stripe onboarding does not constitute approval of this contract or authority to move money.
+
+## 22. PR 14B.7 accepted readiness and webhook alignment decisions
+
+This section supersedes the earlier webhook-list and platform-endpoint details where they conflict.
+
+1. `STRIPE_ACCOUNT_READINESS_MAX_AGE_SECONDS` is exactly `900`. A stale cached connected-account
+   projection triggers an authoritative Stripe retrieval before creation of any customer,
+   provisional appointment, payment attempt, ledger entry, or PaymentIntent.
+2. A per-account bounded refresh lease prevents a concurrent retrieval stampede. Stripe account
+   identity and environment mode are verified, the projection is compare-and-set against the same
+   active association, and a readiness generation/grant is revalidated transactionally and before
+   PaymentIntent work. Failure or an unready result fails closed.
+3. The canonical Connect allowlist is exactly: `account.application.deauthorized`,
+   `account.updated`, `charge.dispute.closed`, `charge.dispute.created`,
+   `charge.dispute.funds_reinstated`, `charge.dispute.funds_withdrawn`,
+   `charge.dispute.updated`, `payment_intent.canceled`, `payment_intent.payment_failed`,
+   `payment_intent.processing`, `payment_intent.succeeded`, `refund.created`, `refund.failed`, and
+   `refund.updated`. `charge.refunded` is unsupported.
+4. Stripe event ID is the primary idempotency boundary for financial webhook evidence so distinct
+   lifecycle events for one Stripe object remain distinct while redelivery remains idempotent.
+5. The platform webhook route and `STRIPE_PLATFORM_WEBHOOK_SECRET` requirement are deferred. Existing
+   historical platform-kind evidence remains valid and must not be destructively removed. A platform
+   webhook may return only in a separately approved PR with an authoritative platform-side lifecycle.
+6. Status-only recovery, expiry, reconciliation, finalization, direct charges, terms, kill switches,
+   tenant isolation, and all existing production safety controls remain unchanged.

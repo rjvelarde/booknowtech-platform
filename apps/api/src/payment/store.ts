@@ -84,21 +84,35 @@ interface TenantPaymentExecutionSettingDocument {
   updated_at: Date;
 }
 
-interface TenantStripePaymentAccountDocument {
+export interface TenantStripePaymentAccountDocument {
+  _id: ObjectId;
   public_id: string;
   tenant_id: ObjectId;
   stripe_account_id: string;
   active: boolean;
   default_currency: string;
   charges_enabled: boolean;
-  capabilities: { card_payments?: string };
+  capabilities: { card_payments?: string | null; transfers?: string | null };
   requirements: {
     disabled_reason?: string | null;
     currently_due?: string[];
     past_due?: string[];
+    [key: string]: unknown;
   };
   disconnected_at: Date | null;
   last_synced_at: Date | null;
+  readiness_generation?: number;
+  readiness_refresh_token?: string | null;
+  readiness_refresh_started_at?: Date | null;
+  version?: number;
+}
+
+export interface PaymentReadinessGrant {
+  tenantId: ObjectId;
+  accountPublicId: string;
+  connectedAccountId: string;
+  readinessGeneration: number;
+  refreshedAt: Date;
 }
 
 export interface PaymentAttemptDocument {
@@ -547,6 +561,127 @@ export class PaymentFoundationStore {
         .findOne({ tenant_id: tenantId, active: true }, options),
     ]);
     return { tenantSetting, serviceConfiguration, fee, account };
+  }
+
+  public activeStripeAccount(tenantId: ObjectId) {
+    return this.db
+      .collection<TenantStripePaymentAccountDocument>('tenant_stripe_accounts')
+      .findOne({ tenant_id: tenantId, active: true });
+  }
+
+  public async claimStripeReadinessRefresh(input: {
+    tenantId: ObjectId;
+    accountPublicId: string;
+    token: string;
+    staleBefore: Date;
+    leaseExpiredBefore: Date;
+  }) {
+    return this.db
+      .collection<TenantStripePaymentAccountDocument>('tenant_stripe_accounts')
+      .findOneAndUpdate(
+        {
+          tenant_id: input.tenantId,
+          public_id: input.accountPublicId,
+          active: true,
+          $and: [
+            { $or: [{ last_synced_at: null }, { last_synced_at: { $lt: input.staleBefore } }] },
+            {
+              $or: [
+                { readiness_refresh_token: null },
+                { readiness_refresh_token: { $exists: false } },
+                { readiness_refresh_started_at: { $lt: input.leaseExpiredBefore } },
+              ],
+            },
+          ],
+        },
+        {
+          $set: {
+            readiness_refresh_token: input.token,
+            readiness_refresh_started_at: new Date(),
+            last_readiness_refresh_attempt_at: new Date(),
+          },
+        },
+        { returnDocument: 'after' },
+      );
+  }
+
+  public async completeStripeReadinessRefresh(input: {
+    tenantId: ObjectId;
+    accountPublicId: string;
+    connectedAccountId: string;
+    token: string;
+    projection: {
+      status: string;
+      details_submitted: boolean;
+      charges_enabled: boolean;
+      payouts_enabled: boolean;
+      capabilities: { card_payments: string | null; transfers: string | null };
+      requirements: Record<string, unknown>;
+    };
+  }) {
+    const now = new Date();
+    const account = await this.db
+      .collection<TenantStripePaymentAccountDocument>('tenant_stripe_accounts')
+      .findOneAndUpdate(
+        {
+          tenant_id: input.tenantId,
+          public_id: input.accountPublicId,
+          stripe_account_id: input.connectedAccountId,
+          active: true,
+          readiness_refresh_token: input.token,
+        },
+        {
+          $set: {
+            ...input.projection,
+            last_synced_at: now,
+            updated_at: now,
+            updated_by_source: 'stripe_api_refresh',
+            readiness_refresh_token: null,
+            readiness_refresh_started_at: null,
+            last_readiness_refresh_failure_category: null,
+          },
+          $inc: { readiness_generation: 1, version: 1 },
+        },
+        { returnDocument: 'after' },
+      );
+    return account;
+  }
+
+  public async failStripeReadinessRefresh(input: {
+    tenantId: ObjectId;
+    accountPublicId: string;
+    token: string;
+    category: string;
+  }) {
+    await this.db.collection('tenant_stripe_accounts').updateOne(
+      {
+        tenant_id: input.tenantId,
+        public_id: input.accountPublicId,
+        readiness_refresh_token: input.token,
+      },
+      {
+        $set: {
+          readiness_refresh_token: null,
+          readiness_refresh_started_at: null,
+          last_readiness_refresh_failure_category: input.category,
+          updated_at: new Date(),
+        },
+      },
+    );
+  }
+
+  public async readinessGrantCurrent(grant: PaymentReadinessGrant, session?: ClientSession) {
+    return this.db.collection<TenantStripePaymentAccountDocument>('tenant_stripe_accounts').findOne(
+      {
+        tenant_id: grant.tenantId,
+        public_id: grant.accountPublicId,
+        stripe_account_id: grant.connectedAccountId,
+        active: true,
+        readiness_generation: grant.readinessGeneration,
+        last_synced_at: { $gte: grant.refreshedAt },
+      },
+      session ? { session } : undefined,
+    );
   }
 
   public async linkPaymentIntent(input: {

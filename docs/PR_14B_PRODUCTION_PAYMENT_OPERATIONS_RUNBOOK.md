@@ -21,47 +21,56 @@ Do not enable production execution until every placeholder above has an approved
 
 Never paste values into tickets, logs, screenshots, command history, or this runbook.
 
-| Service      | Variable                                   | Kind              | Required state before live execution  |
-| ------------ | ------------------------------------------ | ----------------- | ------------------------------------- |
-| API + worker | `STRIPE_SECRET_KEY`                        | secret            | Same approved `sk_live_…` credential  |
-| API          | `STRIPE_PUBLISHABLE_KEY`                   | public client key | Matching `pk_live_…` key              |
-| API          | `STRIPE_PLATFORM_WEBHOOK_SECRET`           | secret            | Live platform endpoint secret         |
-| API          | `STRIPE_CONNECT_WEBHOOK_SECRET`            | secret            | Distinct live Connect endpoint secret |
-| API          | `STRIPE_CONNECT_COUNTRY`                   | non-secret        | `US`                                  |
-| API          | `BOOKNOWTECH_CONNECT_TERMS_VERSION`        | non-secret        | Approved published version            |
-| API          | `BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256`    | integrity hash    | Exact approved terms hash             |
-| API          | `STRIPE_ACCOUNT_READINESS_MAX_AGE_SECONDS` | non-secret        | Approved bounded age, 60–86400        |
-| API + worker | `BOOKNOWTECH_PAYMENT_TERMS_VERSION`        | non-secret        | Identical approved version            |
-| API + worker | `BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256`    | integrity hash    | Identical approved hash               |
-| API          | `PAYMENT_IP_HASH_SECRET`                   | secret            | Unique environment-specific secret    |
-| API          | `CHECKOUT_RECOVERY_TOKEN_SECRET`           | secret            | Unique environment-specific secret    |
-| API          | `STRIPE_PAYMENTS_FOUNDATION_ENABLED`       | flag              | `true` only for approved onboarding   |
-| API          | `STRIPE_PAYMENT_EXECUTION_ENABLED`         | kill switch       | `false` until final enablement        |
+| Service      | Variable                                   | Kind              | Required state before live execution |
+| ------------ | ------------------------------------------ | ----------------- | ------------------------------------ |
+| API + worker | `STRIPE_SECRET_KEY`                        | secret            | Same approved `sk_live_…` credential |
+| API          | `STRIPE_PUBLISHABLE_KEY`                   | public client key | Matching `pk_live_…` key             |
+| API          | `STRIPE_CONNECT_WEBHOOK_SECRET`            | secret            | Live Connect endpoint secret         |
+| API          | `STRIPE_CONNECT_COUNTRY`                   | non-secret        | `US`                                 |
+| API          | `BOOKNOWTECH_CONNECT_TERMS_VERSION`        | non-secret        | Approved published version           |
+| API          | `BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256`    | integrity hash    | Exact approved terms hash            |
+| API          | `STRIPE_ACCOUNT_READINESS_MAX_AGE_SECONDS` | non-secret        | Exactly `900`                        |
+| API + worker | `BOOKNOWTECH_PAYMENT_TERMS_VERSION`        | non-secret        | Identical approved version           |
+| API + worker | `BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256`    | integrity hash    | Identical approved hash              |
+| API          | `PAYMENT_IP_HASH_SECRET`                   | secret            | Unique environment-specific secret   |
+| API          | `CHECKOUT_RECOVERY_TOKEN_SECRET`           | secret            | Unique environment-specific secret   |
+| API          | `STRIPE_PAYMENTS_FOUNDATION_ENABLED`       | flag              | `true` only for approved onboarding  |
+| API          | `STRIPE_PAYMENT_EXECUTION_ENABLED`         | kill switch       | `false` until final enablement       |
 
 ## Public Stripe endpoints and registration
 
-Register live Stripe webhook endpoints only after an unsigned POST to each public URL reaches the
+Register the live Stripe Connect webhook only after an unsigned POST to the public URL reaches the
 API signature boundary and fails with the bounded invalid-signature response:
 
-- `https://admin.booknowtech.com/webhooks/stripe/platform`
 - `https://admin.booknowtech.com/webhooks/stripe/connect`
 
 The Connect endpoint must listen to events on connected accounts. Subscribe only to:
 
-- `account.updated`
 - `account.application.deauthorized`
-- `payment_intent.succeeded`
+- `account.updated`
+- `charge.dispute.closed`
+- `charge.dispute.created`
+- `charge.dispute.funds_reinstated`
+- `charge.dispute.funds_withdrawn`
+- `charge.dispute.updated`
+- `payment_intent.canceled`
 - `payment_intent.payment_failed`
 - `payment_intent.processing`
-- `payment_intent.canceled`
-- `charge.refunded`
+- `payment_intent.succeeded`
+- `refund.created`
+- `refund.failed`
 - `refund.updated`
-- `charge.dispute.created`
-- `charge.dispute.updated`
-- `charge.dispute.closed`
 
-Keep platform and Connect signing secrets distinct. Deliver one approved non-financial test event,
+The platform webhook is intentionally deferred. Do not register it unless a future approved PR adds
+an authoritative platform-side financial lifecycle. Deliver one approved non-financial test event,
 confirm one stored event/projection and green monitoring, then confirm redelivery is idempotent.
+
+Account readiness older than 900 seconds is refreshed authoritatively before any new provisional or
+financial record is created. Monitor refresh failures, account identity/mode mismatch, expired refresh
+leases, and readiness-grant rejection. A refresh failure must produce no customer, provisional
+appointment, payment attempt, ledger entry, or PaymentIntent. Disable payment execution immediately
+if these invariants cannot be observed. Existing expiry, reconciliation, and finalization continue
+while new execution is disabled.
 
 ## First tenant and Connect onboarding
 

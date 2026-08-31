@@ -144,9 +144,7 @@ export async function processStripeWebhookEvent(
     if (!accountId) throw new Error('unresolved_account');
     const paymentEvent = event.event_type.startsWith('payment_intent.');
     const externalEvidenceEvent =
-      event.event_type === 'charge.refunded' ||
-      event.event_type === 'refund.updated' ||
-      event.event_type.startsWith('charge.dispute.');
+      event.event_type.startsWith('refund.') || event.event_type.startsWith('charge.dispute.');
     const accountRecord = await db
       .collection<TenantStripeAccountDocument>('tenant_stripe_accounts')
       .findOne({
@@ -206,7 +204,7 @@ export async function processStripeWebhookEvent(
                 updated_at: new Date(),
                 updated_by_source: 'stripe_webhook',
               },
-              $inc: { version: 1 },
+              $inc: { version: 1, readiness_generation: 1 },
             },
             { session },
           );
@@ -220,13 +218,14 @@ export async function processStripeWebhookEvent(
           );
         } else if (!stale) {
           const nextStatus = deriveConnectStatus(projection);
-          await db
-            .collection('tenant_stripe_accounts')
-            .updateOne(
-              { _id: accountRecord._id },
-              { $set: projectionUpdate(projection, event, nextStatus), $inc: { version: 1 } },
-              { session },
-            );
+          await db.collection('tenant_stripe_accounts').updateOne(
+            { _id: accountRecord._id },
+            {
+              $set: projectionUpdate(projection, event, nextStatus),
+              $inc: { version: 1, readiness_generation: 1 },
+            },
+            { session },
+          );
           if (current?.status !== nextStatus)
             await audit(
               db.collection('audit_logs'),

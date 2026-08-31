@@ -36,6 +36,8 @@ import {
 } from './recovery.js';
 import { toAmountSnapshot } from './store.js';
 import type { PaymentFoundationStore } from './store.js';
+import type { PaymentReadinessGrant } from './store.js';
+import type { StripeAccountReadinessService } from './readiness-service.js';
 
 export class PaidBookingError extends Error {
   public constructor(
@@ -53,6 +55,7 @@ export class PublicPaidBookingOrchestrator {
     private readonly admin: AdminStore,
     private readonly payments: PaymentFoundationStore,
     private readonly execution: PaymentExecutionService | null,
+    private readonly readiness: StripeAccountReadinessService | null = null,
   ) {}
 
   public async paymentMode(tenantId: TenantDocument['_id'], serviceId: ServiceDocument['_id']) {
@@ -90,6 +93,14 @@ export class PublicPaidBookingOrchestrator {
   }): Promise<PublicPaymentAttemptResponse> {
     const normalized = normalizePublicAppointment(input.body);
     if (!normalized) throw new PaidBookingError(400, 'invalid_public_booking_request');
+    let readinessGrant: PaymentReadinessGrant | null = null;
+    if (this.readiness) {
+      try {
+        readinessGrant = await this.readiness.ensureFresh(input.tenant._id);
+      } catch (reason) {
+        throw new PaidBookingError(503, 'payment_account_not_ready', { cause: reason });
+      }
+    }
     const startsAt = new Date(normalized.starts_at);
     const preliminaryStart = new Date(
       startsAt.valueOf() - input.initialAssignment.buffer_before_minutes * 60_000,
@@ -102,7 +113,7 @@ export class PublicPaidBookingOrchestrator {
     const local = await this.admin.withAppointmentScheduleLocks(
       input.tenant._id,
       utcDateScopes(input.initialProvider._id, preliminaryStart, preliminaryEnd),
-      (session) => this.createLocal(input, normalized, startsAt, session),
+      (session) => this.createLocal(input, normalized, startsAt, readinessGrant, session),
     );
     if ('stale' in local) {
       if (this.execution && local.stale && local.connectedAccountId)
@@ -126,6 +137,7 @@ export class PublicPaidBookingOrchestrator {
         appointmentStatus: local.appointment
           .status as PublicPaymentAttemptResponse['appointment_status'],
         attempt: local.attempt,
+        readinessGrant,
       });
     } catch (reason) {
       throw new PaidBookingError(503, 'payment_temporarily_unavailable', { cause: reason });
@@ -221,6 +233,16 @@ export class PublicPaidBookingOrchestrator {
         attempt.tenant_stripe_account_public_id,
       );
       if (!account) throw new PaidBookingError(409, 'payment_attempt_stale');
+      let readinessGrant: PaymentReadinessGrant | null = null;
+      if (this.readiness) {
+        try {
+          readinessGrant = await this.readiness.ensureFresh(input.tenant._id);
+        } catch (reason) {
+          throw new PaidBookingError(503, 'payment_account_not_ready', { cause: reason });
+        }
+        if (readinessGrant.accountPublicId !== attempt.tenant_stripe_account_public_id)
+          throw new PaidBookingError(409, 'payment_attempt_stale');
+      }
       return this.execution.ensurePaymentIntent({
         tenantId: input.tenant._id,
         tenantPublicId: input.tenant.public_id,
@@ -231,6 +253,7 @@ export class PublicPaidBookingOrchestrator {
         appointmentStatus: context.appointment
           .status as PublicPaymentAttemptResponse['appointment_status'],
         attempt,
+        readinessGrant,
       });
     }
     return publicPaymentAttemptResponse({
@@ -247,6 +270,7 @@ export class PublicPaidBookingOrchestrator {
     input: Parameters<PublicPaidBookingOrchestrator['create']>[0],
     normalized: NonNullable<ReturnType<typeof normalizePublicAppointment>>,
     startsAt: Date,
+    readinessGrant: PaymentReadinessGrant | null,
     session: ClientSession,
   ) {
     const tenant = await this.admin.getPublicTenantBySlug(input.tenant.slug, session);
@@ -296,6 +320,12 @@ export class PublicPaidBookingOrchestrator {
       throw new PaidBookingError(404, 'public_booking_not_found');
     }
     const snapshot = await this.payments.executionSnapshot(tenant._id, service._id, session);
+    if (
+      readinessGrant &&
+      (!(await this.payments.readinessGrantCurrent(readinessGrant, session)) ||
+        snapshot.account?.public_id !== readinessGrant.accountPublicId)
+    )
+      throw new PaidBookingError(503, 'payment_account_not_ready');
     const paymentTerms = normalized.payment_terms;
     if (
       !paymentTerms?.accepted ||

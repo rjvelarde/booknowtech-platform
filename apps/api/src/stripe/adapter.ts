@@ -2,6 +2,7 @@ import Stripe from 'stripe';
 
 export interface ConnectAccountView {
   id: string;
+  livemode: boolean | undefined;
   detailsSubmitted: boolean;
   chargesEnabled: boolean;
   payoutsEnabled: boolean;
@@ -105,9 +106,11 @@ export interface StripePaymentAdapter {
 
 export class StripeSdkConnectAdapter implements StripeConnectAdapter {
   private readonly stripe: Stripe;
+  private readonly livemode: boolean;
 
   public constructor(secretKey: string) {
     this.stripe = new Stripe(secretKey, { maxNetworkRetries: 2, timeout: 10_000 });
+    this.livemode = secretKey.startsWith('sk_live_');
   }
 
   public async createExpressAccount(input: {
@@ -130,7 +133,7 @@ export class StripeSdkConnectAdapter implements StripeConnectAdapter {
       },
       { idempotencyKey: input.idempotencyKey },
     );
-    return accountView(account);
+    return accountView(account, this.livemode);
   }
 
   public async createAccountLink(input: {
@@ -149,7 +152,7 @@ export class StripeSdkConnectAdapter implements StripeConnectAdapter {
   }
 
   public async retrieveAccount(accountId: string): Promise<ConnectAccountView> {
-    return accountView(await this.stripe.accounts.retrieve(accountId));
+    return accountView(await this.stripe.accounts.retrieve(accountId), this.livemode);
   }
 
   public async createDirectChargePaymentIntent(input: {
@@ -307,10 +310,11 @@ function isReducedPaymentIntentStatus(value: string): value is ReducedPaymentInt
   ].includes(value);
 }
 
-function accountView(account: Stripe.Account): ConnectAccountView {
+function accountView(account: Stripe.Account, livemode?: boolean): ConnectAccountView {
   const requirements = account.requirements;
   return {
     id: account.id,
+    livemode,
     detailsSubmitted: account.details_submitted,
     chargesEnabled: account.charges_enabled,
     payoutsEnabled: account.payouts_enabled,
