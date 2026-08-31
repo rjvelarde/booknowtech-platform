@@ -133,6 +133,17 @@ fresh worker heartbeat, and zero actionable webhook failures, expiry candidates,
 pending/processing, `succeeded_unfinalized`, manual review, local-finalization failure, and retry
 exhaustion. Preserve acknowledged historical evidence.
 
+The `stripe_readiness_refresh` section reports a 15-minute actionable-failure window and a
+24-hour operational context window. Any `failure_count_15m` is release-blocking. Category counts
+separate Stripe timeout, authentication/API, rate-limit and malformed-response failures from
+high-severity account identity/mode mismatches, persistence/CAS loss, and exhausted lease waits.
+`unready_count_24h` is visible tenant-readiness evidence but does not by itself declare the
+platform unhealthy. Retrievals lasting at least five seconds contribute to `slow_count_15m` and
+`max_duration_ms_15m`. `reclaimed_lease_count_24h` records successful stale-lease recovery without
+treating ordinary short-lived contention as an incident. The endpoint returns aggregates only;
+it never returns tenant/account identifiers, refresh tokens, Stripe responses, requirements
+payloads, or secrets.
+
 Disable new execution immediately for a missing/stale heartbeat, SHA divergence, webhook delivery
 failure, growing processing backlog, any paid-but-unfinalized case, attribution/amount mismatch,
 unexpected manual review, retry exhaustion, or inability to observe Stripe and BookNowTech.

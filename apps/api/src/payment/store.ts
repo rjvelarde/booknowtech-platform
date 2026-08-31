@@ -115,6 +115,8 @@ export interface PaymentReadinessGrant {
   refreshedAt: Date;
 }
 
+export type StripeReadinessRefreshOutcome = 'success' | 'failure';
+
 export interface PaymentAttemptDocument {
   _id: ObjectId;
   public_id: string;
@@ -668,6 +670,29 @@ export class PaymentFoundationStore {
         },
       },
     );
+  }
+
+  public async recordStripeReadinessRefresh(input: {
+    tenantId: ObjectId;
+    outcome: StripeReadinessRefreshOutcome;
+    category: string;
+    durationMs: number;
+    leaseReclaimed: boolean;
+  }) {
+    await this.auditLogs.insertOne({
+      public_id: randomUUID(),
+      event: 'stripe_readiness_refresh.completed',
+      outcome: input.outcome,
+      actor_user_id: null,
+      tenant_id: input.tenantId,
+      request_id: null,
+      metadata: {
+        category: input.category,
+        duration_ms: String(Math.max(0, Math.round(input.durationMs))),
+        lease_reclaimed: String(input.leaseReclaimed),
+      },
+      created_at: new Date(),
+    });
   }
 
   public async readinessGrantCurrent(grant: PaymentReadinessGrant, session?: ClientSession) {

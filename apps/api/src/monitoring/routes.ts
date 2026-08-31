@@ -3,7 +3,11 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 
 import type { Environment } from '../config.js';
-import type { MonitoringReader, MonitoringSnapshot } from './store.js';
+import {
+  type MonitoringReader,
+  type MonitoringSnapshot,
+  readinessFailureCategories,
+} from './store.js';
 
 export const WORKER_FRESHNESS_MILLISECONDS = 90_000;
 
@@ -13,7 +17,15 @@ const nullableInteger = { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null
 const monitoringDataSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['environment', 'api_sha', 'worker', 'outbox', 'stripe_webhooks', 'payments'],
+  required: [
+    'environment',
+    'api_sha',
+    'worker',
+    'outbox',
+    'stripe_webhooks',
+    'payments',
+    'stripe_readiness_refresh',
+  ],
   properties: {
     environment: { type: 'string', enum: ['development', 'test', 'staging', 'production'] },
     api_sha: { type: 'string' },
@@ -90,6 +102,37 @@ const monitoringDataSchema = {
         succeeded_unfinalized_count: nullableInteger,
         oldest_succeeded_unfinalized_age_seconds: nullableInteger,
         retry_exhausted_count: nullableInteger,
+      },
+    },
+    stripe_readiness_refresh: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'failure_count_15m',
+        'oldest_failure_age_seconds',
+        'newest_failure_age_seconds',
+        'failure_categories_15m',
+        'unready_count_24h',
+        'slow_count_15m',
+        'max_duration_ms_15m',
+        'reclaimed_lease_count_24h',
+      ],
+      properties: {
+        failure_count_15m: nullableInteger,
+        oldest_failure_age_seconds: nullableInteger,
+        newest_failure_age_seconds: nullableInteger,
+        failure_categories_15m: {
+          type: 'object',
+          additionalProperties: false,
+          required: readinessFailureCategories,
+          properties: Object.fromEntries(
+            readinessFailureCategories.map((category) => [category, nullableInteger]),
+          ),
+        },
+        unready_count_24h: nullableInteger,
+        slow_count_15m: nullableInteger,
+        max_duration_ms_15m: nullableInteger,
+        reclaimed_lease_count_24h: nullableInteger,
       },
     },
   },
@@ -187,7 +230,8 @@ function monitoringResponse(environment: Environment, snapshot: MonitoringSnapsh
       snapshot.paymentReconciliationProcessingCount === 0 &&
       snapshot.paymentSucceededUnfinalizedCount === 0 &&
       snapshot.paymentManualReviewCount === 0 &&
-      snapshot.paymentRetryExhaustedCount === 0,
+      snapshot.paymentRetryExhaustedCount === 0 &&
+      snapshot.readinessFailureCount15m === 0,
     data: {
       environment: environment.ENVIRONMENT_ID,
       api_sha: environment.BUILD_VERSION,
@@ -226,6 +270,16 @@ function monitoringResponse(environment: Environment, snapshot: MonitoringSnapsh
         ),
         retry_exhausted_count: snapshot.paymentRetryExhaustedCount,
       },
+      stripe_readiness_refresh: {
+        failure_count_15m: snapshot.readinessFailureCount15m,
+        oldest_failure_age_seconds: age(now, snapshot.readinessOldestFailureAt),
+        newest_failure_age_seconds: age(now, snapshot.readinessNewestFailureAt),
+        failure_categories_15m: snapshot.readinessFailureCounts15m,
+        unready_count_24h: snapshot.readinessUnreadyCount24h,
+        slow_count_15m: snapshot.readinessSlowCount15m,
+        max_duration_ms_15m: snapshot.readinessMaxDurationMs15m,
+        reclaimed_lease_count_24h: snapshot.readinessReclaimedLeaseCount24h,
+      },
     },
   };
 }
@@ -260,6 +314,18 @@ function unavailableData(environment: Environment) {
       succeeded_unfinalized_count: null,
       oldest_succeeded_unfinalized_age_seconds: null,
       retry_exhausted_count: null,
+    },
+    stripe_readiness_refresh: {
+      failure_count_15m: null,
+      oldest_failure_age_seconds: null,
+      newest_failure_age_seconds: null,
+      failure_categories_15m: Object.fromEntries(
+        readinessFailureCategories.map((category) => [category, null]),
+      ),
+      unready_count_24h: null,
+      slow_count_15m: null,
+      max_duration_ms_15m: null,
+      reclaimed_lease_count_24h: null,
     },
   };
 }

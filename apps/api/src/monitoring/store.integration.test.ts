@@ -144,7 +144,69 @@ suite('Mongo monitoring reader', () => {
       paymentSucceededUnfinalizedCount: 0,
       paymentOldestSucceededUnfinalizedAt: null,
       paymentRetryExhaustedCount: 0,
+      readinessFailureCount15m: 0,
+      readinessOldestFailureAt: null,
+      readinessNewestFailureAt: null,
+      readinessFailureCounts15m: {
+        stripe_timeout: 0,
+        stripe_authentication_failure: 0,
+        stripe_api_failure: 0,
+        stripe_rate_limit: 0,
+        stripe_malformed_response: 0,
+        stripe_account_identity_mismatch: 0,
+        stripe_account_mode_mismatch: 0,
+        stripe_account_refresh_claim_lost: 0,
+        refresh_lease_exhausted: 0,
+      },
+      readinessUnreadyCount24h: 0,
+      readinessSlowCount15m: 0,
+      readinessMaxDurationMs15m: 0,
+      readinessReclaimedLeaseCount24h: 0,
     });
+  });
+
+  it('aggregates sanitized readiness failures, latency, unready outcomes, and reclaimed leases', async () => {
+    await db.collection('audit_logs').insertMany([
+      {
+        event: 'stripe_readiness_refresh.completed',
+        outcome: 'success',
+        tenant_id: new ObjectId(),
+        metadata: { category: 'refreshed', duration_ms: '6250', lease_reclaimed: 'true' },
+        created_at: new Date(now.valueOf() - 60_000),
+      },
+      {
+        event: 'stripe_readiness_refresh.completed',
+        outcome: 'failure',
+        tenant_id: new ObjectId(),
+        metadata: {
+          category: 'stripe_account_identity_mismatch',
+          duration_ms: '200',
+          lease_reclaimed: 'false',
+          raw_response: 'must-not-be-returned',
+        },
+        created_at: new Date(now.valueOf() - 45_000),
+      },
+      {
+        event: 'stripe_readiness_refresh.completed',
+        outcome: 'success',
+        tenant_id: new ObjectId(),
+        metadata: { category: 'account_unready', duration_ms: '300', lease_reclaimed: 'false' },
+        created_at: new Date(now.valueOf() - 30_000),
+      },
+    ]);
+
+    const result = await new MongoMonitoringReader(db).read('staging', now);
+    expect(result).toMatchObject({
+      readinessFailureCount15m: 1,
+      readinessOldestFailureAt: new Date(now.valueOf() - 45_000),
+      readinessNewestFailureAt: new Date(now.valueOf() - 45_000),
+      readinessFailureCounts15m: { stripe_account_identity_mismatch: 1 },
+      readinessUnreadyCount24h: 1,
+      readinessSlowCount15m: 1,
+      readinessMaxDurationMs15m: 6_250,
+      readinessReclaimedLeaseCount24h: 1,
+    });
+    expect(JSON.stringify(result)).not.toContain('must-not-be-returned');
   });
 
   it('preserves acknowledged terminal evidence while excluding it from actionable failures', async () => {

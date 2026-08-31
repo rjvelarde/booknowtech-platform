@@ -33,6 +33,10 @@ export class StripeAccountReadinessService {
     const staleBefore = new Date(Date.now() - maxAgeMs);
     if (!(account.last_synced_at instanceof Date) || account.last_synced_at < staleBefore) {
       const token = randomUUID();
+      const leaseReclaimed =
+        typeof account.readiness_refresh_token === 'string' &&
+        account.readiness_refresh_started_at instanceof Date &&
+        account.readiness_refresh_started_at < new Date(Date.now() - REFRESH_LEASE_MS);
       const claimed = await this.store.claimStripeReadinessRefresh({
         tenantId,
         accountPublicId: account.public_id,
@@ -40,8 +44,25 @@ export class StripeAccountReadinessService {
         staleBefore,
         leaseExpiredBefore: new Date(Date.now() - REFRESH_LEASE_MS),
       });
-      if (claimed) account = await this.refresh(tenantId, claimed, token);
-      else account = await this.waitForRefresh(tenantId, account.public_id, staleBefore);
+      if (claimed) account = await this.refresh(tenantId, claimed, token, leaseReclaimed);
+      else {
+        try {
+          account = await this.waitForRefresh(tenantId, account.public_id, staleBefore);
+        } catch (error) {
+          if (
+            error instanceof StripeReadinessError &&
+            error.message === 'payment_account_refresh_in_progress'
+          )
+            await this.store.recordStripeReadinessRefresh({
+              tenantId,
+              outcome: 'failure',
+              category: 'refresh_lease_exhausted',
+              durationMs: FOLLOWER_WAIT_MS,
+              leaseReclaimed: false,
+            });
+          throw error;
+        }
+      }
     }
     return this.grant(tenantId, account, staleBefore);
   }
@@ -50,7 +71,9 @@ export class StripeAccountReadinessService {
     tenantId: ObjectId,
     account: TenantStripePaymentAccountDocument,
     token: string,
+    leaseReclaimed: boolean,
   ) {
+    const startedAt = Date.now();
     try {
       const view = await this.stripe.retrieveAccount(account.stripe_account_id);
       if (view.id !== account.stripe_account_id)
@@ -65,13 +88,29 @@ export class StripeAccountReadinessService {
         projection: projection(view),
       });
       if (!updated) throw new Error('stripe_account_refresh_claim_lost');
+      const ready = accountReady(updated);
+      await this.store.recordStripeReadinessRefresh({
+        tenantId,
+        outcome: 'success',
+        category: ready ? 'refreshed' : 'account_unready',
+        durationMs: Date.now() - startedAt,
+        leaseReclaimed,
+      });
       return updated;
     } catch (error) {
+      const category = refreshFailureCategory(error);
       await this.store.failStripeReadinessRefresh({
         tenantId,
         accountPublicId: account.public_id,
         token,
-        category: refreshFailureCategory(error),
+        category,
+      });
+      await this.store.recordStripeReadinessRefresh({
+        tenantId,
+        outcome: 'failure',
+        category,
+        durationMs: Date.now() - startedAt,
+        leaseReclaimed,
       });
       throw new StripeReadinessError('payment_account_refresh_failed', { cause: error });
     }
@@ -98,12 +137,7 @@ export class StripeAccountReadinessService {
     if (
       !(account.last_synced_at instanceof Date) ||
       account.last_synced_at < staleBefore ||
-      !account.charges_enabled ||
-      account.capabilities?.card_payments !== 'active' ||
-      account.requirements?.disabled_reason ||
-      account.requirements?.currently_due?.length ||
-      account.requirements?.past_due?.length ||
-      account.disconnected_at
+      !accountReady(account)
     )
       throw new StripeReadinessError('payment_account_not_ready');
     return {
@@ -138,7 +172,31 @@ function projection(view: ConnectAccountView) {
 }
 
 function refreshFailureCategory(error: unknown) {
-  return error instanceof Error && error.message.startsWith('stripe_account_')
-    ? error.message
-    : 'stripe_account_refresh_failed';
+  if (!(error instanceof Error)) return 'stripe_api_failure';
+  if (
+    error.message === 'stripe_account_identity_mismatch' ||
+    error.message === 'stripe_account_mode_mismatch' ||
+    error.message === 'stripe_account_refresh_claim_lost'
+  )
+    return error.message;
+  const candidate = error as Error & { code?: string; statusCode?: number; type?: string };
+  if (candidate.type === 'StripeAuthenticationError' || candidate.statusCode === 401)
+    return 'stripe_authentication_failure';
+  if (candidate.type === 'StripeRateLimitError' || candidate.statusCode === 429)
+    return 'stripe_rate_limit';
+  if (candidate.type === 'StripeConnectionError' || candidate.code === 'ETIMEDOUT')
+    return 'stripe_timeout';
+  if (candidate.type === 'StripeInvalidRequestError') return 'stripe_malformed_response';
+  return 'stripe_api_failure';
+}
+
+function accountReady(account: TenantStripePaymentAccountDocument) {
+  return Boolean(
+    account.charges_enabled &&
+    account.capabilities?.card_payments === 'active' &&
+    !account.requirements?.disabled_reason &&
+    !account.requirements?.currently_due?.length &&
+    !account.requirements?.past_due?.length &&
+    !account.disconnected_at,
+  );
 }

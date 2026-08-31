@@ -462,6 +462,36 @@ suite('PR 14B.1 payment persistence foundation', () => {
       }),
     ).resolves.toBeNull();
   });
+
+  it('records only bounded readiness-refresh operational evidence', async () => {
+    const tenantId = new ObjectId();
+    await store.recordStripeReadinessRefresh({
+      tenantId,
+      outcome: 'failure',
+      category: 'stripe_account_identity_mismatch',
+      durationMs: 241.6,
+      leaseReclaimed: true,
+    });
+    const evidence = await db.collection('audit_logs').findOne({
+      event: 'stripe_readiness_refresh.completed',
+      tenant_id: tenantId,
+    });
+    expect(evidence).toMatchObject({
+      outcome: 'failure',
+      request_id: null,
+      metadata: {
+        category: 'stripe_account_identity_mismatch',
+        duration_ms: '242',
+        lease_reclaimed: 'true',
+      },
+    });
+    const metadata = evidence?.metadata as Record<string, unknown> | undefined;
+    expect(Object.keys(metadata ?? {}).sort()).toEqual([
+      'category',
+      'duration_ms',
+      'lease_reclaimed',
+    ]);
+  });
 });
 
 function feeInput(tenantId: ObjectId, amountMinor: number, seed: string) {
