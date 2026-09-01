@@ -198,30 +198,35 @@ suite('payment webhook financial finalization', () => {
 
   it('records external refund evidence without changing appointment cancellation state', async () => {
     const seeded = await seed('succeeded', false, 'scheduled');
+    const refundId = `re_${randomUUID().replaceAll('-', '')}`;
     const session = client.startSession();
     try {
-      await session.withTransaction(() =>
-        applyExternalFinancialEvidence(
-          db,
-          {
-            _id: new ObjectId(),
-            stripe_event_id: `evt_${randomUUID().replaceAll('-', '')}`,
-            stripe_account_id: seeded.accountId,
-            event_type: 'refund.updated',
-            stripe_created_at: new Date(),
-            sanitized_payload: {
-              object_type: 'refund',
-              id: `re_${randomUUID().replaceAll('-', '')}`,
-              payment_intent_id: seeded.intentId,
-              amount: 1_000,
-              currency: 'usd',
-              status: 'succeeded',
+      await session.withTransaction(async () => {
+        for (const [eventType, status] of [
+          ['refund.created', 'pending'],
+          ['refund.updated', 'succeeded'],
+        ] as const)
+          await applyExternalFinancialEvidence(
+            db,
+            {
+              _id: new ObjectId(),
+              stripe_event_id: `evt_${randomUUID().replaceAll('-', '')}`,
+              stripe_account_id: seeded.accountId,
+              event_type: eventType,
+              stripe_created_at: new Date(),
+              sanitized_payload: {
+                object_type: 'refund',
+                id: refundId,
+                payment_intent_id: seeded.intentId,
+                amount: 1_000,
+                currency: 'usd',
+                status,
+              },
+              received_request_id: randomUUID(),
             },
-            received_request_id: randomUUID(),
-          },
-          session,
-        ),
-      );
+            session,
+          );
+      });
     } finally {
       await session.endSession();
     }
@@ -233,8 +238,13 @@ suite('payment webhook financial finalization', () => {
     expect(
       await db
         .collection('payment_ledger_entries')
-        .findOne({ payment_attempt_id: seeded.attemptId }),
-    ).toMatchObject({ entry_kind: 'refund_updated_external' });
+        .find({ payment_attempt_id: seeded.attemptId })
+        .sort({ sequence: 1 })
+        .toArray(),
+    ).toEqual([
+      expect.objectContaining({ entry_kind: 'refund_created_external' }),
+      expect.objectContaining({ entry_kind: 'refund_updated_external' }),
+    ]);
     expect(
       await db.collection('payment_attempts').findOne({ _id: seeded.attemptId }),
     ).toMatchObject({

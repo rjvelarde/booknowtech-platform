@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildApplication } from '../app.js';
 import { StubReadinessProbe, testEnvironment } from '../test-fixtures.js';
-import type { MonitoringReader, MonitoringSnapshot } from './store.js';
+import {
+  type MonitoringReader,
+  type MonitoringSnapshot,
+  readinessFailureCategories,
+} from './store.js';
 
 const token = testEnvironment.MONITORING_TOKEN;
 const sha = 'a'.repeat(40);
@@ -36,6 +40,16 @@ function snapshot(overrides: Partial<MonitoringSnapshot> = {}): MonitoringSnapsh
     paymentSucceededUnfinalizedCount: 0,
     paymentOldestSucceededUnfinalizedAt: null,
     paymentRetryExhaustedCount: 0,
+    readinessFailureCount15m: 0,
+    readinessOldestFailureAt: null,
+    readinessNewestFailureAt: null,
+    readinessFailureCounts15m: Object.fromEntries(
+      readinessFailureCategories.map((category) => [category, 0]),
+    ) as MonitoringSnapshot['readinessFailureCounts15m'],
+    readinessUnreadyCount24h: 0,
+    readinessSlowCount15m: 0,
+    readinessMaxDurationMs15m: 0,
+    readinessReclaimedLeaseCount24h: 0,
     ...overrides,
   };
 }
@@ -111,6 +125,18 @@ describe('internal monitoring route', () => {
           oldest_succeeded_unfinalized_age_seconds: null,
           retry_exhausted_count: 0,
         },
+        stripe_readiness_refresh: {
+          failure_count_15m: 0,
+          oldest_failure_age_seconds: null,
+          newest_failure_age_seconds: null,
+          failure_categories_15m: Object.fromEntries(
+            readinessFailureCategories.map((category) => [category, 0]),
+          ),
+          unready_count_24h: 0,
+          slow_count_15m: 0,
+          max_duration_ms_15m: 0,
+          reclaimed_lease_count_24h: 0,
+        },
       },
     });
   });
@@ -156,6 +182,7 @@ describe('internal monitoring route', () => {
     ['paid unfinalized', { paymentSucceededUnfinalizedCount: 1 }],
     ['manual review', { paymentManualReviewCount: 1 }],
     ['retry exhausted', { paymentRetryExhaustedCount: 1 }],
+    ['readiness refresh failure', { readinessFailureCount15m: 1 }],
   ])('fails closed for %s', async (_label, overrides) => {
     const app = await application({ read: () => Promise.resolve(snapshot(overrides)) });
     const response = await app.inject({
@@ -207,6 +234,42 @@ describe('internal monitoring route', () => {
     });
   });
 
+  it('exposes bounded readiness categories and latency without tenant or Stripe identifiers', async () => {
+    const categories = snapshot().readinessFailureCounts15m;
+    categories.stripe_account_identity_mismatch = 1;
+    const unsafe = snapshot({
+      readinessFailureCount15m: 1,
+      readinessOldestFailureAt: new Date(now.valueOf() - 45_000),
+      readinessNewestFailureAt: new Date(now.valueOf() - 15_000),
+      readinessFailureCounts15m: categories,
+      readinessUnreadyCount24h: 2,
+      readinessSlowCount15m: 1,
+      readinessMaxDurationMs15m: 6_250,
+      readinessReclaimedLeaseCount24h: 1,
+    }) as MonitoringSnapshot & Record<string, unknown>;
+    unsafe.stripe_account_id = 'acct_sensitive';
+    unsafe.raw_response = 'sk_test_sensitive';
+    const app = await application({ read: () => Promise.resolve(unsafe) });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/internal/monitoring',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.json().data.stripe_readiness_refresh).toMatchObject({
+      failure_count_15m: 1,
+      oldest_failure_age_seconds: 45,
+      newest_failure_age_seconds: 15,
+      failure_categories_15m: { stripe_account_identity_mismatch: 1 },
+      unready_count_24h: 2,
+      slow_count_15m: 1,
+      max_duration_ms_15m: 6_250,
+      reclaimed_lease_count_24h: 1,
+    });
+    expect(response.body).not.toContain('acct_sensitive');
+    expect(response.body).not.toContain('sk_test_sensitive');
+  });
+
   it('fails closed on Mongo/query failure without exposing error or business data', async () => {
     const sensitive = 'customer@example.test tenant-123 mongodb://user:password@private-host';
     const app = await application({ read: () => Promise.reject(new Error(sensitive)) });
@@ -227,6 +290,7 @@ describe('internal monitoring route', () => {
       'outbox',
       'stripe_webhooks',
       'payments',
+      'stripe_readiness_refresh',
     ]);
   });
 

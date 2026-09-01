@@ -187,6 +187,38 @@ describe('PR 14B.2 PaymentIntent execution recovery', () => {
     expect(stripe.retrievePaymentIntent).not.toHaveBeenCalled();
     expect(store.linkPaymentIntent).not.toHaveBeenCalled();
   });
+
+  it('refuses PaymentIntent work when the readiness grant no longer matches', async () => {
+    const attempt = attemptFixture();
+    const store = {
+      readinessGrantCurrent: vi.fn().mockResolvedValue(null),
+      transitionAttempt: vi.fn(),
+    };
+    const stripe = {
+      createDirectChargePaymentIntent: vi.fn(),
+      retrievePaymentIntent: vi.fn(),
+      cancelPaymentIntent: vi.fn(),
+    };
+    const service = new PaymentExecutionService(
+      store as unknown as PaymentFoundationStore,
+      stripe,
+      true,
+    );
+    await expect(
+      service.ensurePaymentIntent({
+        ...executionInput(attempt),
+        readinessGrant: {
+          tenantId: attempt.tenant_id,
+          accountPublicId: attempt.tenant_stripe_account_public_id,
+          connectedAccountId: 'acct_server_resolved',
+          readinessGeneration: 3,
+          refreshedAt: new Date(),
+        },
+      }),
+    ).rejects.toThrow('payment_readiness_grant_invalid');
+    expect(store.transitionAttempt).not.toHaveBeenCalled();
+    expect(stripe.createDirectChargePaymentIntent).not.toHaveBeenCalled();
+  });
 });
 
 function executionInput(attempt: PaymentAttemptDocument) {

@@ -9,6 +9,7 @@ import { MongoMonitoringReader } from './monitoring/store.js';
 import { PaymentExecutionService } from './payment/execution-service.js';
 import { PublicPaidBookingOrchestrator } from './payment/public-orchestrator.js';
 import { PaymentFoundationStore } from './payment/store.js';
+import { StripeAccountReadinessService } from './payment/readiness-service.js';
 import { StripeSdkConnectAdapter } from './stripe/adapter.js';
 import { ConnectStore } from './stripe/connect-store.js';
 import { ConnectService } from './stripe/connect-service.js';
@@ -31,7 +32,10 @@ async function start(): Promise<void> {
           environment,
           adminStore,
           paymentStore,
-          stripeAdapter ? new PaymentExecutionService(paymentStore, stripeAdapter) : null,
+          stripeAdapter ? new PaymentExecutionService(paymentStore, stripeAdapter, true) : null,
+          stripeAdapter
+            ? new StripeAccountReadinessService(environment, paymentStore, stripeAdapter)
+            : null,
         )
       : undefined;
   const app = await buildApplication({
@@ -39,7 +43,7 @@ async function start(): Promise<void> {
     readiness,
     monitoringReader: new MongoMonitoringReader(database),
     closeAdmin: async () => applicationClient.close(),
-    ...(stripeAdapter && environment.STRIPE_PLATFORM_WEBHOOK_SECRET
+    ...(stripeAdapter && environment.STRIPE_CONNECT_WEBHOOK_SECRET
       ? {
           stripeAdapter,
           stripeWebhookStore: new StripeWebhookStore(database),

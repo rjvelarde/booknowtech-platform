@@ -387,6 +387,111 @@ suite('PR 14B.1 payment persistence foundation', () => {
       }),
     ).toHaveLength(0);
   });
+
+  it('allows exactly one stale-readiness refresh claim and rejects a replaced association', async () => {
+    const tenantId = new ObjectId();
+    const publicId = randomUUID();
+    const now = new Date();
+    await db.collection('tenant_stripe_accounts').insertOne({
+      public_id: publicId,
+      tenant_id: tenantId,
+      stripe_account_id: 'acct_readinessconcurrency',
+      account_type: 'express',
+      country: 'US',
+      default_currency: 'USD',
+      status: 'payouts_enabled',
+      active: true,
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
+      capabilities: { card_payments: 'active', transfers: 'active' },
+      requirements: {
+        currently_due: [],
+        eventually_due: [],
+        past_due: [],
+        pending_verification: [],
+        disabled_reason: null,
+        current_deadline: null,
+      },
+      last_stripe_event_id: null,
+      last_stripe_event_created_at: null,
+      last_synced_at: new Date(0),
+      connected_at: now,
+      disconnected_at: null,
+      created_at: now,
+      created_by_user_id: new ObjectId(),
+      updated_at: now,
+      updated_by_source: 'user',
+      version: 1,
+      readiness_generation: 0,
+      readiness_refresh_token: null,
+      readiness_refresh_started_at: null,
+      last_readiness_refresh_attempt_at: null,
+      last_readiness_refresh_failure_category: null,
+    });
+    const claims = await Promise.all(
+      ['claim-a', 'claim-b'].map((token) =>
+        store.claimStripeReadinessRefresh({
+          tenantId,
+          accountPublicId: publicId,
+          token,
+          staleBefore: new Date(),
+          leaseExpiredBefore: new Date(Date.now() - 15_000),
+        }),
+      ),
+    );
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    const winner = claims.find(Boolean)!;
+    await db
+      .collection('tenant_stripe_accounts')
+      .updateOne({ public_id: publicId }, { $set: { active: false, disconnected_at: new Date() } });
+    await expect(
+      store.completeStripeReadinessRefresh({
+        tenantId,
+        accountPublicId: publicId,
+        connectedAccountId: winner.stripe_account_id,
+        token: winner.readiness_refresh_token!,
+        projection: {
+          status: 'payouts_enabled',
+          details_submitted: true,
+          charges_enabled: true,
+          payouts_enabled: true,
+          capabilities: { card_payments: 'active', transfers: 'active' },
+          requirements: {},
+        },
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('records only bounded readiness-refresh operational evidence', async () => {
+    const tenantId = new ObjectId();
+    await store.recordStripeReadinessRefresh({
+      tenantId,
+      outcome: 'failure',
+      category: 'stripe_account_identity_mismatch',
+      durationMs: 241.6,
+      leaseReclaimed: true,
+    });
+    const evidence = await db.collection('audit_logs').findOne({
+      event: 'stripe_readiness_refresh.completed',
+      tenant_id: tenantId,
+    });
+    expect(evidence).toMatchObject({
+      outcome: 'failure',
+      request_id: null,
+      metadata: {
+        category: 'stripe_account_identity_mismatch',
+        duration_ms: '242',
+        lease_reclaimed: 'true',
+      },
+    });
+    const metadata = evidence?.metadata as Record<string, unknown> | undefined;
+    expect(Object.keys(metadata ?? {}).sort()).toEqual([
+      'category',
+      'duration_ms',
+      'lease_reclaimed',
+    ]);
+  });
 });
 
 function feeInput(tenantId: ObjectId, amountMinor: number, seed: string) {

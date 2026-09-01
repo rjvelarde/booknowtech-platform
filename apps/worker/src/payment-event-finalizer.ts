@@ -253,7 +253,7 @@ export async function applyExternalFinancialEvidence(
     .findOne({ stripe_payment_intent_id: view.payment_intent_id }, { session });
   if (!account || !attempt || String(account.tenant_id) !== String(attempt.tenant_id))
     throw new Error('financial_evidence_unattributed');
-  const evidenceKey = `${event.event_type}:${view.id}`;
+  const evidenceKey = `stripe_event:${event.stripe_event_id}`;
   if (
     await db.collection('payment_ledger_entries').findOne(
       {
@@ -265,7 +265,14 @@ export async function applyExternalFinancialEvidence(
     )
   )
     return;
-  const entryKind = view.object_type === 'dispute' ? 'dispute_evidence' : 'refund_updated_external';
+  const entryKind =
+    view.object_type === 'dispute'
+      ? 'dispute_evidence'
+      : event.event_type === 'refund.created'
+        ? 'refund_created_external'
+        : event.event_type === 'refund.failed'
+          ? 'refund_failed_external'
+          : 'refund_updated_external';
   await appendExternalLedger(db, event, attempt, session, entryKind);
   await db.collection<Attempt>('payment_attempts').updateOne(
     { _id: attempt._id },
@@ -642,7 +649,7 @@ async function appendExternalLedger(
   entryKind: string,
 ) {
   const ledger = db.collection('payment_ledger_entries');
-  const key = `${event.event_type}:${event.sanitized_payload.id}`;
+  const key = `stripe_event:${event.stripe_event_id}`;
   if (
     await ledger.findOne(
       {

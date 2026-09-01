@@ -8,7 +8,7 @@ export class StripeWebhookStore {
 
   public async ingest(input: {
     event: VerifiedStripeEvent;
-    endpointKind: 'platform' | 'connect';
+    endpointKind: 'connect';
     requestId: string;
     payloadHash: string;
   }) {
@@ -19,19 +19,7 @@ export class StripeWebhookStore {
           .collection<{ tenant_id: ObjectId }>('tenant_stripe_accounts')
           .findOne({ stripe_account_id: account, active: true }, { projection: { tenant_id: 1 } })
       : null;
-    const supportedTypes = [
-      'account.updated',
-      'account.application.deauthorized',
-      'payment_intent.succeeded',
-      'payment_intent.payment_failed',
-      'payment_intent.canceled',
-      'payment_intent.processing',
-      'charge.refunded',
-      'refund.updated',
-      'charge.dispute.created',
-      'charge.dispute.updated',
-      'charge.dispute.closed',
-    ];
+    const supportedTypes: readonly string[] = CONNECT_WEBHOOK_EVENT_TYPES;
     const supported =
       input.endpointKind === 'connect' &&
       account !== null &&
@@ -86,10 +74,25 @@ export class StripeWebhookStore {
   }
 }
 
+export const CONNECT_WEBHOOK_EVENT_TYPES = [
+  'account.application.deauthorized',
+  'account.updated',
+  'charge.dispute.closed',
+  'charge.dispute.created',
+  'charge.dispute.funds_reinstated',
+  'charge.dispute.funds_withdrawn',
+  'charge.dispute.updated',
+  'payment_intent.canceled',
+  'payment_intent.payment_failed',
+  'payment_intent.processing',
+  'payment_intent.succeeded',
+  'refund.created',
+  'refund.failed',
+  'refund.updated',
+] as const;
+
 function isExternalEvidenceType(type: string) {
-  return (
-    type === 'charge.refunded' || type === 'refund.updated' || type.startsWith('charge.dispute.')
-  );
+  return type.startsWith('refund.') || type.startsWith('charge.dispute.');
 }
 
 function sanitizeExternalEvidence(view: NonNullable<VerifiedStripeEvent['financialEvidenceView']>) {

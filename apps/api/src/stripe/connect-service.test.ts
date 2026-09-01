@@ -94,7 +94,6 @@ function environment() {
   return {
     ...testEnvironment,
     STRIPE_SECRET_KEY: 'sk_test_foundation',
-    STRIPE_PLATFORM_WEBHOOK_SECRET: 'whsec_platform_secret',
     STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_connect_secret',
     BOOKNOWTECH_CONNECT_TERMS_VERSION: 'connect-v1',
     BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256: 'a'.repeat(64),

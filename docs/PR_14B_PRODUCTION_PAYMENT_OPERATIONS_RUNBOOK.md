@@ -6,12 +6,14 @@ time window, rollback owner, and evidence location before changing configuration
 
 ## Required owner record
 
-- Primary payment operations owner: `<name and contact>`
-- Backup payment operations owner: `<name and contact>`
-- Operating-hours timezone: `<IANA timezone>`
-- Operating days and holiday calendar: `<published calendar>`
-- Highest-priority escalation channel: `<channel and paging target>`
-- Same-business-day manual-review queue owner: `<name and queue>`
+- Primary payment operations owner: Robert Velarde
+- Backup payment operations owner: Allan Miranda
+- Operating-hours timezone: `America/New_York`
+- Operating days: Monday through Friday
+- Holiday calendar: U.S. federal holidays excluded
+- Highest-priority escalation channel: telephone call to `843-324-3301`
+- Secondary escalation channel: email; no address is recorded because none has been approved
+- Same-business-day manual-review queue owner: Robert Velarde
 
 Do not enable production execution until every placeholder above has an approved value.
 
@@ -19,47 +21,56 @@ Do not enable production execution until every placeholder above has an approved
 
 Never paste values into tickets, logs, screenshots, command history, or this runbook.
 
-| Service      | Variable                                   | Kind              | Required state before live execution  |
-| ------------ | ------------------------------------------ | ----------------- | ------------------------------------- |
-| API + worker | `STRIPE_SECRET_KEY`                        | secret            | Same approved `sk_live_…` credential  |
-| API          | `STRIPE_PUBLISHABLE_KEY`                   | public client key | Matching `pk_live_…` key              |
-| API          | `STRIPE_PLATFORM_WEBHOOK_SECRET`           | secret            | Live platform endpoint secret         |
-| API          | `STRIPE_CONNECT_WEBHOOK_SECRET`            | secret            | Distinct live Connect endpoint secret |
-| API          | `STRIPE_CONNECT_COUNTRY`                   | non-secret        | `US`                                  |
-| API          | `BOOKNOWTECH_CONNECT_TERMS_VERSION`        | non-secret        | Approved published version            |
-| API          | `BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256`    | integrity hash    | Exact approved terms hash             |
-| API          | `STRIPE_ACCOUNT_READINESS_MAX_AGE_SECONDS` | non-secret        | Approved bounded age, 60–86400        |
-| API + worker | `BOOKNOWTECH_PAYMENT_TERMS_VERSION`        | non-secret        | Identical approved version            |
-| API + worker | `BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256`    | integrity hash    | Identical approved hash               |
-| API          | `PAYMENT_IP_HASH_SECRET`                   | secret            | Unique environment-specific secret    |
-| API          | `CHECKOUT_RECOVERY_TOKEN_SECRET`           | secret            | Unique environment-specific secret    |
-| API          | `STRIPE_PAYMENTS_FOUNDATION_ENABLED`       | flag              | `true` only for approved onboarding   |
-| API          | `STRIPE_PAYMENT_EXECUTION_ENABLED`         | kill switch       | `false` until final enablement        |
+| Service      | Variable                                   | Kind              | Required state before live execution |
+| ------------ | ------------------------------------------ | ----------------- | ------------------------------------ |
+| API + worker | `STRIPE_SECRET_KEY`                        | secret            | Same approved `sk_live_…` credential |
+| API          | `STRIPE_PUBLISHABLE_KEY`                   | public client key | Matching `pk_live_…` key             |
+| API          | `STRIPE_CONNECT_WEBHOOK_SECRET`            | secret            | Live Connect endpoint secret         |
+| API          | `STRIPE_CONNECT_COUNTRY`                   | non-secret        | `US`                                 |
+| API          | `BOOKNOWTECH_CONNECT_TERMS_VERSION`        | non-secret        | Approved published version           |
+| API          | `BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256`    | integrity hash    | Exact approved terms hash            |
+| API          | `STRIPE_ACCOUNT_READINESS_MAX_AGE_SECONDS` | non-secret        | Exactly `900`                        |
+| API + worker | `BOOKNOWTECH_PAYMENT_TERMS_VERSION`        | non-secret        | Identical approved version           |
+| API + worker | `BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256`    | integrity hash    | Identical approved hash              |
+| API          | `PAYMENT_IP_HASH_SECRET`                   | secret            | Unique environment-specific secret   |
+| API          | `CHECKOUT_RECOVERY_TOKEN_SECRET`           | secret            | Unique environment-specific secret   |
+| API          | `STRIPE_PAYMENTS_FOUNDATION_ENABLED`       | flag              | `true` only for approved onboarding  |
+| API          | `STRIPE_PAYMENT_EXECUTION_ENABLED`         | kill switch       | `false` until final enablement       |
 
 ## Public Stripe endpoints and registration
 
-Register live Stripe webhook endpoints only after an unsigned POST to each public URL reaches the
+Register the live Stripe Connect webhook only after an unsigned POST to the public URL reaches the
 API signature boundary and fails with the bounded invalid-signature response:
 
-- `https://admin.booknowtech.com/webhooks/stripe/platform`
 - `https://admin.booknowtech.com/webhooks/stripe/connect`
 
 The Connect endpoint must listen to events on connected accounts. Subscribe only to:
 
-- `account.updated`
 - `account.application.deauthorized`
-- `payment_intent.succeeded`
+- `account.updated`
+- `charge.dispute.closed`
+- `charge.dispute.created`
+- `charge.dispute.funds_reinstated`
+- `charge.dispute.funds_withdrawn`
+- `charge.dispute.updated`
+- `payment_intent.canceled`
 - `payment_intent.payment_failed`
 - `payment_intent.processing`
-- `payment_intent.canceled`
-- `charge.refunded`
+- `payment_intent.succeeded`
+- `refund.created`
+- `refund.failed`
 - `refund.updated`
-- `charge.dispute.created`
-- `charge.dispute.updated`
-- `charge.dispute.closed`
 
-Keep platform and Connect signing secrets distinct. Deliver one approved non-financial test event,
+The platform webhook is intentionally deferred. Do not register it unless a future approved PR adds
+an authoritative platform-side financial lifecycle. Deliver one approved non-financial test event,
 confirm one stored event/projection and green monitoring, then confirm redelivery is idempotent.
+
+Account readiness older than 900 seconds is refreshed authoritatively before any new provisional or
+financial record is created. Monitor refresh failures, account identity/mode mismatch, expired refresh
+leases, and readiness-grant rejection. A refresh failure must produce no customer, provisional
+appointment, payment attempt, ledger entry, or PaymentIntent. Disable payment execution immediately
+if these invariants cannot be observed. Existing expiry, reconciliation, and finalization continue
+while new execution is disabled.
 
 ## First tenant and Connect onboarding
 
@@ -121,6 +132,17 @@ Before enablement, authenticated `/api/internal/monitoring` must report the exac
 fresh worker heartbeat, and zero actionable webhook failures, expiry candidates, reconciliation
 pending/processing, `succeeded_unfinalized`, manual review, local-finalization failure, and retry
 exhaustion. Preserve acknowledged historical evidence.
+
+The `stripe_readiness_refresh` section reports a 15-minute actionable-failure window and a
+24-hour operational context window. Any `failure_count_15m` is release-blocking. Category counts
+separate Stripe timeout, authentication/API, rate-limit and malformed-response failures from
+high-severity account identity/mode mismatches, persistence/CAS loss, and exhausted lease waits.
+`unready_count_24h` is visible tenant-readiness evidence but does not by itself declare the
+platform unhealthy. Retrievals lasting at least five seconds contribute to `slow_count_15m` and
+`max_duration_ms_15m`. `reclaimed_lease_count_24h` records successful stale-lease recovery without
+treating ordinary short-lived contention as an incident. The endpoint returns aggregates only;
+it never returns tenant/account identifiers, refresh tokens, Stripe responses, requirements
+payloads, or secrets.
 
 Disable new execution immediately for a missing/stale heartbeat, SHA divergence, webhook delivery
 failure, growing processing backlog, any paid-but-unfinalized case, attribution/amount mismatch,

@@ -361,5 +361,10 @@ export function accountDocument(input: ConnectActor, view: ConnectAccountView, n
     updated_at: now,
     updated_by_source: 'user',
     version: 1,
+    readiness_generation: 0,
+    readiness_refresh_token: null,
+    readiness_refresh_started_at: null,
+    last_readiness_refresh_attempt_at: null,
+    last_readiness_refresh_failure_category: null,
   };
 }

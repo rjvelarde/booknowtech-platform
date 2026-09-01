@@ -29,7 +29,6 @@ const environmentSchema = z.object({
   MONITORING_TOKEN: z.string().min(48).max(256),
   STRIPE_SECRET_KEY: z.string().min(16).optional(),
   STRIPE_PUBLISHABLE_KEY: z.string().min(16).optional(),
-  STRIPE_PLATFORM_WEBHOOK_SECRET: z.string().min(16).optional(),
   STRIPE_CONNECT_WEBHOOK_SECRET: z.string().min(16).optional(),
   STRIPE_CONNECT_COUNTRY: z.literal('US').default('US'),
   BOOKNOWTECH_CONNECT_TERMS_VERSION: z
@@ -168,7 +167,6 @@ function validatePaymentExecutionConfiguration(
 function validateStripeConfiguration(environment: z.infer<typeof environmentSchema>): void {
   const values = [
     environment.STRIPE_SECRET_KEY,
-    environment.STRIPE_PLATFORM_WEBHOOK_SECRET,
     environment.STRIPE_CONNECT_WEBHOOK_SECRET,
     environment.BOOKNOWTECH_CONNECT_TERMS_VERSION,
     environment.BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256,
@@ -187,14 +185,9 @@ function validateStripeConfiguration(environment: z.infer<typeof environmentSche
     if ((!publishableLive && !publishableTest) || publishableLive !== live)
       throw new Error('Invalid environment configuration: STRIPE_PUBLISHABLE_KEY');
   }
-  if (environment.STRIPE_PLATFORM_WEBHOOK_SECRET === environment.STRIPE_CONNECT_WEBHOOK_SECRET)
-    throw new Error('Invalid environment configuration: Stripe webhook secret separation');
   if ((!live && !test) || (environment.ENVIRONMENT_ID === 'production' ? !live : !test))
     throw new Error('Invalid environment configuration: Stripe key mode');
-  if (
-    !environment.STRIPE_PLATFORM_WEBHOOK_SECRET!.startsWith('whsec_') ||
-    !environment.STRIPE_CONNECT_WEBHOOK_SECRET!.startsWith('whsec_')
-  )
+  if (!environment.STRIPE_CONNECT_WEBHOOK_SECRET!.startsWith('whsec_'))
     throw new Error('Invalid environment configuration: Stripe webhook secrets');
 }
 

@@ -96,8 +96,15 @@ const validators: Record<string, Document> = {
         created_at: { bsonType: 'date' },
         created_by_user_id: { bsonType: 'objectId' },
         updated_at: { bsonType: 'date' },
-        updated_by_source: { enum: ['user', 'stripe_webhook', 'reconciliation'] },
+        updated_by_source: {
+          enum: ['user', 'stripe_webhook', 'stripe_api_refresh', 'reconciliation'],
+        },
         version: { bsonType: ['int', 'long', 'double'], minimum: 1 },
+        readiness_generation: { bsonType: ['int', 'long', 'double'], minimum: 0 },
+        readiness_refresh_token: { bsonType: ['string', 'null'] },
+        readiness_refresh_started_at: { bsonType: ['date', 'null'] },
+        last_readiness_refresh_attempt_at: { bsonType: ['date', 'null'] },
+        last_readiness_refresh_failure_category: { bsonType: ['string', 'null'] },
       },
     },
   },
@@ -2086,6 +2093,20 @@ export async function migrateDatabase(db: Db): Promise<void> {
         { $set: { public_booking_origin: null } },
       );
   }
+  if (existing.has('tenant_stripe_accounts')) {
+    await db.collection('tenant_stripe_accounts').updateMany(
+      { readiness_generation: { $exists: false } },
+      {
+        $set: {
+          readiness_generation: 0,
+          readiness_refresh_token: null,
+          readiness_refresh_started_at: null,
+          last_readiness_refresh_attempt_at: null,
+          last_readiness_refresh_failure_category: null,
+        },
+      },
+    );
+  }
   for (const [name, validator] of Object.entries(validators)) {
     if (existing.has(name)) {
       await db.command({ collMod: name, validator, validationLevel: 'strict' });
@@ -2177,6 +2198,10 @@ export async function migrateDatabase(db: Db): Promise<void> {
       partialFilterExpression: { active: true },
     },
     { key: { status: 1, last_synced_at: 1 }, name: 'tenant_stripe_accounts_operations' },
+    {
+      key: { active: 1, last_synced_at: 1, readiness_refresh_started_at: 1 },
+      name: 'tenant_stripe_accounts_readiness_refresh',
+    },
   ]);
   await db.collection('stripe_connect_operations').createIndexes([
     { key: { public_id: 1 }, name: 'stripe_connect_operations_public_id_unique', unique: true },
