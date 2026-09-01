@@ -1,4 +1,6 @@
 import react from '@vitejs/plugin-react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { loadEnv } from 'vite';
 import { defineConfig } from 'vitest/config';
 
@@ -28,6 +30,16 @@ export default defineConfig(({ mode }) => {
             fileName: 'version.json',
             source: JSON.stringify({ version: environment.VITE_BUILD_VERSION }),
           });
+          for (const name of [
+            'BOOKNOWTECH_PAYMENT_TERMS_paymentsv1.md',
+            'BOOKNOWTECH_PAYMENT_TERMS_paymentsv2.md',
+          ]) {
+            this.emitFile({
+              type: 'asset',
+              fileName: `legal/${name}`,
+              source: readFileSync(resolve(import.meta.dirname, '../../docs/legal', name)),
+            });
+          }
         },
       },
     ],

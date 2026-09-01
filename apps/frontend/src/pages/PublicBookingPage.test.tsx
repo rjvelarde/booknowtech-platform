@@ -36,6 +36,12 @@ describe('PublicBookingPage', () => {
               acknowledgment_label: 'I agree to the booking terms.',
               terms_url: null,
             },
+            payment_checkout: {
+              stripe_publishable_key: 'pk_test_synthetic',
+              terms_version: 'payments-v2',
+              terms_document_sha256: 'c'.repeat(64),
+              terms_url: '/legal/BOOKNOWTECH_PAYMENT_TERMS_paymentsv2.md',
+            },
           },
         }),
       )
@@ -53,6 +59,7 @@ describe('PublicBookingPage', () => {
                 booking_fee_minor: 125,
                 currency: 'USD',
                 policy: { minimum_lead_minutes: 120, maximum_advance_days: 90 },
+                payment_mode: 'fixed_deposit',
               },
             ],
           },
@@ -117,9 +124,19 @@ describe('PublicBookingPage', () => {
     fireEvent.change(screen.getByLabelText('Mobile phone'), {
       target: { value: '(843) 555-0104' },
     });
-    fireEvent.click(screen.getByRole('checkbox'));
+    const checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes).toHaveLength(2);
+    fireEvent.click(checkboxes[0]!);
+    fireEvent.click(checkboxes[1]!);
+    expect(screen.getByRole('link', { name: 'Payment Terms' })).toHaveAttribute(
+      'href',
+      '/legal/BOOKNOWTECH_PAYMENT_TERMS_paymentsv2.md',
+    );
+    expect(checkboxes[1]!.closest('label')).toHaveTextContent(
+      'I accept the Payment Terms, including the amount shown and the normally non-refundable online booking fee.',
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Review appointment' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Book appointment' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to secure payment' }));
 
     expect(await screen.findByRole('heading', { name: 'You’re booked!' })).toBeInTheDocument();
     expect(screen.getByText(/BNT-PUBLIC01/)).toBeInTheDocument();
@@ -129,6 +146,13 @@ describe('PublicBookingPage', () => {
     expect(fetchMock.mock.calls.at(-1)?.[1]?.method).toBe('POST');
     expect(fetchMock.mock.calls.at(-1)?.[1]?.headers).toMatchObject({
       'Idempotency-Key': expect.any(String),
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
+      payment_terms: {
+        version: 'payments-v2',
+        document_sha256: 'c'.repeat(64),
+        accepted: true,
+      },
     });
     expect(screen.queryByText(/Any available provider/i)).not.toBeInTheDocument();
   });
@@ -250,8 +274,9 @@ describe('PublicBookingPage', () => {
             },
             payment_checkout: {
               stripe_publishable_key: 'pk_test_synthetic',
-              terms_version: 'payments-v1',
+              terms_version: 'payments-v2',
               terms_document_sha256: 'b'.repeat(64),
+              terms_url: '/legal/BOOKNOWTECH_PAYMENT_TERMS_paymentsv2.md',
             },
           },
         }),

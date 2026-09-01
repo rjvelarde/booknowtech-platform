@@ -41,7 +41,7 @@ export function PublicPaymentCheckout({
     return (
       <CheckoutStatus
         title="Payment needs review"
-        message="Do not submit another payment. Your appointment is not yet confirmed. BookNowTech is reviewing the payment status."
+        message="Do not submit another payment. Your appointment is not yet confirmed. The payment status is being reviewed."
       />
     );
   if (attempt.payment_status === 'processing' || attempt.payment_status === 'temporary_recovery')
@@ -94,7 +94,7 @@ export function PublicPaymentCheckout({
       <AmountBreakdown attempt={attempt} />
       <p className="public-payment-hold" role="status">
         This time is provisionally held until {new Date(attempt.expires_at).toLocaleTimeString()}.
-        It is not booked until payment is finalized by BookNowTech.
+        Your appointment is not confirmed until payment is successfully completed.
       </p>
       <Elements
         stripe={stripePromise}
@@ -189,7 +189,7 @@ function AmountBreakdown({ attempt }: { attempt: PublicPaymentAttemptView }) {
           <dd>{money(amount.provider_amount_due_now_minor)}</dd>
         </div>
         <div>
-          <dt>BookNowTech booking fee</dt>
+          <dt>Online booking fee</dt>
           <dd>{money(amount.booknowtech_fee_minor)}</dd>
         </div>
         <div className="public-payment-total">
@@ -203,11 +203,15 @@ function AmountBreakdown({ attempt }: { attempt: PublicPaymentAttemptView }) {
       </dl>
       {deposit ? (
         <p>
-          The remaining service balance is not charged or tracked as a receivable by BookNowTech.
+          The remaining service balance is paid directly to the provider and is not included in
+          today's charge.
         </p>
       ) : null}
       <p>
         All amounts are USD. The booking fee is normally non-refundable for customer cancellation.
+      </p>
+      <p className="public-payment-disclosure">
+        Online booking services and the applicable booking fee are provided by Mobile Up Tech Inc.
       </p>
     </div>
   );

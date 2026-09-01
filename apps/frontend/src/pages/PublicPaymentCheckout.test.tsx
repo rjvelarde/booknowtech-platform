@@ -56,7 +56,28 @@ describe('PublicPaymentCheckout', () => {
     expect(screen.getByText('$21.25')).toBeInTheDocument();
     expect(screen.getByText('$35.00')).toBeInTheDocument();
     expect(screen.getByText(/provisionally held/i)).toBeInTheDocument();
+    expect(screen.getByText('Online booking fee')).toBeInTheDocument();
+    expect(screen.queryByText('BookNowTech booking fee')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Online booking services and the applicable booking fee are provided by Mobile Up Tech Inc.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Your appointment is not confirmed until payment is successfully completed/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "The remaining service balance is paid directly to the provider and is not included in today's charge.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/you.re booked/i)).not.toBeInTheDocument();
+  });
+
+  it('uses neutral language while a payment is in manual review', () => {
+    renderCheckout(attempt({ payment_status: 'manual_review', client_secret: null }));
+    expect(screen.getByText(/The payment status is being reviewed/)).toBeInTheDocument();
+    expect(screen.queryByText(/BookNowTech is reviewing/)).not.toBeInTheDocument();
   });
 
   it('confirms through Stripe then reads the durable attempt before showing confirmation', async () => {

@@ -1040,6 +1040,11 @@ button:disabled {
   font-weight: 700;
 }
 
+.public-payment-disclosure {
+  color: #50617d;
+  font-size: 0.875rem;
+}
+
 .public-payment-hold {
   border-left: 0.3rem solid var(--booking-accent);
   background: #f4f8fb;

@@ -84,7 +84,7 @@ function paymentSummary(data: AppointmentEmailTemplateData) {
   const lines = [
     `Service price: ${money(data.service_price_minor!)}`,
     `Paid online toward service: ${money(data.provider_amount_paid_online_minor!)}`,
-    `BookNowTech booking fee: ${money(data.booknowtech_fee_minor!)}`,
+    `Online booking fee: ${money(data.booknowtech_fee_minor!)}`,
     `Remaining service balance: ${money(data.remaining_service_balance_minor!)}`,
   ];
   return { text: lines.join('\n'), html: lines.map((line) => escapeHtml(line)).join('<br>') };
