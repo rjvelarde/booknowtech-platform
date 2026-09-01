@@ -124,6 +124,33 @@ describe('public booking discovery', () => {
     await app.close();
   });
 
+  it('publishes the immutable payments-v2 artifact URL with its configured acceptance evidence', async () => {
+    const { app, store, tenant } = await testApp(
+      {
+        ...testEnvironment,
+        STRIPE_PAYMENT_EXECUTION_ENABLED: true,
+        STRIPE_PUBLISHABLE_KEY: 'pk_test_synthetic',
+        BOOKNOWTECH_PAYMENT_TERMS_VERSION: 'payments-v2',
+        BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256:
+          '6f8ce120b1ee45828913d23c7553bf80bb9ef19ad56ce68dc7590a081b6b906b',
+      },
+      {} as PublicPaidBookingOrchestrator,
+    );
+    vi.spyOn(store, 'getPublicTenantBySlug').mockResolvedValue(tenant);
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/booking-context',
+      headers: { host: 'brazilian-wax.booknowtech.com' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.payment_checkout).toMatchObject({
+      terms_version: 'payments-v2',
+      terms_document_sha256: '6f8ce120b1ee45828913d23c7553bf80bb9ef19ad56ce68dc7590a081b6b906b',
+      terms_url: '/legal/BOOKNOWTECH_PAYMENT_TERMS_paymentsv2.md',
+    });
+    await app.close();
+  });
+
   it('serves the configured staging suffix and rejects the production suffix', async () => {
     const { app, store, tenant } = await testApp({
       ...testEnvironment,

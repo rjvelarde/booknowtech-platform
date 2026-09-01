@@ -55,6 +55,7 @@ describe('public appointment management', () => {
       'mailto:help@example.test',
     );
     expect(document.body.textContent).not.toContain(credential);
+    expect(document.body.textContent).not.toContain('BookNowTech booking fee');
     expect(window.location.hash).toBe('');
   });
 

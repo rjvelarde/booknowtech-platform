@@ -21,21 +21,26 @@ Do not enable production execution until every placeholder above has an approved
 
 Never paste values into tickets, logs, screenshots, command history, or this runbook.
 
-| Service      | Variable                                   | Kind              | Required state before live execution |
-| ------------ | ------------------------------------------ | ----------------- | ------------------------------------ |
-| API + worker | `STRIPE_SECRET_KEY`                        | secret            | Same approved `sk_live_…` credential |
-| API          | `STRIPE_PUBLISHABLE_KEY`                   | public client key | Matching `pk_live_…` key             |
-| API          | `STRIPE_CONNECT_WEBHOOK_SECRET`            | secret            | Live Connect endpoint secret         |
-| API          | `STRIPE_CONNECT_COUNTRY`                   | non-secret        | `US`                                 |
-| API          | `BOOKNOWTECH_CONNECT_TERMS_VERSION`        | non-secret        | Approved published version           |
-| API          | `BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256`    | integrity hash    | Exact approved terms hash            |
-| API          | `STRIPE_ACCOUNT_READINESS_MAX_AGE_SECONDS` | non-secret        | Exactly `900`                        |
-| API + worker | `BOOKNOWTECH_PAYMENT_TERMS_VERSION`        | non-secret        | Identical approved version           |
-| API + worker | `BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256`    | integrity hash    | Identical approved hash              |
-| API          | `PAYMENT_IP_HASH_SECRET`                   | secret            | Unique environment-specific secret   |
-| API          | `CHECKOUT_RECOVERY_TOKEN_SECRET`           | secret            | Unique environment-specific secret   |
-| API          | `STRIPE_PAYMENTS_FOUNDATION_ENABLED`       | flag              | `true` only for approved onboarding  |
-| API          | `STRIPE_PAYMENT_EXECUTION_ENABLED`         | kill switch       | `false` until final enablement       |
+| Service      | Variable                                   | Kind              | Required state before live execution                               |
+| ------------ | ------------------------------------------ | ----------------- | ------------------------------------------------------------------ |
+| API + worker | `STRIPE_SECRET_KEY`                        | secret            | Same approved `sk_live_…` credential                               |
+| API          | `STRIPE_PUBLISHABLE_KEY`                   | public client key | Matching `pk_live_…` key                                           |
+| API          | `STRIPE_CONNECT_WEBHOOK_SECRET`            | secret            | Live Connect endpoint secret                                       |
+| API          | `STRIPE_CONNECT_COUNTRY`                   | non-secret        | `US`                                                               |
+| API          | `BOOKNOWTECH_CONNECT_TERMS_VERSION`        | non-secret        | Approved published version                                         |
+| API          | `BOOKNOWTECH_CONNECT_TERMS_TEXT_SHA256`    | integrity hash    | Exact approved terms hash                                          |
+| API          | `STRIPE_ACCOUNT_READINESS_MAX_AGE_SECONDS` | non-secret        | Exactly `900`                                                      |
+| API + worker | `BOOKNOWTECH_PAYMENT_TERMS_VERSION`        | non-secret        | `payments-v2`                                                      |
+| API + worker | `BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256`    | integrity hash    | `6f8ce120b1ee45828913d23c7553bf80bb9ef19ad56ce68dc7590a081b6b906b` |
+| API          | `PAYMENT_IP_HASH_SECRET`                   | secret            | Unique environment-specific secret                                 |
+| API          | `CHECKOUT_RECOVERY_TOKEN_SECRET`           | secret            | Unique environment-specific secret                                 |
+| API          | `STRIPE_PAYMENTS_FOUNDATION_ENABLED`       | flag              | `true` only for approved onboarding                                |
+| API          | `STRIPE_PAYMENT_EXECUTION_ENABLED`         | kill switch       | `false` until final enablement                                     |
+
+The authoritative customer artifact is
+`docs/legal/BOOKNOWTECH_PAYMENT_TERMS_paymentsv2.md`. The neutral customer-facing label “Online
+booking fee” changes presentation only; application-fee calculations and internal identifiers are
+unchanged. Historical `payments-v1` acceptance evidence remains valid and must not be rewritten.
 
 ## Public Stripe endpoints and registration
 

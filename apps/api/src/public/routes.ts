@@ -946,9 +946,16 @@ function bookingContextView(tenant: TenantDocument, environment: Environment) {
             stripe_publishable_key: environment.STRIPE_PUBLISHABLE_KEY,
             terms_version: environment.BOOKNOWTECH_PAYMENT_TERMS_VERSION,
             terms_document_sha256: environment.BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256,
+            terms_url: paymentTermsUrl(environment.BOOKNOWTECH_PAYMENT_TERMS_VERSION),
           }
         : null,
   };
+}
+
+function paymentTermsUrl(version: string): string {
+  if (version === 'payments-v1') return '/legal/BOOKNOWTECH_PAYMENT_TERMS_paymentsv1.md';
+  if (version === 'payments-v2') return '/legal/BOOKNOWTECH_PAYMENT_TERMS_paymentsv2.md';
+  throw new Error('unsupported_payment_terms_version');
 }
 
 function publicServiceView(service: ServiceDocument, tenant: TenantDocument) {

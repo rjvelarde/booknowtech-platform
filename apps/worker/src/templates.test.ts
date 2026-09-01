@@ -43,6 +43,22 @@ describe('renderAppointmentEmail', () => {
     expect(unlinked.text).not.toContain('/appointments/manage/');
   });
 
+  it('uses the neutral online booking fee label in HTML and plaintext payment summaries', () => {
+    const result = renderAppointmentEmail('appointment_confirmation', 'BNT-PAID0001', {
+      ...data,
+      currency: 'USD',
+      service_price_minor: 5500,
+      provider_amount_paid_online_minor: 2500,
+      booknowtech_fee_minor: 125,
+      remaining_service_balance_minor: 3000,
+    });
+    expect(result.html).toContain('Online booking fee: $1.25');
+    expect(result.text).toContain('Online booking fee: $1.25');
+    expect(result.html).not.toContain('BookNowTech booking fee');
+    expect(result.text).not.toContain('BookNowTech booking fee');
+    expect(result.html).not.toContain('Mobile Up Tech Inc.');
+  });
+
   it('invites replies and includes configured public contact details', () => {
     const result = renderAppointmentEmail(
       'appointment_confirmation',

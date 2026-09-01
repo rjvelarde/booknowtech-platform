@@ -122,6 +122,7 @@ export interface PublicBookingContextView {
     stripe_publishable_key: string;
     terms_version: string;
     terms_document_sha256: string;
+    terms_url: string;
   } | null;
 }
 

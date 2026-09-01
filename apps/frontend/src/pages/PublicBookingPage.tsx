@@ -576,8 +576,11 @@ function GuestDetailsForm({
         <label className="checkbox-label">
           <input type="checkbox" name="payment_terms_accepted" required />
           <span>
-            I accept the BookNowTech payment terms, including the amount disclosure and that the
-            booking fee is normally non-refundable for a customer cancellation.
+            I accept the{' '}
+            <a href={paymentTerms.terms_url} target="_blank" rel="noreferrer">
+              Payment Terms
+            </a>
+            , including the amount shown and the normally non-refundable online booking fee.
           </span>
         </label>
       ) : null}
