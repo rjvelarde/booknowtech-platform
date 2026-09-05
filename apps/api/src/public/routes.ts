@@ -112,7 +112,7 @@ interface StartsQuery {
   cursor?: string;
 }
 
-interface PublicSettingsBody {
+export interface PublicSettingsBody {
   expected_version: number;
   public_booking_enabled: boolean;
   public_profile: TenantDocument['public_profile'];
@@ -812,6 +812,13 @@ function registerAdministrativeConfiguration(
     async (request, reply) => {
       const context = await requireAdmin(request, reply, store, true, environment);
       if (!context) return;
+      const invalidField = publicSettingsValidationField(
+        request.body,
+        context.tenant!,
+        environment.BOOKING_ROOT_DOMAIN,
+      );
+      if (invalidField)
+        return safeError(reply, 400, 'validation_failed', request.id, { field: invalidField });
       const changes = normalizePublicSettings(
         request.body,
         context.tenant!,
@@ -1337,7 +1344,13 @@ function adminNotFound(reply: FastifyReply, requestId: string) {
   return safeError(reply, 404, 'resource_not_found', requestId);
 }
 
-function safeError(reply: FastifyReply, status: number, code: string, requestId: string) {
+function safeError(
+  reply: FastifyReply,
+  status: number,
+  code: string,
+  requestId: string,
+  details: Record<string, string> = {},
+) {
   return reply
     .header('Cache-Control', 'no-store')
     .status(status)
@@ -1346,6 +1359,7 @@ function safeError(reply: FastifyReply, status: number, code: string, requestId:
         code,
         message: 'The booking request could not be completed.',
         request_id: requestId,
+        ...details,
       },
     });
 }
@@ -1490,6 +1504,43 @@ function normalizePublicSettings(
     },
     appointment_self_service: body.appointment_self_service,
   };
+}
+
+export function publicSettingsValidationField(
+  body: PublicSettingsBody,
+  tenant: TenantDocument,
+  bookingRootDomain: Environment['BOOKING_ROOT_DOMAIN'],
+): string | null {
+  if (!body || typeof body !== 'object') return 'request';
+  if (!Number.isInteger(body.expected_version)) return 'expected_version';
+  const profile = body.public_profile;
+  if (!profile || typeof profile !== 'object') return 'public_profile';
+  const businessName = profile.business_name?.trim();
+  if (!businessName || businessName.length > 120) return 'public_profile.business_name';
+  if (!validNullable(profile.tagline, 160)) return 'public_profile.tagline';
+  if (!validNullable(profile.description, 1000)) return 'public_profile.description';
+  if (!validHttps(profile.logo_url)) return 'public_profile.logo_url';
+  if (profile.primary_color !== null && !/^#[A-Fa-f0-9]{6}$/.test(profile.primary_color))
+    return 'public_profile.primary_color';
+  if (!validHttps(profile.website_url)) return 'public_profile.website_url';
+  if (!validPhone(profile.phone_e164)) return 'public_profile.phone_e164';
+  if (!validEmail(profile.email_normalized)) return 'public_profile.email_normalized';
+  if (!validPolicy(body.booking_policy)) return 'booking_policy';
+  if (!validTerms(body.public_booking_terms)) return 'public_booking_terms';
+  if (!validSelfServicePolicy(body.appointment_self_service, false))
+    return 'appointment_self_service';
+  if (
+    body.public_booking_enabled &&
+    (!tenant.default_timezone ||
+      !tenant.locale ||
+      !tenant.currency ||
+      fallbackTenantSlug(
+        fallbackBookingHostname(tenant.slug, bookingRootDomain) ?? '',
+        bookingRootDomain,
+      ) !== tenant.slug)
+  )
+    return 'public_booking_enabled';
+  return null;
 }
 
 function validTerms(terms: TenantDocument['public_booking_terms']) {
