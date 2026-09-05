@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { InputHTMLAttributes } from 'react';
 
 import {
+  ApiError,
   type AppointmentEmailSettingsView,
   type PublicBookingSettingsView,
   getAppointmentEmailSettings,
@@ -19,7 +20,9 @@ export function PublicBookingSettingsPage({
 }) {
   const [settings, setSettings] = useState<PublicBookingSettingsView | null>(null);
   const [emailSettings, setEmailSettings] = useState<AppointmentEmailSettingsView | null>(null);
-  const [error, setError] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [publicSaveError, setPublicSaveError] = useState<string | null>(null);
+  const [emailSaveError, setEmailSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [emailSaved, setEmailSaved] = useState(false);
   useEffect(() => {
@@ -28,9 +31,9 @@ export function PublicBookingSettingsPage({
         setSettings(publicSettings);
         setEmailSettings(appointmentEmailSettings);
       })
-      .catch(() => setError(true));
+      .catch(() => setLoadError(true));
   }, []);
-  if (error) return <p role="alert">Unable to load public booking settings.</p>;
+  if (loadError) return <p role="alert">Unable to load public booking settings.</p>;
   if (!settings || !emailSettings) return <p>Loading public booking settings…</p>;
   return (
     <section aria-labelledby="public-booking-settings-title">
@@ -45,6 +48,7 @@ export function PublicBookingSettingsPage({
         onSubmit={(event) => {
           event.preventDefault();
           setSaved(false);
+          setPublicSaveError(null);
           const values = new FormData(event.currentTarget);
           void updatePublicBookingSettings(
             {
@@ -84,7 +88,7 @@ export function PublicBookingSettingsPage({
               );
               setSaved(true);
             })
-            .catch(() => setError(true));
+            .catch((reason: unknown) => setPublicSaveError(publicSettingsErrorMessage(reason)));
         }}
       >
         <label className="checkbox-label">
@@ -223,6 +227,7 @@ export function PublicBookingSettingsPage({
             Public booking settings saved.
           </p>
         ) : null}
+        {publicSaveError ? <p role="alert">{publicSaveError}</p> : null}
       </form>
       <h2>Appointment emails</h2>
       <p className="form-note">
@@ -234,6 +239,7 @@ export function PublicBookingSettingsPage({
         onSubmit={(event) => {
           event.preventDefault();
           setEmailSaved(false);
+          setEmailSaveError(null);
           const values = new FormData(event.currentTarget);
           void updateAppointmentEmailSettings(
             {
@@ -249,7 +255,9 @@ export function PublicBookingSettingsPage({
               setSettings((current) => (current ? { ...current, version: next.version } : current));
               setEmailSaved(true);
             })
-            .catch(() => setError(true));
+            .catch(() =>
+              setEmailSaveError('Unable to save appointment email settings. Please try again.'),
+            );
         }}
       >
         <label className="checkbox-label">
@@ -279,9 +287,35 @@ export function PublicBookingSettingsPage({
             Appointment email settings saved.
           </p>
         ) : null}
+        {emailSaveError ? <p role="alert">{emailSaveError}</p> : null}
       </form>
     </section>
   );
+}
+
+export function publicSettingsErrorMessage(reason: unknown): string {
+  if (!(reason instanceof ApiError) || reason.code !== 'validation_failed')
+    return 'Unable to save public booking settings. Please try again.';
+  const field = typeof reason.details?.field === 'string' ? reason.details.field : null;
+  const labels: Record<string, string> = {
+    expected_version: 'the form version',
+    public_profile: 'the public profile',
+    'public_profile.business_name': 'the public business name',
+    'public_profile.tagline': 'the tagline',
+    'public_profile.description': 'the description',
+    'public_profile.logo_url': 'the logo URL',
+    'public_profile.primary_color': 'the primary color',
+    'public_profile.website_url': 'the public website',
+    'public_profile.phone_e164': 'the public phone number',
+    'public_profile.email_normalized': 'the public email',
+    booking_policy: 'the booking policy',
+    public_booking_terms: 'the booking terms',
+    appointment_self_service: 'the appointment self-service settings',
+    public_booking_enabled: 'the publication prerequisites',
+  };
+  return field && labels[field]
+    ? `Unable to save public booking settings. Check ${labels[field]} and try again.`
+    : 'Unable to save public booking settings. Check the entered values and try again.';
 }
 
 function Field(props: { label: string; name: string } & InputHTMLAttributes<HTMLInputElement>) {

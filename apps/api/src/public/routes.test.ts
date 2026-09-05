@@ -12,7 +12,7 @@ import {
 import { buildApplication } from '../app.js';
 import type { PublicPaidBookingOrchestrator } from '../payment/public-orchestrator.js';
 import { StubReadinessProbe, testEnvironment } from '../test-fixtures.js';
-import { publicRequestFingerprint } from './routes.js';
+import { publicRequestFingerprint, publicSettingsValidationField } from './routes.js';
 
 describe('public booking discovery', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -59,6 +59,47 @@ describe('public booking discovery', () => {
     expect(
       publicRequestFingerprint({ ...request, starts_at: '2027-02-02T15:15:00.000Z' }),
     ).not.toBe(fingerprint);
+  });
+
+  it('accepts blank optional public-booking fields and identifies an invalid field safely', () => {
+    const tenant = tenantFixture();
+    const input = {
+      expected_version: tenant.version,
+      public_booking_enabled: false,
+      public_profile: {
+        business_name: 'Maritime Software Tech',
+        description: null,
+        tagline: null,
+        logo_url: null,
+        primary_color: null,
+        website_url: null,
+        phone_e164: null,
+        email_normalized: null,
+      },
+      booking_policy: { minimum_lead_minutes: 120, maximum_advance_days: 90 },
+      public_booking_terms: {
+        version: '1',
+        acknowledgment_label: 'I agree to the booking and cancellation terms.',
+        terms_url: null,
+      },
+      appointment_self_service: {
+        enabled: false,
+        cancellation_cutoff_minutes: 1440,
+        reschedule_cutoff_minutes: 1440,
+      },
+    };
+
+    expect(publicSettingsValidationField(input, tenant, 'booknowtech.com')).toBeNull();
+    expect(
+      publicSettingsValidationField(
+        {
+          ...input,
+          public_profile: { ...input.public_profile, website_url: 'http://example.com' },
+        },
+        tenant,
+        'booknowtech.com',
+      ),
+    ).toBe('public_profile.website_url');
   });
 
   it('returns only approved public fields and supports ETag revalidation', async () => {
