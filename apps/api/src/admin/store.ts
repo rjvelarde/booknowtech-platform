@@ -470,7 +470,8 @@ export interface TenantProvisioningOperationDocument {
   _id: ObjectId;
   public_id: string;
   request_id: string;
-  operation_type: 'create_tenant' | 'set_status' | 'deactivate_internal_qa';
+  operation_type:
+    'create_tenant' | 'set_status' | 'deactivate_internal_qa' | 'reset_owner_password';
   request_fingerprint: string;
   operator_id: string;
   reason: string;

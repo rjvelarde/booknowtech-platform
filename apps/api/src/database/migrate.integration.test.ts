@@ -458,6 +458,15 @@ suite('administrative foundation migration', () => {
     };
     await expect(collection.insertOne(operation)).resolves.toBeDefined();
     await expect(
+      collection.insertOne({
+        ...operation,
+        _id: new ObjectId(),
+        public_id: randomUUID(),
+        request_id: randomUUID(),
+        operation_type: 'reset_owner_password',
+      }),
+    ).resolves.toBeDefined();
+    await expect(
       collection.insertOne({ ...operation, _id: new ObjectId(), public_id: randomUUID() }),
     ).rejects.toThrow();
     await expect(

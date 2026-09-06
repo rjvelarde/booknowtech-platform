@@ -131,6 +131,52 @@ not in source control.
 - [ ] Verify logs and persisted evidence contain no plaintext password or secret.
 - [ ] Do not provision the first customer until production QA evidence is approved.
 
+## Audited tenant-owner password reset
+
+Use this command only for one existing active tenant owner when the permanent password is
+unavailable and the reset is separately approved. It does not create an owner, change a role, or
+alter tenant, booking, hostname, or payment state. Run it only from the target API service's Railway
+console with the standard provisioning approval variables.
+
+First dry-validate the exact target. Supply exactly one tenant selector (`--tenant-id` or
+`--tenant`) and one owner selector (`--owner-id` or `--owner-email`):
+
+```bash
+pnpm --filter @booknowtech/api tenant-provision -- \
+  reset-owner-password \
+  --request-id '<dry-validation-uuid>' \
+  --tenant-id '<tenant-public-uuid>' \
+  --owner-id '<owner-public-uuid>' \
+  --dry-validate
+```
+
+Verify the returned tenant ID, slug, owner ID, normalized owner email, and environment. Dry
+validation does not request or hash a password and does not mutate authentication or session data.
+Use a new request UUID for the approved mutation:
+
+```bash
+PROVISIONING_APPROVED=true \
+PROVISIONING_OPERATOR_ID='<approved-operator-id>' \
+PROVISIONING_REASON='<approved password-reset reason>' \
+pnpm --filter @booknowtech/api tenant-provision -- \
+  reset-owner-password \
+  --request-id '<new-mutation-uuid>' \
+  --tenant-id '<tenant-public-uuid>' \
+  --owner-id '<owner-public-uuid>'
+```
+
+Enter and confirm the temporary password only at the masked TTY prompts. Never put it in command
+arguments, environment variables, tenant JSON, notes, logs, screenshots, or evidence. A successful
+operation stores only its scrypt hash, sets `must_change_password=true`, and revokes every unrevoked
+admin session for that user with `operator_password_reset`. Confirm the result reports zero active
+sessions remaining, then transfer the temporary password through the approved out-of-band channel.
+The owner must immediately complete the existing mandatory first-login password replacement.
+
+Replaying the same mutation UUID for the same resolved tenant and owner returns the existing
+redacted result without prompting or resetting again. Reusing it for another target, operator, or
+reason fails closed. Do not use this command for a non-owner, disabled user, bulk reset, public
+account recovery, or tenant reprovisioning.
+
 ## Migration and deployment
 
 Before enabling the CLI on a target environment, record deployment IDs and run once from the API
