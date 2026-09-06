@@ -45,7 +45,7 @@ afterEach(async () =>
 );
 
 describe('tenant-provision CLI', () => {
-  it('accepts the three bounded commands and never accepts a password argument', () => {
+  it('accepts the bounded commands and never accepts a password argument', () => {
     const id = randomUUID();
     expect(parseArguments(['create', '--request-id', id, '--input', 'tenant.json'])).toMatchObject({
       requestId: id,
@@ -67,6 +67,22 @@ describe('tenant-provision CLI', () => {
     expect(
       parseArguments(['deactivate-internal-qa', '--request-id', id, '--tenant', 'internal-qa']),
     ).toMatchObject({ command: 'deactivate-internal-qa', tenantSlug: 'internal-qa' });
+    expect(
+      parseArguments([
+        'reset-owner-password',
+        '--request-id',
+        id,
+        '--tenant-id',
+        randomUUID(),
+        '--owner-email',
+        ' Owner@Example.Test ',
+        '--dry-validate',
+      ]),
+    ).toMatchObject({
+      command: 'reset-owner-password',
+      ownerEmail: 'owner@example.test',
+      dryValidate: true,
+    });
     expect(() =>
       parseArguments([
         'create',
@@ -87,6 +103,53 @@ describe('tenant-provision CLI', () => {
         'internal-qa',
         '--status',
         'deleted',
+      ]),
+    ).toThrow();
+  });
+
+  it('requires exactly one tenant selector and one owner selector for password reset', () => {
+    const id = randomUUID();
+    const tenantId = randomUUID();
+    const ownerId = randomUUID();
+    const base = ['reset-owner-password', '--request-id', id];
+    expect(() => parseArguments([...base, '--tenant-id', tenantId])).toThrow();
+    expect(() =>
+      parseArguments([
+        ...base,
+        '--tenant-id',
+        tenantId,
+        '--owner-id',
+        ownerId,
+        '--owner-email',
+        'owner@example.test',
+      ]),
+    ).toThrow();
+    expect(() =>
+      parseArguments([
+        ...base,
+        '--tenant-id',
+        tenantId,
+        '--tenant',
+        'tenant',
+        '--owner-id',
+        ownerId,
+      ]),
+    ).toThrow();
+    expect(() =>
+      parseArguments([...base, '--tenant-id', 'not-a-uuid', '--owner-id', ownerId]),
+    ).toThrow();
+    expect(() =>
+      parseArguments([...base, '--tenant', 'tenant', '--owner-email', 'not-an-email']),
+    ).toThrow();
+    expect(() =>
+      parseArguments([
+        ...base,
+        '--tenant',
+        'tenant',
+        '--owner-email',
+        'owner@example.test',
+        '--password',
+        'Never1InArgs',
       ]),
     ).toThrow();
   });
@@ -127,11 +190,17 @@ describe('tenant-provision CLI', () => {
   });
 
   it('immediately converts the temporary password to the existing scrypt format', async () => {
-    const plaintext = 'Temporary-Password-Only-In-Memory';
+    const plaintext = 'Temporary-Password-Only-In-Memory-1';
     const encoded = await hashTemporaryPassword(plaintext);
     expect(encoded).toMatch(/^scrypt\$/u);
     expect(encoded).not.toContain(plaintext);
     await expect(verifyPassword(plaintext, encoded)).resolves.toBe(true);
+  });
+
+  it('enforces replacement-password complexity before hashing a temporary password', async () => {
+    await expect(hashTemporaryPassword('all-lowercase-password')).rejects.toThrow();
+    await expect(hashTemporaryPassword('NO-LOWERCASE-PASSWORD-1')).rejects.toThrow();
+    await expect(hashTemporaryPassword('NoNumberInThisPassword')).rejects.toThrow();
   });
 
   it('reports only safe provisioning failure categories', () => {
@@ -153,6 +222,29 @@ describe('tenant-provision CLI', () => {
     expect(safeProvisioningError(new ProvisioningPersistenceFailure('tenant_insert')).code).toBe(
       'provisioning_tenant_insert_failed',
     );
+  });
+
+  it('rejects an unauthorized reset before connecting or collecting a password', async () => {
+    const clientFactory = vi.fn();
+    const passwordReader = vi.fn();
+    await expect(
+      runProvisioningCli(
+        [
+          'reset-owner-password',
+          '--request-id',
+          randomUUID(),
+          '--tenant',
+          'password-reset-tenant',
+          '--owner-email',
+          'owner@example.test',
+          '--dry-validate',
+        ],
+        { ...environment, PROVISIONING_APPROVED: 'false' },
+        { clientFactory, passwordReader },
+      ),
+    ).rejects.toBeInstanceOf(ProvisioningAuthorizationFailure);
+    expect(clientFactory).not.toHaveBeenCalled();
+    expect(passwordReader).not.toHaveBeenCalled();
   });
 });
 

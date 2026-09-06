@@ -14,7 +14,9 @@ export type ProvisioningConflictCode =
   | 'request_id_mismatch'
   | 'tenant_slug_conflict'
   | 'owner_email_conflict'
-  | 'tenant_designation_conflict';
+  | 'tenant_designation_conflict'
+  | 'tenant_target_conflict'
+  | 'owner_target_conflict';
 
 export class ProvisioningConflict extends Error {
   public constructor(public readonly code: ProvisioningConflictCode) {

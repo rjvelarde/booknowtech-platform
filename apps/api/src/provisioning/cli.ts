@@ -1,8 +1,13 @@
 import { stdin, stdout } from 'node:process';
 import { MongoClient } from 'mongodb';
-import { hashPassword } from '../auth/password.js';
+import { hashPassword, validateReplacementPassword } from '../auth/password.js';
 import { authorizeProvisioning } from './guard.js';
 import { readAndValidateProvisioningInput } from './input.js';
+import {
+  type OwnerPasswordResetSelectors,
+  prepareOwnerPasswordReset,
+  resetOwnerPassword,
+} from './password-reset-service.js';
 import {
   ProvisioningConflict,
   ProvisioningPersistenceFailure,
@@ -41,11 +46,14 @@ export class ProvisioningInputFailure extends Error {
 }
 
 interface CommandArguments {
-  command: 'create' | 'set-status' | 'deactivate-internal-qa';
+  command: 'create' | 'set-status' | 'deactivate-internal-qa' | 'reset-owner-password';
   requestId: string;
   inputPath?: string;
   tenantSlug?: string;
   status?: TenantStatus;
+  tenantId?: string;
+  ownerId?: string;
+  ownerEmail?: string;
   dryValidate: boolean;
 }
 
@@ -81,6 +89,58 @@ export async function runProvisioningCli(
         await client.connect();
       } catch {
         throw new ProvisioningConnectionFailure();
+      }
+      if (parsed.command === 'reset-owner-password') {
+        const selectors: OwnerPasswordResetSelectors = {
+          ...(parsed.tenantId ? { tenantId: parsed.tenantId } : {}),
+          ...(parsed.tenantSlug ? { tenantSlug: parsed.tenantSlug } : {}),
+          ...(parsed.ownerId ? { ownerId: parsed.ownerId } : {}),
+          ...(parsed.ownerEmail ? { ownerEmail: parsed.ownerEmail } : {}),
+        };
+        const preparation = await prepareOwnerPasswordReset({
+          database: client.db(authorization.environment.MONGODB_DATABASE),
+          authorization,
+          requestId: parsed.requestId,
+          selectors,
+        });
+        if (parsed.dryValidate) {
+          write(
+            JSON.stringify({
+              outcome: preparation.replay ? 'replayed' : 'validated',
+              request_id: parsed.requestId,
+              tenant_public_id: preparation.target.tenantPublicId,
+              tenant_slug: preparation.target.tenantSlug,
+              owner_user_public_id: preparation.target.ownerPublicId,
+              owner_email: preparation.target.ownerEmail,
+              environment: authorization.environment.ENVIRONMENT_ID,
+            }),
+          );
+          return;
+        }
+        if (preparation.replay) {
+          write(JSON.stringify(preparation.replay));
+          return;
+        }
+        const readPassword = dependencies.passwordReader ?? readConfirmedMaskedPassword;
+        let passwordHash: string;
+        try {
+          passwordHash = await hashTemporaryPassword(await readPassword());
+        } catch {
+          throw new ProvisioningTemporaryPasswordFailure();
+        }
+        write(
+          JSON.stringify(
+            await resetOwnerPassword({
+              client,
+              database: client.db(authorization.environment.MONGODB_DATABASE),
+              authorization,
+              requestId: parsed.requestId,
+              preparation,
+              passwordHash,
+            }),
+          ),
+        );
+        return;
       }
       const common = {
         client,
@@ -158,18 +218,29 @@ export function parseArguments(arguments_: string[]): CommandArguments {
   // pnpm forwards an optional separator to the script when invoking this command.
   if (arguments_[0] === '--') arguments_ = arguments_.slice(1);
   const command = arguments_[0];
-  if (command !== 'create' && command !== 'set-status' && command !== 'deactivate-internal-qa')
+  if (
+    command !== 'create' &&
+    command !== 'set-status' &&
+    command !== 'deactivate-internal-qa' &&
+    command !== 'reset-owner-password'
+  )
     throw new Error('Invalid provisioning command');
   let requestId: string | undefined;
   let inputPath: string | undefined;
   let dryValidate = false;
   let tenantSlug: string | undefined;
   let status: TenantStatus | undefined;
+  let tenantId: string | undefined;
+  let ownerId: string | undefined;
+  let ownerEmail: string | undefined;
   for (let index = 1; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (argument === '--request-id') requestId = arguments_[++index];
     else if (argument === '--input') inputPath = arguments_[++index];
     else if (argument === '--tenant') tenantSlug = arguments_[++index];
+    else if (argument === '--tenant-id') tenantId = arguments_[++index];
+    else if (argument === '--owner-id') ownerId = arguments_[++index];
+    else if (argument === '--owner-email') ownerEmail = normalizeOwnerEmail(arguments_[++index]);
     else if (argument === '--status') status = arguments_[++index] as TenantStatus;
     else if (argument === '--dry-validate') dryValidate = true;
     else throw new Error('Invalid provisioning arguments');
@@ -188,6 +259,24 @@ export function parseArguments(arguments_: string[]): CommandArguments {
   )
     throw new Error('Invalid provisioning arguments');
   if (
+    command === 'reset-owner-password' &&
+    ((!tenantSlug && !tenantId) ||
+      (tenantSlug && tenantId) ||
+      (!ownerId && !ownerEmail) ||
+      (ownerId && ownerEmail) ||
+      (tenantSlug !== undefined && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(tenantSlug)) ||
+      (tenantId !== undefined && !isUuid(tenantId)) ||
+      (ownerId !== undefined && !isUuid(ownerId)) ||
+      inputPath ||
+      status)
+  )
+    throw new Error('Invalid provisioning arguments');
+  if (
+    command !== 'reset-owner-password' &&
+    (tenantId !== undefined || ownerId !== undefined || ownerEmail !== undefined)
+  )
+    throw new Error('Invalid provisioning arguments');
+  if (
     command === 'deactivate-internal-qa' &&
     (!tenantSlug ||
       !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(tenantSlug) ||
@@ -202,8 +291,19 @@ export function parseArguments(arguments_: string[]): CommandArguments {
     ...(inputPath ? { inputPath } : {}),
     ...(tenantSlug ? { tenantSlug } : {}),
     ...(status ? { status } : {}),
+    ...(tenantId ? { tenantId } : {}),
+    ...(ownerId ? { ownerId } : {}),
+    ...(ownerEmail ? { ownerEmail } : {}),
     dryValidate,
   };
+}
+
+function normalizeOwnerEmail(value: string | undefined): string {
+  if (!value) throw new Error('Invalid provisioning arguments');
+  const normalized = value.trim().toLowerCase();
+  if (normalized.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(normalized))
+    throw new Error('Invalid provisioning arguments');
+  return normalized;
 }
 
 async function readConfirmedMaskedPassword(): Promise<string> {
@@ -250,7 +350,7 @@ function readMaskedLine(prompt: string): Promise<string> {
 }
 
 function validateTemporaryPassword(value: string): void {
-  if (value.length < 16 || value.length > 256)
+  if (!validateReplacementPassword(value))
     throw new Error('Temporary password does not meet requirements');
 }
 

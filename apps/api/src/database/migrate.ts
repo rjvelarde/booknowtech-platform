@@ -1883,7 +1883,7 @@ const validators: Record<string, Document> = {
         public_id: { bsonType: 'string', pattern: UUID_PATTERN },
         request_id: { bsonType: 'string', pattern: UUID_PATTERN },
         operation_type: {
-          enum: ['create_tenant', 'set_status', 'deactivate_internal_qa'],
+          enum: ['create_tenant', 'set_status', 'deactivate_internal_qa', 'reset_owner_password'],
         },
         request_fingerprint: { bsonType: 'string', pattern: '^[a-f0-9]{64}$' },
         operator_id: {
