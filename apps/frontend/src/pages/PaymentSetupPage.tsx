@@ -32,6 +32,10 @@ export function PaymentSetupPage({
       <p className="eyebrow">Stripe Connect foundation</p>
       <h1 id="payment-setup-title">Payment account setup</h1>
       <p className="form-note">
+        Stripe is only required to collect online payments. You can offer appointments without
+        setting up a payment account.
+      </p>
+      <p className="form-note">
         This setup connects your business with Stripe. It does not enable paid booking or move
         money.
       </p>

@@ -18,7 +18,10 @@ import { PROVISIONAL_APPOINTMENT_STATUSES } from '../admin/store.js';
 import { dateRange, generateSlots, localToUtc, previewDay } from '../availability/routes.js';
 import { authenticateAdminMutation, authenticateAdminRequest } from '../auth/routes.js';
 import type { Environment } from '../config.js';
-import type { PublicPaidBookingOrchestrator } from '../payment/public-orchestrator.js';
+import {
+  PaidBookingError,
+  type PublicPaidBookingOrchestrator,
+} from '../payment/public-orchestrator.js';
 import { clearRecoveryCookie, recoveryCookie, recoveryCookieToken } from '../payment/recovery.js';
 import { TenantHostResolver } from './tenant-host-resolver.js';
 
@@ -189,9 +192,7 @@ export function registerPublicBookingRoutes(
         items: await Promise.all(
           services.map(async (service) => ({
             ...publicServiceView(service, tenant),
-            payment_mode: paidBooking
-              ? await paidBooking.paymentMode(tenant._id, service._id)
-              : 'none',
+            payment_mode: paidBooking ? await paidBooking.paymentMode(tenant._id, service) : 'none',
           })),
         ),
       });
@@ -403,7 +404,7 @@ export function registerPublicBookingRoutes(
       );
       if (!initialSubject) return safeResourceNotFound(reply, request.id);
       if (paidBooking) {
-        const paymentMode = await paidBooking.paymentMode(tenant._id, initialService._id);
+        const paymentMode = await paidBooking.paymentMode(tenant._id, initialService);
         if (paymentMode !== 'none') {
           try {
             const payment = await paidBooking.create({
@@ -469,6 +470,13 @@ export function registerPublicBookingRoutes(
               session,
             );
             if (existing) {
+              // A prior paid hold must never become an unpaid confirmation on replay.
+              if (
+                PROVISIONAL_APPOINTMENT_STATUSES.includes(
+                  existing.status as (typeof PROVISIONAL_APPOINTMENT_STATUSES)[number],
+                )
+              )
+                throw new PublicBookingError(409, 'payment_attempt_stale');
               if (existing.public_submission?.request_fingerprint !== fingerprint)
                 throw new PublicBookingError(409, 'idempotency_key_reused');
               return {
@@ -494,7 +502,7 @@ export function registerPublicBookingRoutes(
             if (!service || service.status !== 'active' || !service.publicly_bookable)
               throw new PublicBookingError(404, 'public_booking_not_found');
             if (paidBooking)
-              await paidBooking.assertUnpaidMode(currentTenant._id, service._id, session);
+              await paidBooking.assertUnpaidMode(currentTenant._id, service, session);
             if (
               !provider ||
               provider.status !== 'active' ||
@@ -630,10 +638,16 @@ export function registerPublicBookingRoutes(
             ),
           );
       } catch (reason) {
-        if (reason instanceof PublicBookingError)
+        if (reason instanceof PublicBookingError || reason instanceof PaidBookingError)
           return safeError(reply, reason.status, reason.code, request.id);
         const afterRace = await store.getPublicAppointmentByIdempotency(tenant._id, keyHash);
-        if (afterRace && afterRace.public_submission?.request_fingerprint === fingerprint) {
+        if (
+          afterRace &&
+          !PROVISIONAL_APPOINTMENT_STATUSES.includes(
+            afterRace.status as (typeof PROVISIONAL_APPOINTMENT_STATUSES)[number],
+          ) &&
+          afterRace.public_submission?.request_fingerprint === fingerprint
+        ) {
           const replayProvider = await store.getProviderById(tenant._id, afterRace.provider_id);
           return reply
             .status(200)

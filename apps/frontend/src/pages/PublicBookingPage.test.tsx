@@ -11,151 +11,179 @@ describe('PublicBookingPage', () => {
     window.history.replaceState({}, '', '/book');
   });
 
-  it('reviews and creates a public appointment with an accessible confirmation', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse(200, {
-          data: {
-            business: {
-              public_id: 'tenant',
-              name: 'Brazilian Wax Demo',
-              description: 'Professional appointment services.',
-              tagline: null,
-              logo_url: null,
-              primary_color: '#176CAB',
-              website_url: null,
-              phone: null,
-              email: null,
-            },
-            timezone: 'America/New_York',
-            locale: 'en-US',
-            currency: 'USD',
-            booking_terms: {
-              version: 'test-v1',
-              acknowledgment_label: 'I agree to the booking terms.',
-              terms_url: null,
-            },
-            payment_checkout: {
-              stripe_publishable_key: 'pk_test_synthetic',
-              terms_version: 'payments-v2',
-              terms_document_sha256: 'c'.repeat(64),
-              terms_url: '/legal/BOOKNOWTECH_PAYMENT_TERMS_paymentsv2.md',
-            },
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse(200, {
-          data: {
-            items: [
-              {
-                public_id: 'wax',
-                name: 'Brazilian Wax',
-                description: null,
-                delivery_mode: 'provider_location',
-                duration_minutes: 30,
-                base_price_minor: 5500,
-                booking_fee_minor: 125,
-                currency: 'USD',
-                policy: { minimum_lead_minutes: 120, maximum_advance_days: 90 },
-                payment_mode: 'fixed_deposit',
+  it.each(['paid', 'zero-disabled', 'zero-enabled'])(
+    'reviews and confirms %s bookings with appropriate disclosure',
+    async (scenario) => {
+      const zero = scenario !== 'paid';
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse(200, {
+            data: {
+              business: {
+                public_id: 'tenant',
+                name: 'Brazilian Wax Demo',
+                description: 'Professional appointment services.',
+                tagline: null,
+                logo_url: null,
+                primary_color: '#176CAB',
+                website_url: null,
+                phone: null,
+                email: null,
               },
-            ],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse(200, {
-          data: {
-            service: { public_id: 'wax', name: 'Brazilian Wax' },
-            items: [{ public_id: 'lisa', display_name: 'Lisa', bio: null, photo_url: null }],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse(200, {
-          data: {
-            timezone: 'America/New_York',
-            items: [
-              {
-                starts_at: '2026-08-03T13:00:00.000Z',
-                ends_at: '2026-08-03T13:30:00.000Z',
-                local_start: '2026-08-03T09:00:00-04:00',
-                timezone: 'America/New_York',
+              timezone: 'America/New_York',
+              locale: 'en-US',
+              currency: 'USD',
+              booking_terms: {
+                version: 'test-v1',
+                acknowledgment_label: 'I agree to the booking terms.',
+                terms_url: null,
               },
-            ],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse(201, {
-          data: {
-            appointment_reference: 'BNT-PUBLIC01',
-            status: 'scheduled',
-            business: { name: 'Brazilian Wax Demo' },
-            service: { name: 'Brazilian Wax', duration_minutes: 30 },
-            provider: { display_name: 'Lisa', photo_url: null },
-            starts_at: '2026-08-03T13:00:00.000Z',
-            ends_at: '2026-08-03T13:30:00.000Z',
-            local_start: '2026-08-03T09:00:00-04:00',
-            timezone: 'America/New_York',
-            location_mode: 'provider_location',
-            replayed: false,
-          },
+              payment_checkout:
+                scenario === 'zero-disabled'
+                  ? null
+                  : {
+                      stripe_publishable_key: 'pk_test_synthetic',
+                      terms_version: 'payments-v2',
+                      terms_document_sha256: 'c'.repeat(64),
+                      terms_url: '/legal/BOOKNOWTECH_PAYMENT_TERMS_paymentsv2.md',
+                    },
+            },
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse(200, {
+            data: {
+              items: [
+                {
+                  public_id: 'wax',
+                  name: 'Brazilian Wax',
+                  description: null,
+                  delivery_mode: 'provider_location',
+                  duration_minutes: 30,
+                  base_price_minor: zero ? 0 : 5500,
+                  booking_fee_minor: zero ? 0 : 125,
+                  currency: 'USD',
+                  policy: { minimum_lead_minutes: 120, maximum_advance_days: 90 },
+                  payment_mode: zero ? 'none' : 'fixed_deposit',
+                },
+              ],
+            },
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse(200, {
+            data: {
+              service: { public_id: 'wax', name: 'Brazilian Wax' },
+              items: [{ public_id: 'lisa', display_name: 'Lisa', bio: null, photo_url: null }],
+            },
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse(200, {
+            data: {
+              timezone: 'America/New_York',
+              items: [
+                {
+                  starts_at: '2026-08-03T13:00:00.000Z',
+                  ends_at: '2026-08-03T13:30:00.000Z',
+                  local_start: '2026-08-03T09:00:00-04:00',
+                  timezone: 'America/New_York',
+                },
+              ],
+            },
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse(201, {
+            data: {
+              appointment_reference: 'BNT-PUBLIC01',
+              status: 'scheduled',
+              business: { name: 'Brazilian Wax Demo' },
+              service: { name: 'Brazilian Wax', duration_minutes: 30 },
+              provider: { display_name: 'Lisa', photo_url: null },
+              starts_at: '2026-08-03T13:00:00.000Z',
+              ends_at: '2026-08-03T13:30:00.000Z',
+              local_start: '2026-08-03T09:00:00-04:00',
+              timezone: 'America/New_York',
+              location_mode: 'provider_location',
+              replayed: false,
+            },
+          }),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      render(<PublicBookingPage />);
+      expect(
+        await screen.findByRole('heading', { name: 'Brazilian Wax Demo' }),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /Brazilian Wax/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Lisa' }));
+      fireEvent.change(screen.getByLabelText('Appointment date'), {
+        target: { value: '2026-08-03' },
+      });
+      fireEvent.click(await screen.findByRole('button', { name: '9:00 AM' }));
+
+      fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Taylor' } });
+      fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Guest' } });
+      fireEvent.change(screen.getByLabelText('Email'), {
+        target: { value: 'taylor@example.test' },
+      });
+      fireEvent.change(screen.getByLabelText('Mobile phone'), {
+        target: { value: '(843) 555-0104' },
+      });
+      const checkboxes = screen.getAllByRole('checkbox');
+      expect(checkboxes).toHaveLength(zero ? 1 : 2);
+      fireEvent.click(checkboxes[0]!);
+      if (!zero) {
+        fireEvent.click(checkboxes[1]!);
+        expect(screen.getByRole('link', { name: 'Payment Terms' })).toHaveAttribute(
+          'href',
+          '/legal/BOOKNOWTECH_PAYMENT_TERMS_paymentsv2.md',
+        );
+      } else {
+        expect(screen.queryByText(/Payment Terms/)).not.toBeInTheDocument();
+        expect(document.body.textContent).not.toMatch(
+          /\$|\bfree\b|stripe|booking fee|card checkout/i,
+        );
+      }
+      fireEvent.click(screen.getByRole('button', { name: 'Review appointment' }));
+      if (zero)
+        expect(document.body.textContent).not.toMatch(
+          /\$|\bfree\b|stripe|booking fee|card checkout/i,
+        );
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: zero ? 'Book appointment' : 'Continue to secure payment',
         }),
       );
-    vi.stubGlobal('fetch', fetchMock);
 
-    render(<PublicBookingPage />);
-    expect(await screen.findByRole('heading', { name: 'Brazilian Wax Demo' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Brazilian Wax/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Lisa' }));
-    fireEvent.change(screen.getByLabelText('Appointment date'), {
-      target: { value: '2026-08-03' },
-    });
-    fireEvent.click(await screen.findByRole('button', { name: '9:00 AM' }));
-
-    fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Taylor' } });
-    fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Guest' } });
-    fireEvent.change(screen.getByLabelText('Email'), {
-      target: { value: 'taylor@example.test' },
-    });
-    fireEvent.change(screen.getByLabelText('Mobile phone'), {
-      target: { value: '(843) 555-0104' },
-    });
-    const checkboxes = screen.getAllByRole('checkbox');
-    expect(checkboxes).toHaveLength(2);
-    fireEvent.click(checkboxes[0]!);
-    fireEvent.click(checkboxes[1]!);
-    expect(screen.getByRole('link', { name: 'Payment Terms' })).toHaveAttribute(
-      'href',
-      '/legal/BOOKNOWTECH_PAYMENT_TERMS_paymentsv2.md',
-    );
-    expect(checkboxes[1]!.closest('label')).toHaveTextContent(
-      'I accept the Payment Terms, including the amount shown and the normally non-refundable online booking fee.',
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Review appointment' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Continue to secure payment' }));
-
-    expect(await screen.findByRole('heading', { name: 'You’re booked!' })).toBeInTheDocument();
-    expect(screen.getByText(/BNT-PUBLIC01/)).toBeInTheDocument();
-    expect(screen.getAllByText('✓ Selected')).toHaveLength(3);
-    expect(screen.queryByText('Powered by BookNowTech')).not.toBeInTheDocument();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
-    expect(fetchMock.mock.calls.at(-1)?.[1]?.method).toBe('POST');
-    expect(fetchMock.mock.calls.at(-1)?.[1]?.headers).toMatchObject({
-      'Idempotency-Key': expect.any(String),
-    });
-    expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
-      payment_terms: {
-        version: 'payments-v2',
-        document_sha256: 'c'.repeat(64),
-        accepted: true,
-      },
-    });
-    expect(screen.queryByText(/Any available provider/i)).not.toBeInTheDocument();
-  });
+      expect(await screen.findByRole('heading', { name: 'You’re booked!' })).toBeInTheDocument();
+      expect(screen.getByText(/BNT-PUBLIC01/)).toBeInTheDocument();
+      expect(screen.getAllByText('✓ Selected')).toHaveLength(3);
+      expect(screen.queryByText('Powered by BookNowTech')).not.toBeInTheDocument();
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
+      expect(fetchMock.mock.calls.at(-1)?.[1]?.method).toBe('POST');
+      expect(fetchMock.mock.calls.at(-1)?.[1]?.headers).toMatchObject({
+        'Idempotency-Key': expect.any(String),
+      });
+      const submitted = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body));
+      if (zero) {
+        expect(submitted).not.toHaveProperty('payment_terms');
+        expect(document.body.textContent).not.toMatch(
+          /\$|\bfree\b|stripe|booking fee|card checkout/i,
+        );
+      } else
+        expect(submitted).toMatchObject({
+          payment_terms: {
+            version: 'payments-v2',
+            document_sha256: 'c'.repeat(64),
+            accepted: true,
+          },
+        });
+      expect(screen.queryByText(/Any available provider/i)).not.toBeInTheDocument();
+    },
+  );
 
   it('shows provider initials and a clear empty-time state', async () => {
     const fetchMock = vi

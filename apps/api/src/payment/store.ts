@@ -550,6 +550,17 @@ export class PaymentFoundationStore {
     );
   }
 
+  public servicePaymentConfiguration(
+    tenantId: ObjectId,
+    serviceId: ObjectId,
+    session?: ClientSession,
+  ) {
+    return this.serviceActive.findOne(
+      { tenant_id: tenantId, service_id: serviceId },
+      session ? { session } : undefined,
+    );
+  }
+
   public async executionSnapshot(tenantId: ObjectId, serviceId: ObjectId, session?: ClientSession) {
     const options = session ? { session } : undefined;
     const [tenantSetting, serviceConfiguration, fee, account] = await Promise.all([

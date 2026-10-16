@@ -156,7 +156,10 @@ export function PublicBookingPage() {
               >
                 <strong className="public-choice-title">{item.name}</strong>
                 <span className="public-choice-detail">
-                  {item.duration_minutes} minutes · {money(item.base_price_minor, item.currency)}
+                  {item.duration_minutes} minutes
+                  {item.base_price_minor > 0
+                    ? ` · ${money(item.base_price_minor, item.currency)}`
+                    : ''}
                 </span>
                 {service?.public_id === item.public_id ? <SelectedBadge /> : null}
               </button>
@@ -285,8 +288,10 @@ export function PublicBookingPage() {
               })}
             </p>
             <p className="public-summary-price">
-              {service.duration_minutes} minutes ·{' '}
-              {money(service.base_price_minor, service.currency)}
+              {service.duration_minutes} minutes
+              {service.base_price_minor > 0
+                ? ` · ${money(service.base_price_minor, service.currency)}`
+                : ''}
             </p>
             {review ? (
               <div className="public-review-details">
@@ -630,6 +635,14 @@ function ConfirmationCard({ confirmation }: { confirmation: PublicAppointmentCon
           timeStyle: 'short',
           timeZone: confirmation.timezone,
         })}
+      </p>
+      <p>
+        Location:{' '}
+        {confirmation.location_mode === 'provider_location'
+          ? 'At the business location'
+          : confirmation.location_mode === 'customer_location'
+            ? 'At your location'
+            : 'Virtual appointment'}
       </p>
       <p className="appointment-reference">
         Reference: <strong>{confirmation.appointment_reference}</strong>

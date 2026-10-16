@@ -7,6 +7,7 @@ import {
   authoritativeAttemptChanged,
   calculatePaymentAmounts,
   createPaymentTermsEvidence,
+  effectivePaymentMode,
   hashPaymentIdempotencyKey,
   normalizeServicePaymentConfiguration,
   paymentAttemptFingerprint,
@@ -267,5 +268,35 @@ describe('PR 14B.1 pure state machine', () => {
         event: 'payment_succeeded',
       }),
     ).toMatchObject({ attemptState: 'succeeded', appointmentStatus: 'scheduled', changed: false });
+  });
+});
+
+describe('effective online collection mode', () => {
+  it.each(['none', 'full', 'fixed_deposit'] as const)(
+    'bypasses stale %s settings for a zero-priced service',
+    (paymentMode) => {
+      expect(
+        effectivePaymentMode({ servicePriceMinor: 0, paymentMode, fixedDepositMinor: 2500 }),
+      ).toBe('none');
+    },
+  );
+  it('preserves positive full/deposit collection and existing off-platform settlement', () => {
+    expect(effectivePaymentMode({ servicePriceMinor: 10000, paymentMode: 'full' })).toBe('full');
+    expect(
+      effectivePaymentMode({
+        servicePriceMinor: 10000,
+        paymentMode: 'fixed_deposit',
+        fixedDepositMinor: 2500,
+      }),
+    ).toBe('fixed_deposit');
+    expect(
+      effectivePaymentMode({
+        servicePriceMinor: 10000,
+        paymentMode: 'fixed_deposit',
+        fixedDepositMinor: 0,
+      }),
+    ).toBe('none');
+    expect(effectivePaymentMode({ servicePriceMinor: 10000 })).toBe('none');
+    expect(() => effectivePaymentMode({ servicePriceMinor: -1 })).toThrow();
   });
 });
