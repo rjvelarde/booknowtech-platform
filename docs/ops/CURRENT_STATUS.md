@@ -16,11 +16,11 @@ Evidence cutoff: October 18, 2026 (America/New_York). This is operational docume
 - Starting HEAD: `65641a6e8a1716fb9239fc640d1909ac09465672` (PR #42 merge). Starting worktree clean.
 - Railway project: `4ba68f71-06f3-4217-9a18-5eae5505cbf3`; production has three separate services. Service inventory reports each SUCCESS, not stopped, with one running replica.
 
-| Production service | Service ID | Current deployment ID | Commit SHA |
-| --- | --- | --- | --- |
-| Frontend | `1d15a17a-9ef6-40a5-a028-109cc3024a11` | `188d034f-5283-4804-8d33-046bbb8ca050` | `65641a6e8a1716fb9239fc640d1909ac09465672` |
-| API | `cc5a7228-d9b3-44a7-8f29-d73ae1c28f05` | `6dedf2f8-8b80-4daa-91db-0b997545abcf` | `65641a6e8a1716fb9239fc640d1909ac09465672` |
-| Worker | `82b12d16-dbb8-4026-99b3-fc420799e454` | `dde0ba39-362b-4724-b59e-7f5d660a5787` | `65641a6e8a1716fb9239fc640d1909ac09465672` |
+| Production service | Service ID                             | Current deployment ID                  | Commit SHA                                 |
+| ------------------ | -------------------------------------- | -------------------------------------- | ------------------------------------------ |
+| Frontend           | `1d15a17a-9ef6-40a5-a028-109cc3024a11` | `188d034f-5283-4804-8d33-046bbb8ca050` | `65641a6e8a1716fb9239fc640d1909ac09465672` |
+| API                | `cc5a7228-d9b3-44a7-8f29-d73ae1c28f05` | `6dedf2f8-8b80-4daa-91db-0b997545abcf` | `65641a6e8a1716fb9239fc640d1909ac09465672` |
+| Worker             | `82b12d16-dbb8-4026-99b3-fc420799e454` | `dde0ba39-362b-4724-b59e-7f5d660a5787` | `65641a6e8a1716fb9239fc640d1909ac09465672` |
 
 SHA evidence: `railway deployment list` for each service, production, limit 1; status and commitHash agree. This proves deployment metadata, not current authenticated monitoring health or worker heartbeat freshness.
 
@@ -32,9 +32,9 @@ Verified source contract: tenant-scoped Stripe Express associations; direct conn
 
 Canonical repository artifacts, SHA-256 verified this pass:
 
-| Purpose | Artifact | Version | SHA-256 |
-| --- | --- | --- | --- |
-| Business Connect acceptance | [Connect terms](../legal/BOOKNOWTECH_CONNECT_TERMS_connect-v1.md) | `connect-v1` | `b073da2fdad1052fe52a69fddcf418c4022f0fcd94fbdf4875803bbb4daedb3d` |
+| Purpose                     | Artifact                                                          | Version       | SHA-256                                                            |
+| --------------------------- | ----------------------------------------------------------------- | ------------- | ------------------------------------------------------------------ |
+| Business Connect acceptance | [Connect terms](../legal/BOOKNOWTECH_CONNECT_TERMS_connect-v1.md) | `connect-v1`  | `b073da2fdad1052fe52a69fddcf418c4022f0fcd94fbdf4875803bbb4daedb3d` |
 | Customer payment acceptance | [Payment terms](../legal/BOOKNOWTECH_PAYMENT_TERMS_paymentsv2.md) | `payments-v2` | `6f8ce120b1ee45828913d23c7553bf80bb9ef19ad56ce68dc7590a081b6b906b` |
 
 Mobile Up Tech Inc. operates BookNowTech. Historical `payments-v1` acceptances remain preserved. Stripe's own onboarding terms are distinct from BookNowTech Connect acceptance. Current production legal configuration was not re-read this pass.
@@ -71,15 +71,15 @@ Proposed isolation design, not implemented/approved by this handoff: exact revie
 
 GitHub state independently queried October 18; PRs #36–42 are MERGED:
 
-| PR | Delivered scope |
-| --- | --- |
-| #36 | PR 14B.4 signed payment finalization |
-| #37 | PR 14B.5 payment expiry and reconciliation |
-| #38 | PR 14B.6 production payment enablement controls |
+| PR  | Delivered scope                                        |
+| --- | ------------------------------------------------------ |
+| #36 | PR 14B.4 signed payment finalization                   |
+| #37 | PR 14B.5 payment expiry and reconciliation             |
+| #38 | PR 14B.6 production payment enablement controls        |
 | #39 | PR 14B.7 production Stripe readiness/webhook alignment |
-| #40 | PR 14B.8 white-label payment presentation |
-| #41 | Public booking settings validation feedback |
-| #42 | Audited tenant-owner password reset |
+| #40 | PR 14B.8 white-label payment presentation              |
+| #41 | Public booking settings validation feedback            |
+| #42 | Audited tenant-owner password reset                    |
 
 [PR #43](https://github.com/rjvelarde/booknowtech-platform/pull/43), zero-price bookings without Connect, remains OPEN. Historical October 16 staging evidence for `5872e35822eda233d0dde4c1ed058a407990f143` reports 516 CI tests, successful three-service staging deployment, booking/idempotency/email checks and zero new financial artifacts. This is not evidence of a production release. Its Fastify/security updates are not on the production SHA. Historical audit reported no high/critical findings on that feature build and five moderate entries requiring disposition; current audit/CI/PR head were not rerun here. Staging also had a separate historical payment manual-review/finalization monitoring blocker; do not conflate it with the production external-account event.
 
