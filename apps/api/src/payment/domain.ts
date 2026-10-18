@@ -57,6 +57,22 @@ export function normalizeServicePaymentConfiguration(input: {
   return { paymentMode: 'fixed_deposit', fixedDepositMinor: deposit };
 }
 
+/** Online collection only: `none` preserves existing off-platform settlement.
+ * Zero-priced services never collect a fee-only payment, even with stale paid settings.
+ */
+export function effectivePaymentMode(input: {
+  servicePriceMinor: number;
+  paymentMode?: PaymentMode;
+  fixedDepositMinor?: number | null;
+}): PaymentMode {
+  assertMoney(input.servicePriceMinor, 'service_price_minor');
+  if (input.servicePriceMinor === 0) return 'none';
+  return normalizeServicePaymentConfiguration({
+    ...input,
+    paymentMode: input.paymentMode ?? 'none',
+  }).paymentMode;
+}
+
 export interface PaymentAmounts {
   servicePriceMinor: number;
   paymentMode: 'fixed_deposit' | 'full';

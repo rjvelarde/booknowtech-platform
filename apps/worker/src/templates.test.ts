@@ -90,3 +90,35 @@ describe('renderAppointmentEmail', () => {
     expect(result.text).not.toContain('Questions?');
   });
 });
+
+describe('appointment emails without payment', () => {
+  it.each([
+    'appointment_confirmation',
+    'appointment_rescheduled',
+    'appointment_cancelled',
+  ] as const)('omits monetary information in %s for absent or all-zero amounts', (type) => {
+    for (const amounts of [
+      {},
+      {
+        currency: 'USD' as const,
+        service_price_minor: 0,
+        provider_amount_paid_online_minor: 0,
+        booknowtech_fee_minor: 0,
+        remaining_service_balance_minor: 0,
+      },
+    ]) {
+      const result = renderAppointmentEmail(type, 'BNT-TOUR', {
+        ...data,
+        service_name: 'Venue Tour',
+        ...amounts,
+      });
+      for (const content of [result.html, result.text]) {
+        expect(content).toContain('Venue Tour');
+        expect(content).toContain('BNT-TOUR');
+        expect(content).not.toMatch(
+          /\$|\bfree\b|stripe|payment|booking fee|service price|paid online|balance/i,
+        );
+      }
+    }
+  });
+});

@@ -19,6 +19,7 @@ import {
 import {
   calculatePaymentAmounts,
   createPaymentTermsEvidence,
+  effectivePaymentMode,
   hashPaymentIdempotencyKey,
   paymentAttemptFingerprint,
 } from './domain.js';
@@ -58,22 +59,32 @@ export class PublicPaidBookingOrchestrator {
     private readonly readiness: StripeAccountReadinessService | null = null,
   ) {}
 
-  public async paymentMode(tenantId: TenantDocument['_id'], serviceId: ServiceDocument['_id']) {
-    return (
-      (await this.payments.executionSnapshot(tenantId, serviceId)).serviceConfiguration
-        ?.payment_mode ?? 'none'
+  public async paymentMode(
+    tenantId: TenantDocument['_id'],
+    service: Pick<ServiceDocument, '_id' | 'base_price_minor'>,
+    session?: ClientSession,
+  ) {
+    // No Connect, fee, execution-setting, or Stripe lookup is needed for a zero total.
+    if (service.base_price_minor === 0) return 'none';
+    const configuration = await this.payments.servicePaymentConfiguration(
+      tenantId,
+      service._id,
+      session,
     );
+    return effectivePaymentMode({
+      servicePriceMinor: service.base_price_minor,
+      paymentMode: configuration?.payment_mode ?? 'none',
+      fixedDepositMinor: configuration?.fixed_deposit_minor ?? null,
+    });
   }
 
   public async assertUnpaidMode(
     tenantId: TenantDocument['_id'],
-    serviceId: ServiceDocument['_id'],
+    service: Pick<ServiceDocument, '_id' | 'base_price_minor'>,
     session: ClientSession,
   ): Promise<void> {
-    const mode =
-      (await this.payments.executionSnapshot(tenantId, serviceId, session)).serviceConfiguration
-        ?.payment_mode ?? 'none';
-    if (mode !== 'none') throw new PaidBookingError(409, 'payment_configuration_changed');
+    if ((await this.paymentMode(tenantId, service, session)) !== 'none')
+      throw new PaidBookingError(409, 'payment_configuration_changed');
   }
 
   public async create(input: {
