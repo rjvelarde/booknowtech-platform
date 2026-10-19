@@ -2204,6 +2204,7 @@ export async function migrateDatabase(db: Db): Promise<void> {
     },
   ]);
   await db.collection('stripe_connect_operations').createIndexes([
+    { key: { stripe_account_id: 1 }, name: 'stripe_connect_operations_account_ownership' },
     { key: { public_id: 1 }, name: 'stripe_connect_operations_public_id_unique', unique: true },
     {
       key: { tenant_id: 1, request_id: 1, operation_type: 1 },
@@ -2445,6 +2446,10 @@ export async function migrateDatabase(db: Db): Promise<void> {
     },
   ]);
   await db.collection('audit_logs').createIndexes([
+    {
+      key: { 'metadata.stripe_account_id': 1, event: 1 },
+      name: 'audit_logs_stripe_account_ownership',
+    },
     { key: { public_id: 1 }, name: 'audit_logs_public_id_unique', unique: true },
     { key: { actor_user_id: 1, created_at: -1 }, name: 'audit_logs_actor_created' },
     { key: { tenant_id: 1, created_at: -1 }, name: 'audit_logs_tenant_created' },

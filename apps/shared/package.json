@@ -14,12 +14,17 @@
       "types": "./src/hostname.ts",
       "browser": "./src/hostname.ts",
       "import": "./dist/hostname.js"
+    },
+    "./stripe-ownership": {
+      "types": "./src/stripe-ownership.ts",
+      "import": "./dist/stripe-ownership.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test:unit": "vitest run"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

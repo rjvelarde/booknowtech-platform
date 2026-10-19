@@ -1,3 +1,8 @@
+import {
+  type ExternalAccountRule,
+  externalAccountManifest,
+  matchExternalRule,
+} from '@booknowtech/shared/stripe-ownership';
 import { randomUUID } from 'node:crypto';
 import type { ClientSession, Collection, Db, ObjectId } from 'mongodb';
 import type { Logger } from 'pino';
@@ -32,6 +37,10 @@ export interface StripeProjection {
 
 interface StripeWebhookEventDocument {
   _id: ObjectId;
+  public_id: string;
+  endpoint_kind: string;
+  livemode: boolean;
+  payload_hash: string;
   stripe_event_id: string;
   stripe_account_id: string | null;
   event_type: string;
@@ -74,6 +83,7 @@ export function startStripeWebhookWorker(
   stripeSecretKey: string,
   logger: Logger,
   paymentOptions: PaymentFinalizationOptions,
+  environment: string,
 ) {
   const stripe = new Stripe(stripeSecretKey, { maxNetworkRetries: 2, timeout: 10_000 });
   let stopped = false;
@@ -83,9 +93,13 @@ export function startStripeWebhookWorker(
     if (stopped) return;
     active = processStripeWebhookEvent(
       db,
-      { retrieveAccount: (id) => stripe.accounts.retrieve(id) },
+      {
+        retrieveAccount: (id) => stripe.accounts.retrieve(id),
+        retrievePlatform: () => stripe.accounts.retrieve(),
+      },
       logger,
       paymentOptions,
+      { environment },
     ).catch((error: unknown) =>
       logger.error({
         event: 'stripe_webhook.poll_failed',
@@ -107,6 +121,7 @@ export function startStripeWebhookWorker(
 
 export interface StripeAccountReader {
   retrieveAccount(accountId: string): Promise<Stripe.Account>;
+  retrievePlatform?(): Promise<{ id: string }>;
 }
 
 export async function processStripeWebhookEvent(
@@ -114,6 +129,7 @@ export async function processStripeWebhookEvent(
   stripe: StripeAccountReader,
   logger: Logger,
   paymentOptions?: PaymentFinalizationOptions,
+  ownership?: { environment: string; manifest?: readonly ExternalAccountRule[] },
 ) {
   const events = db.collection<StripeWebhookEventDocument>('stripe_webhook_events');
   const now = new Date();
@@ -142,6 +158,7 @@ export async function processStripeWebhookEvent(
   try {
     const accountId = event.stripe_account_id;
     if (!accountId) throw new Error('unresolved_account');
+    if (await classifyExternalEvent(db, stripe, event, processingToken, ownership)) return;
     const paymentEvent = event.event_type.startsWith('payment_intent.');
     const externalEvidenceEvent =
       event.event_type.startsWith('refund.') || event.event_type.startsWith('charge.dispute.');
@@ -273,7 +290,15 @@ export async function processStripeWebhookEvent(
 }
 
 function failureCategory(reason: unknown): string {
-  if (reason instanceof Error && ['unresolved_account', 'claim_lost'].includes(reason.message))
+  if (
+    reason instanceof Error &&
+    [
+      'unresolved_account',
+      'claim_lost',
+      'stripe_account_ownership_conflict',
+      'external_ownership_unverified',
+    ].includes(reason.message)
+  )
     return reason.message;
   return 'stripe_processing_failed';
 }
@@ -382,4 +407,121 @@ async function audit(
     },
     { session },
   );
+}
+
+async function classifyExternalEvent(
+  db: Db,
+  stripe: StripeAccountReader,
+  event: StripeWebhookEventDocument,
+  token: string,
+  context?: { environment: string; manifest?: readonly ExternalAccountRule[] },
+): Promise<boolean> {
+  const manifest = context?.manifest ?? externalAccountManifest;
+  if (!manifest.some((rule) => rule.accountId === event.stripe_account_id)) return false;
+  // A manifest reservation and ANY retained BookNowTech reference are a conflict, including inactive accounts.
+  const session = db.client.startSession();
+  try {
+    return await session.withTransaction(async () => {
+      for (const name of ['tenant_stripe_accounts', 'payment_attempts', 'payment_ledger_entries']) {
+        if (
+          await db
+            .collection(name)
+            .findOne({ stripe_account_id: event.stripe_account_id }, { session })
+        )
+          throw new Error('stripe_account_ownership_conflict');
+      }
+      if (
+        await db
+          .collection('stripe_connect_operations')
+          .findOne({ stripe_account_id: event.stripe_account_id }, { session })
+      )
+        throw new Error('stripe_account_ownership_conflict');
+      if (
+        await db.collection('audit_logs').findOne(
+          {
+            event: { $regex: '^stripe_connect_' },
+            'metadata.stripe_account_id': event.stripe_account_id,
+          },
+          { session, maxTimeMS: 5000 },
+        )
+      )
+        throw new Error('stripe_account_ownership_conflict');
+      if (
+        event.tenant_id !== null ||
+        event.endpoint_kind !== 'connect' ||
+        !context ||
+        !stripe.retrievePlatform
+      )
+        throw new Error('external_ownership_unverified');
+      // This is GET /v1/account with the worker credential, never a Stripe-Account header.
+      const platform = await stripe.retrievePlatform();
+      const rule = matchExternalRule(
+        {
+          accountId: event.stripe_account_id!,
+          platformAccountId: platform.id,
+          environment: context.environment,
+          livemode: event.livemode,
+          eventType: event.event_type,
+          now: new Date(),
+        },
+        manifest,
+      );
+      if (!rule) throw new Error('external_ownership_unverified');
+      const now = new Date();
+      const classification = {
+        manifest_version: rule.version,
+        owning_application: rule.owningApplication,
+        platform_account_id: rule.platformAccountId,
+        environment: rule.environment,
+        livemode: rule.livemode,
+        stripe_account_id: rule.accountId,
+        evidence_reference: rule.evidenceReference,
+        approved_by: rule.approvedBy,
+        approved_at: rule.approvedAt,
+        review_at: rule.reviewAt,
+        expires_at: rule.expiresAt,
+        classified_at: now,
+      };
+      const result = await db.collection('stripe_webhook_events').updateOne(
+        { _id: event._id, processing_status: 'processing', processing_token: token },
+        {
+          $set: {
+            processing_status: 'external',
+            external_disposition: classification,
+            processed_at: now,
+            processing_started_at: null,
+            processing_token: null,
+            failure_category: null,
+            updated_at: now,
+          },
+          $inc: { attempt_count: 1 },
+        },
+        { session },
+      );
+      if (result.matchedCount !== 1) throw new Error('claim_lost');
+      await db.collection('audit_logs').insertOne(
+        {
+          public_id: randomUUID(),
+          event: 'stripe_webhook.classified_external',
+          outcome: 'success',
+          actor_user_id: null,
+          tenant_id: null,
+          request_id: event.received_request_id,
+          metadata: {
+            ...classification,
+            classified_at: now.toISOString(),
+            stripe_event_id: event.stripe_event_id,
+            webhook_event_public_id: event.public_id,
+            payload_hash: event.payload_hash,
+            event_type: event.event_type,
+          },
+          created_at: now,
+        },
+        { session },
+      );
+      return true;
+    });
+  } finally {
+    await session.endSession();
+  }
 }

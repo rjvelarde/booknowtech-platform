@@ -1,3 +1,4 @@
+import { isReservedExternalAccount } from '@booknowtech/shared/stripe-ownership';
 import { createHash, randomUUID } from 'node:crypto';
 import { type ClientSession, type Db, MongoServerError, type ObjectId } from 'mongodb';
 
@@ -195,6 +196,7 @@ export class ConnectStore {
     view: ConnectAccountView,
   ) {
     const now = new Date();
+    if (isReservedExternalAccount(view.id)) throw new Error('stripe_account_ownership_conflict');
     const account = accountDocument(input, view, now);
     const session = this.db.client.startSession();
     try {

@@ -215,4 +215,41 @@ suite('Stripe Connect persistence boundaries', () => {
         .countDocuments({ stripe_event_id: event.id, tenant_id: tenantA }),
     ).toBe(1);
   });
+  it('blocks association activation for the reserved external account before any write', async () => {
+    const before = await db.collection('tenant_stripe_accounts').countDocuments();
+    await expect(
+      store.completeAccount(actor(), randomUUID(), { id: 'acct_1TbN5X7paPYfpGLT' } as Parameters<
+        ConnectStore['completeAccount']
+      >[2]),
+    ).rejects.toThrow('stripe_account_ownership_conflict');
+    expect(await db.collection('tenant_stripe_accounts').countDocuments()).toBe(before);
+  });
+  it('deduplicates concurrent deliveries and rejects an event ID with a different payload hash', async () => {
+    const event = {
+      id: 'evt_external_concurrent',
+      type: 'account.updated',
+      account: 'acct_1TbN5X7paPYfpGLT',
+      created: new Date(),
+      apiVersion: '2025-01-01',
+      livemode: false,
+      accountView: null,
+      paymentIntentView: null,
+      financialEvidenceView: null,
+    };
+    const webhookStore = new StripeWebhookStore(db);
+    const input = {
+      event,
+      endpointKind: 'connect' as const,
+      requestId: randomUUID(),
+      payloadHash: 'd'.repeat(64),
+    };
+    const results = await Promise.all(Array.from({ length: 5 }, () => webhookStore.ingest(input)));
+    expect(results.filter((r) => !r.duplicate)).toHaveLength(1);
+    expect(
+      await db.collection('stripe_webhook_events').countDocuments({ stripe_event_id: event.id }),
+    ).toBe(1);
+    await expect(webhookStore.ingest({ ...input, payloadHash: 'e'.repeat(64) })).rejects.toThrow(
+      'stripe_event_payload_mismatch',
+    );
+  });
 });
