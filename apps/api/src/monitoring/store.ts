@@ -45,6 +45,7 @@ export interface MonitoringSnapshot {
   stripeProcessingCount: number;
   stripeFailedCount: number;
   stripeHistoricalTerminalFailedCount: number;
+  stripeExternalCount?: number;
   paymentManualReviewCount: number;
   paymentOldestManualReviewAt: Date | null;
   paymentFinalizationFailureCount: number;
@@ -143,6 +144,7 @@ export class MongoMonitoringReader implements MonitoringReader {
         )
         .next(),
       stripeAcknowledgements.countDocuments({}, { maxTimeMS }),
+      stripeEvents.countDocuments({ processing_status: 'external' }, { maxTimeMS }),
       paymentAttempts.countDocuments({ state: 'manual_review' }, { maxTimeMS }),
       paymentAttempts.findOne(
         { state: 'manual_review' },
@@ -303,6 +305,7 @@ export class MongoMonitoringReader implements MonitoringReader {
       stripeProcessingCount,
       stripeActionableFailed,
       stripeHistoricalTerminalFailedCount,
+      stripeExternalCount,
       paymentManualReviewCount,
       paymentOldestManualReview,
       paymentFinalizationFailureCount,
@@ -330,6 +333,7 @@ export class MongoMonitoringReader implements MonitoringReader {
       stripeProcessingCount,
       stripeFailedCount: stripeActionableFailed?.count ?? 0,
       stripeHistoricalTerminalFailedCount,
+      stripeExternalCount,
       paymentManualReviewCount,
       paymentOldestManualReviewAt: paymentOldestManualReview?.updated_at ?? null,
       paymentFinalizationFailureCount,

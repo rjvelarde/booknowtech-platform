@@ -113,6 +113,7 @@ describe('internal monitoring route', () => {
           processing_count: 0,
           failed_count: 0,
           historical_terminal_failed_count: 0,
+          external_count: 0,
         },
         payments: {
           manual_review_count: 0,

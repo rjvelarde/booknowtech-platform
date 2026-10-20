@@ -46,6 +46,7 @@ async function start(): Promise<void> {
           paymentTermsVersion: environment.BOOKNOWTECH_PAYMENT_TERMS_VERSION,
           paymentTermsDocumentSha256: environment.BOOKNOWTECH_PAYMENT_TERMS_TEXT_SHA256,
         },
+        environment.ENVIRONMENT_ID,
       )
     : null;
   const reconciliationStripe = environment.STRIPE_SECRET_KEY

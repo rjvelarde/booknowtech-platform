@@ -69,6 +69,7 @@ const monitoringDataSchema = {
         'processing_count',
         'failed_count',
         'historical_terminal_failed_count',
+        'external_count',
       ],
       properties: {
         pending_count: nullableInteger,
@@ -76,6 +77,7 @@ const monitoringDataSchema = {
         processing_count: nullableInteger,
         failed_count: nullableInteger,
         historical_terminal_failed_count: nullableInteger,
+        external_count: nullableInteger,
       },
     },
     payments: {
@@ -255,6 +257,7 @@ function monitoringResponse(environment: Environment, snapshot: MonitoringSnapsh
         processing_count: snapshot.stripeProcessingCount,
         failed_count: snapshot.stripeFailedCount,
         historical_terminal_failed_count: snapshot.stripeHistoricalTerminalFailedCount,
+        external_count: snapshot.stripeExternalCount ?? 0,
       },
       payments: {
         manual_review_count: snapshot.paymentManualReviewCount,
@@ -303,6 +306,7 @@ function unavailableData(environment: Environment) {
       processing_count: null,
       failed_count: null,
       historical_terminal_failed_count: null,
+      external_count: null,
     },
     payments: {
       manual_review_count: null,

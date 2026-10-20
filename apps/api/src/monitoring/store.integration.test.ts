@@ -135,6 +135,7 @@ suite('Mongo monitoring reader', () => {
       stripeProcessingCount: 1,
       stripeFailedCount: 1,
       stripeHistoricalTerminalFailedCount: 0,
+      stripeExternalCount: 0,
       paymentManualReviewCount: 2,
       paymentOldestManualReviewAt: new Date(now.valueOf() - 90_000),
       paymentFinalizationFailureCount: 1,
@@ -308,5 +309,14 @@ suite('Mongo monitoring reader', () => {
     expect(plans).toContain('notification_outbox_monitor_processing');
     expect(plans).toContain('notification_outbox_monitor_failed');
     expect(plans).not.toContain('COLLSCAN');
+  });
+  it('counts external dispositions separately without hiding unknown failures', async () => {
+    await db
+      .collection('stripe_webhook_events')
+      .insertMany([{ processing_status: 'external' }, { processing_status: 'failed' }]);
+    const result = await new MongoMonitoringReader(db).read('staging', now);
+    expect(result.stripeExternalCount).toBe(1);
+    expect(result.stripeFailedCount).toBe(1);
+    expect(result.stripeHistoricalTerminalFailedCount).toBe(0);
   });
 });
