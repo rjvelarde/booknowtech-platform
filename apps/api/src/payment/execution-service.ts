@@ -71,17 +71,21 @@ export class PaymentExecutionService {
         clientSecret: null,
         connectedAccountId: input.connectedAccountId,
       });
-    if (this.requireReadinessGrant && !input.readinessGrant)
-      throw new Error('payment_readiness_grant_required');
-    if (input.readinessGrant) {
-      const current = await this.store.readinessGrantCurrent(input.readinessGrant);
-      if (
-        !current ||
-        input.readinessGrant.connectedAccountId !== input.connectedAccountId ||
-        input.readinessGrant.accountPublicId !== input.attempt.tenant_stripe_account_public_id
-      )
-        throw new Error('payment_readiness_grant_invalid');
-    }
+    const assertReadiness = async () => {
+      if (this.requireReadinessGrant && !input.readinessGrant)
+        throw new Error('payment_readiness_grant_required');
+      if (input.readinessGrant) {
+        const current = await this.store.readinessGrantCurrent(input.readinessGrant);
+        if (
+          !current ||
+          input.readinessGrant.tenantId.toHexString() !== input.tenantId.toHexString() ||
+          input.readinessGrant.connectedAccountId !== input.connectedAccountId ||
+          input.readinessGrant.accountPublicId !== input.attempt.tenant_stripe_account_public_id
+        )
+          throw new Error('payment_readiness_grant_invalid');
+      }
+    };
+    await assertReadiness();
     const attempt = input.attempt.stripe_payment_intent_id
       ? input.attempt
       : (
@@ -91,6 +95,22 @@ export class PaymentExecutionService {
             event: 'begin_stripe_creation',
           })
         ).attempt;
+    // The local transition can block long enough to cross the readiness boundary.
+    // Revalidate after it, immediately before any Stripe execution or credential retrieval.
+    await assertReadiness();
+    if (
+      attempt.expires_at <= new Date() ||
+      attempt.slot_released ||
+      (!attempt.stripe_payment_intent_id && attempt.state !== 'stripe_creation_processing')
+    )
+      throw new Error('payment_attempt_not_executable');
+    // Keep the time check synchronous after the final awaited database validation.
+    if (
+      input.readinessGrant &&
+      (!Number.isFinite(input.readinessGrant.refreshedAt.valueOf()) ||
+        input.readinessGrant.refreshedAt.valueOf() < Date.now() - 900_000)
+    )
+      throw new Error('payment_readiness_grant_invalid');
     const intent = attempt.stripe_payment_intent_id
       ? await this.stripe.retrievePaymentIntent({
           connectedAccountId: input.connectedAccountId,

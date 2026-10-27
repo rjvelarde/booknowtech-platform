@@ -124,6 +124,21 @@ export async function processPaymentReconciliation(
   const attempt = await claimAttempt(db, now);
   if (!attempt) return false;
   const claimToken = attempt.claim_token!;
+  // requested proves Stripe creation has never begun. Compete atomically with the
+  // API's requested -> stripe_creation_processing transition before releasing.
+  if (attempt.state === 'requested') {
+    try {
+      await commitExpiry(db, attempt, claimToken, now);
+    } finally {
+      await db
+        .collection<Attempt>('payment_attempts')
+        .updateOne(
+          { _id: attempt._id, claim_token: claimToken },
+          { $set: { claim_token: null, claim_started_at: null } },
+        );
+    }
+    return true;
+  }
   try {
     const account = await db.collection<Account>('tenant_stripe_accounts').findOne({
       tenant_id: attempt.tenant_id,
@@ -215,6 +230,7 @@ async function claimAttempt(db: Db, now: Date): Promise<Attempt | null> {
   };
   return (
     (await claim('succeeded_unfinalized')) ??
+    (await claim('requested', { expires_at: { $lte: now }, stripe_payment_intent_id: null })) ??
     (await claim({ $in: CANDIDATE_STATES.filter((state) => state !== 'succeeded_unfinalized') })) ??
     (await claim(
       { $eq: 'manual_review' },
@@ -408,12 +424,19 @@ async function commitExpiry(
   try {
     await session.withTransaction(async () => {
       const updated = await db.collection<Attempt>('payment_attempts').updateOne(
-        { _id: attempt._id, claim_token: claimToken, slot_released: false },
+        {
+          _id: attempt._id,
+          claim_token: claimToken,
+          slot_released: false,
+          ...(attempt.state === 'requested'
+            ? { state: 'requested', stripe_payment_intent_id: null }
+            : {}),
+        },
         {
           $set: {
             state: 'expired',
             slot_released: true,
-            stripe_payment_intent_status: 'canceled',
+            stripe_payment_intent_status: attempt.state === 'requested' ? null : 'canceled',
             claim_token: null,
             claim_started_at: null,
             failure_category: 'expired',

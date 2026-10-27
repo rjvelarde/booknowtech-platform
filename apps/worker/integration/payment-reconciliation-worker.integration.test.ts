@@ -24,6 +24,87 @@ suite('payment reconciliation worker', () => {
     await client.close();
   });
 
+  it('expires an abandoned requested attempt exactly once under concurrent workers without Stripe calls', async () => {
+    const seeded = await seed({ state: 'requested', expired: true });
+    await db
+      .collection('payment_attempts')
+      .updateOne(
+        { _id: seeded.attemptId },
+        { $set: { stripe_payment_intent_id: null, stripe_payment_intent_status: null } },
+      );
+    const stripe = {
+      retrievePaymentIntent: () => Promise.reject(new Error('unexpected_stripe_retrieval')),
+      cancelPaymentIntent: () => Promise.reject(new Error('unexpected_stripe_cancel')),
+    };
+    await Promise.all(
+      Array.from({ length: 5 }, () =>
+        processPaymentReconciliation(db, stripe, options, seeded.now),
+      ),
+    );
+    expect(
+      await db.collection('payment_attempts').findOne({ _id: seeded.attemptId }),
+    ).toMatchObject({
+      state: 'expired',
+      slot_released: true,
+      stripe_payment_intent_status: null,
+      attempt_count: 1,
+    });
+    expect(
+      await db.collection('appointments').findOne({ _id: seeded.appointmentId }),
+    ).toMatchObject({ status: 'payment_expired', version: 2 });
+    expect(
+      await db
+        .collection('payment_ledger_entries')
+        .countDocuments({ payment_attempt_id: seeded.attemptId }),
+    ).toBe(1);
+    expect(await processPaymentReconciliation(db, stripe, options, seeded.now)).toBe(false);
+  });
+
+  it('preserves the retry window for a requested attempt', async () => {
+    const seeded = await seed({ state: 'requested', expired: false });
+    await db
+      .collection('payment_attempts')
+      .updateOne(
+        { _id: seeded.attemptId },
+        { $set: { stripe_payment_intent_id: null, stripe_payment_intent_status: null } },
+      );
+    expect(await processPaymentReconciliation(db, adapter({}), options, seeded.now)).toBe(false);
+    expect(
+      await db.collection('payment_attempts').findOne({ _id: seeded.attemptId }),
+    ).toMatchObject({ state: 'requested', slot_released: false });
+    await processPaymentReconciliation(
+      db,
+      adapter({}),
+      options,
+      new Date(seeded.now.valueOf() + 900_000),
+    );
+  });
+
+  it('escalates ambiguous unlinked Stripe creation with bounded retries and retains the slot', async () => {
+    const seeded = await seed({ state: 'stripe_creation_processing', expired: true });
+    await db
+      .collection('payment_attempts')
+      .updateOne(
+        { _id: seeded.attemptId },
+        { $set: { stripe_payment_intent_id: null, stripe_payment_intent_status: null } },
+      );
+    for (let index = 0; index < 5; index += 1) {
+      const current = (await db.collection('payment_attempts').findOne({ _id: seeded.attemptId }))!;
+      await processPaymentReconciliation(db, adapter({}), options, current.next_attempt_at as Date);
+    }
+    expect(
+      await db.collection('payment_attempts').findOne({ _id: seeded.attemptId }),
+    ).toMatchObject({ state: 'manual_review', slot_released: false, attempt_count: 5 });
+    expect(
+      await db.collection('appointments').findOne({ _id: seeded.appointmentId }),
+    ).toMatchObject({ status: 'payment_pending' });
+    expect(
+      await db
+        .collection('payment_operations_alerts')
+        .countDocuments({ payment_attempt_id: seeded.attemptId, status: 'open' }),
+    ).toBe(1);
+  });
+
   it('retrieves, cancels, expires, and releases an unpaid hold exactly once', async () => {
     const seeded = await seed({ state: 'requires_payment_method', expired: true });
     let cancellations = 0;

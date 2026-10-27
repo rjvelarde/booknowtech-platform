@@ -648,6 +648,113 @@ suite('PR 14B.2 paid public-booking transaction', () => {
     ).toMatchObject({ state: 'stale', slot_released: true });
   });
 
+  it('retains one committed requested graph after grant invalidation and recovers the same attempt on retry', async () => {
+    await db
+      .collection('tenant_stripe_accounts')
+      .updateOne(
+        { tenant_id: tenantId, active: true },
+        { $set: { readiness_generation: 7, last_synced_at: new Date() } },
+      );
+    const account = (await payments.activeStripeAccount(tenantId))!;
+    const grant = {
+      tenantId,
+      accountPublicId: account.public_id,
+      connectedAccountId: account.stripe_account_id,
+      readinessGeneration: 7,
+      refreshedAt: account.last_synced_at!,
+    };
+    const original = payments.readinessGrantCurrent.bind(payments);
+    let invalidate = true;
+    const spy = vi
+      .spyOn(payments, 'readinessGrantCurrent')
+      .mockImplementation(async (value, session) => {
+        if (!session && invalidate) {
+          invalidate = false;
+          await db
+            .collection('tenant_stripe_accounts')
+            .updateOne(
+              { tenant_id: tenantId, active: true },
+              { $inc: { readiness_generation: 1 } },
+            );
+        }
+        return original(value, session);
+      });
+    const orchestrator = new PublicPaidBookingOrchestrator(
+      environment,
+      admin,
+      payments,
+      new PaymentExecutionService(payments, stripe, true),
+      { ensureFresh: () => Promise.resolve(grant) } as never,
+    );
+    const input = {
+      tenant,
+      body: bookingBody(),
+      idempotencyKey: randomUUID(),
+      requestId: randomUUID(),
+      correlationId: randomUUID(),
+      ipAddress: '192.0.2.10',
+      initialService: service,
+      initialProvider: provider,
+      initialAssignment: assignment,
+      hostname: 'brazilian-wax.booknowtech.com',
+    };
+    const appointments = await db.collection('appointments').countDocuments();
+    const attempts = await db.collection('payment_attempts').countDocuments();
+    const stripeCalls = stripe.createDirectChargePaymentIntent.mock.calls.length;
+    try {
+      await expect(orchestrator.create(input)).rejects.toMatchObject({
+        status: 503,
+        code: 'payment_temporarily_unavailable',
+      });
+      const pending = await payments.getAttemptByIdempotency(
+        tenantId,
+        (await import('./domain.js')).hashPaymentIdempotencyKey(input.idempotencyKey),
+      );
+      expect(pending).toMatchObject({
+        state: 'requested',
+        stripe_payment_intent_id: null,
+        slot_released: false,
+      });
+      expect(stripe.createDirectChargePaymentIntent).toHaveBeenCalledTimes(stripeCalls);
+      grant.readinessGeneration = 8;
+      const response = await orchestrator.create(input);
+      expect(response.payment_attempt_public_id).toBe(pending!.public_id);
+      expect(await db.collection('appointments').countDocuments()).toBe(appointments + 1);
+      expect(await db.collection('payment_attempts').countDocuments()).toBe(attempts + 1);
+      expect(
+        await db
+          .collection('payment_ledger_entries')
+          .countDocuments({ payment_attempt_id: pending!._id }),
+      ).toBe(1);
+      expect(stripe.createDirectChargePaymentIntent).toHaveBeenCalledTimes(stripeCalls + 1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('rejects a same-generation database grant once its account evidence ages beyond 900 seconds', async () => {
+    const account = (await payments.activeStripeAccount(tenantId))!;
+    const staleAt = new Date(Date.now() - 900_001);
+    await db
+      .collection('tenant_stripe_accounts')
+      .updateOne({ tenant_id: tenantId, active: true }, { $set: { last_synced_at: staleAt } });
+    try {
+      expect(
+        await payments.readinessGrantCurrent({
+          tenantId,
+          accountPublicId: account.public_id,
+          connectedAccountId: account.stripe_account_id,
+          readinessGeneration: account.readiness_generation!,
+          refreshedAt: staleAt,
+        }),
+      ).toBeNull();
+    } finally {
+      await db
+        .collection('tenant_stripe_accounts')
+        .updateOne({ tenant_id: tenantId, active: true }, { $set: { last_synced_at: new Date() } });
+    }
+  });
+
   function bookingBody() {
     return {
       service_public_id: servicePublicId,
