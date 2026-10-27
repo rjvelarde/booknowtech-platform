@@ -1,6 +1,8 @@
 # Gate 2E readiness and recovery review
 
-Status: BLOCKED pending dependency remediation/review and approved staging deployment/QA.
+Historical implementation-pass status: BLOCKED pending dependency remediation/review and
+approved staging deployment/QA. See [security and staging remediation](GATE_2E_SECURITY_STAGING_REMEDIATION.md)
+and the current PR #48 evidence for follow-up results.
 Evidence date: October 27, 2026, America/New_York. No production configuration, payment
 execution flag, tenant/service configuration, shared Stripe configuration, or Yii changes.
 No Stripe API object creation, merge, or deployment was performed.

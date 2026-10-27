@@ -19,7 +19,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "sirv-cli": "3.0.1",
-    "zod": "4.4.3"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "7.0.0",
@@ -29,7 +29,7 @@
     "@vitejs/plugin-react": "6.0.4",
     "jsdom": "29.1.1",
     "typescript": "6.0.3",
-    "vite": "8.1.5",
+    "vite": "8.1.6",
     "vitest": "4.1.10"
   }
 }
