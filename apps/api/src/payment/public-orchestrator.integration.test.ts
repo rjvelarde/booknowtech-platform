@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { MongoClient, ObjectId } from 'mongodb';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { processPaymentReconciliation } from '../../../worker/src/payment-reconciliation-worker.js';
+
 import { AdminStore } from '../admin/store.js';
 import type { Environment } from '../config.js';
 import { migrateDatabase } from '../database/migrate.js';
@@ -753,6 +755,76 @@ suite('PR 14B.2 paid public-booking transaction', () => {
         .collection('tenant_stripe_accounts')
         .updateOne({ tenant_id: tenantId, active: true }, { $set: { last_synced_at: new Date() } });
     }
+  });
+
+  it('expires a requested graph with the real migrated ledger validator and full amount snapshot', async () => {
+    const idempotencyKey = randomUUID();
+    const orchestrator = new PublicPaidBookingOrchestrator(environment, admin, payments, {
+      ensurePaymentIntent: () => Promise.reject(new Error('late_readiness_failure')),
+    } as never);
+    await expect(
+      orchestrator.create({
+        tenant,
+        body: bookingBody(),
+        idempotencyKey,
+        requestId: randomUUID(),
+        correlationId: randomUUID(),
+        ipAddress: '192.0.2.10',
+        initialService: service,
+        initialProvider: provider,
+        initialAssignment: assignment,
+        hostname: 'brazilian-wax.booknowtech.com',
+      }),
+    ).rejects.toMatchObject({ status: 503 });
+    const attempt = (await payments.getAttemptByIdempotency(
+      tenantId,
+      (await import('./domain.js')).hashPaymentIdempotencyKey(idempotencyKey),
+    ))!;
+    expect(attempt).toMatchObject({ state: 'requested', stripe_payment_intent_id: null });
+    const now = new Date();
+    await db
+      .collection('payment_attempts')
+      .updateMany({}, { $set: { next_attempt_at: new Date(now.valueOf() + 3_600_000) } });
+    await db
+      .collection('payment_attempts')
+      .updateOne(
+        { _id: attempt._id },
+        { $set: { expires_at: new Date(now.valueOf() - 1), next_attempt_at: now } },
+      );
+    const stripe = {
+      retrievePaymentIntent: vi.fn().mockRejectedValue(new Error('unexpected_stripe_call')),
+      cancelPaymentIntent: vi.fn().mockRejectedValue(new Error('unexpected_stripe_call')),
+    };
+    const options = {
+      publicAppointmentTokenSecret: 'a'.repeat(64),
+      paymentTermsVersion: 'payments-v1',
+      paymentTermsDocumentSha256: 'b'.repeat(64),
+    };
+    await Promise.all([
+      processPaymentReconciliation(db, stripe, options, now),
+      processPaymentReconciliation(db, stripe, options, now),
+    ]);
+    expect(await db.collection('payment_attempts').findOne({ _id: attempt._id })).toMatchObject({
+      state: 'expired',
+      slot_released: true,
+      stripe_payment_intent_id: null,
+    });
+    expect(
+      await db.collection('appointments').findOne({ _id: attempt.appointment_id }),
+    ).toMatchObject({ status: 'payment_expired' });
+    expect(
+      await db
+        .collection('payment_ledger_entries')
+        .countDocuments({ payment_attempt_id: attempt._id }),
+    ).toBe(2);
+    const expiry = await db
+      .collection('payment_ledger_entries')
+      .findOne({ payment_attempt_id: attempt._id, entry_kind: 'payment_expired' });
+    expect(expiry).not.toBeNull();
+    expect(expiry).not.toHaveProperty('payment_mode');
+    expect(expiry).not.toHaveProperty('fixed_deposit_minor');
+    expect(stripe.retrievePaymentIntent).not.toHaveBeenCalled();
+    expect(stripe.cancelPaymentIntent).not.toHaveBeenCalled();
   });
 
   function bookingBody() {

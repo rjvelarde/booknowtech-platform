@@ -1,6 +1,6 @@
 # PR 48 security and staging remediation
 
-Evidence date: October 27, 2026. Updates existing Gate 2E PR, based on
+Evidence dates: October 27–28, 2026 (America/New_York). Updates existing Gate 2E PR, based on
 `36dc8f01141a7cfd1434ece988d2c8cdf09b3fcb`.
 
 ## Dependency investigation and minimum correction
@@ -33,8 +33,8 @@ Vite moves from 8.1.5 to 8.1.6 in frontend and matching dev-tool paths. Targeted
 version-range overrides pin brace-expansion 5.0.11, nanoid 3.3.18, undici 7.30.1,
 source-map-js 1.2.2, and shell-quote 1.11.0. These are the minimum versions covering
 all reported high/critical findings in each installed major line. No Stripe package,
-React version, Fastify version, MongoDB driver, payment contract, or payment runtime
-implementation is changed. Existing strict peers and 1440-minute minimum release age
+React version, Fastify version, MongoDB driver, or payment contract is changed. The
+additional worker schema correction discovered during QA is described below. Existing strict peers and 1440-minute minimum release age
 remain enforced. No advisories are ignored and audit severity thresholds remain high.
 
 Post-patch audits both exit zero at the existing high threshold:
@@ -85,3 +85,51 @@ checks use the exact candidate with mocked Stripe (execution must never be enabl
 QA). A distinctly tagged synthetic requested hold may prove the deployed worker expiry
 path; retain its evidence and never use Maritime's configuration. The PR's final evidence
 will record actual deployment IDs and observed results; this plan alone is not QA success.
+
+## Approved staging deployment and recovery evidence
+
+The user approved candidate `976d90bd5f4d86f6cda279f4489d075ea44abcb1` after its
+CI passed. Frontend/API/worker deployments succeeded and converged to that SHA:
+
+| Service  | Deployment identifier                |
+| -------- | ------------------------------------ |
+| API      | 6f002848-d6da-4aa2-92c4-d9f41dc1a4dd |
+| Worker   | 1f2a1a73-d78c-44e7-bde7-3bf0b9eaef6c |
+| Frontend | 0a57bd12-6d75-4dd9-8179-9449c30eb227 |
+
+API readiness returned 200 and execution was false. The separately approved audited
+requeue used request ID `5cf61661-fcf4-4d63-939d-ec48ab713707`, operator robert.velarde,
+and the recorded user-approved repair reason. A local command preflight first refused
+missing PORT before database access; the same request was then executed with PORT=3000
+only in that command's process environment. No Railway PORT variable was changed.
+
+The deployed worker repaired the historical attempt to succeeded. Monitoring became 200.
+Before/after evidence: appointment scheduled/version 3 and count 1; one notification;
+four ledger entries including exactly one success; four historical webhook acknowledgements.
+All were unchanged. No Stripe object was created by the recovery.
+
+The candidate boundary harness used a synthetic Stripe adapter: 899999 and 900000 ms
+reached the adapter, while 900001 ms was rejected before any adapter call. Zero real Stripe
+calls were made by this harness; it is candidate-code contract QA, not live paid execution.
+
+## Strict-schema regression discovered before expiry seeding
+
+Inspection before seeding staging synthetic data identified that the worker's appendEvidence
+spread the full amount_snapshot into payment_ledger_entries. Real snapshots contain
+payment_mode and fixed_deposit_minor, which the strict ledger validator forbids. Existing
+worker fixtures omitted these fields and did not apply the migrated ledger validator.
+
+A new API/Mongo integration regression creates a real provisional graph under migrateDatabase,
+retains the full amount snapshot, expires the requested hold, and runs concurrent worker
+reconciliation. Before correction it failed with Document failed validation in appendEvidence;
+transaction rollback correctly prevented a partial slot release. No synthetic staging fixture
+had been seeded when this was found.
+
+The correction explicitly projects the six allowed amount columns into worker ledger evidence.
+It changes no amounts, weakens no validator, and applies equally to expiry/manual-review evidence.
+The regression checks one expiry entry, one appointment/attempt, terminal slot release, no
+payment_mode/fixed_deposit_minor leakage, and zero Stripe calls. The complete verification
+suite passed again: 136 API and 54 worker Mongo integration tests, 474 tests in the unit
+command (including the worker Mongo tests), 22 release-verifier tests, static checks,
+workspace builds, and frontend secret exclusion. This source correction supersedes the
+first staging candidate and requires approval/deployment of its exact SHA before expiry QA.
