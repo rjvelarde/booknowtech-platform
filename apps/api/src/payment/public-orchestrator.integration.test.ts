@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { MongoClient, ObjectId } from 'mongodb';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { processPaymentReconciliation } from '../../../worker/src/payment-reconciliation-worker.js';
+
 import { AdminStore } from '../admin/store.js';
 import type { Environment } from '../config.js';
 import { migrateDatabase } from '../database/migrate.js';
@@ -646,6 +648,183 @@ suite('PR 14B.2 paid public-booking transaction', () => {
         public_id: created.payment_attempt_public_id,
       }),
     ).toMatchObject({ state: 'stale', slot_released: true });
+  });
+
+  it('retains one committed requested graph after grant invalidation and recovers the same attempt on retry', async () => {
+    await db
+      .collection('tenant_stripe_accounts')
+      .updateOne(
+        { tenant_id: tenantId, active: true },
+        { $set: { readiness_generation: 7, last_synced_at: new Date() } },
+      );
+    const account = (await payments.activeStripeAccount(tenantId))!;
+    const grant = {
+      tenantId,
+      accountPublicId: account.public_id,
+      connectedAccountId: account.stripe_account_id,
+      readinessGeneration: 7,
+      refreshedAt: account.last_synced_at!,
+    };
+    const original = payments.readinessGrantCurrent.bind(payments);
+    let invalidate = true;
+    const spy = vi
+      .spyOn(payments, 'readinessGrantCurrent')
+      .mockImplementation(async (value, session) => {
+        if (!session && invalidate) {
+          invalidate = false;
+          await db
+            .collection('tenant_stripe_accounts')
+            .updateOne(
+              { tenant_id: tenantId, active: true },
+              { $inc: { readiness_generation: 1 } },
+            );
+        }
+        return original(value, session);
+      });
+    const orchestrator = new PublicPaidBookingOrchestrator(
+      environment,
+      admin,
+      payments,
+      new PaymentExecutionService(payments, stripe, true),
+      { ensureFresh: () => Promise.resolve(grant) } as never,
+    );
+    const input = {
+      tenant,
+      body: bookingBody(),
+      idempotencyKey: randomUUID(),
+      requestId: randomUUID(),
+      correlationId: randomUUID(),
+      ipAddress: '192.0.2.10',
+      initialService: service,
+      initialProvider: provider,
+      initialAssignment: assignment,
+      hostname: 'brazilian-wax.booknowtech.com',
+    };
+    const appointments = await db.collection('appointments').countDocuments();
+    const attempts = await db.collection('payment_attempts').countDocuments();
+    const stripeCalls = stripe.createDirectChargePaymentIntent.mock.calls.length;
+    try {
+      await expect(orchestrator.create(input)).rejects.toMatchObject({
+        status: 503,
+        code: 'payment_temporarily_unavailable',
+      });
+      const pending = await payments.getAttemptByIdempotency(
+        tenantId,
+        (await import('./domain.js')).hashPaymentIdempotencyKey(input.idempotencyKey),
+      );
+      expect(pending).toMatchObject({
+        state: 'requested',
+        stripe_payment_intent_id: null,
+        slot_released: false,
+      });
+      expect(stripe.createDirectChargePaymentIntent).toHaveBeenCalledTimes(stripeCalls);
+      grant.readinessGeneration = 8;
+      const response = await orchestrator.create(input);
+      expect(response.payment_attempt_public_id).toBe(pending!.public_id);
+      expect(await db.collection('appointments').countDocuments()).toBe(appointments + 1);
+      expect(await db.collection('payment_attempts').countDocuments()).toBe(attempts + 1);
+      expect(
+        await db
+          .collection('payment_ledger_entries')
+          .countDocuments({ payment_attempt_id: pending!._id }),
+      ).toBe(1);
+      expect(stripe.createDirectChargePaymentIntent).toHaveBeenCalledTimes(stripeCalls + 1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('rejects a same-generation database grant once its account evidence ages beyond 900 seconds', async () => {
+    const account = (await payments.activeStripeAccount(tenantId))!;
+    const staleAt = new Date(Date.now() - 900_001);
+    await db
+      .collection('tenant_stripe_accounts')
+      .updateOne({ tenant_id: tenantId, active: true }, { $set: { last_synced_at: staleAt } });
+    try {
+      expect(
+        await payments.readinessGrantCurrent({
+          tenantId,
+          accountPublicId: account.public_id,
+          connectedAccountId: account.stripe_account_id,
+          readinessGeneration: account.readiness_generation!,
+          refreshedAt: staleAt,
+        }),
+      ).toBeNull();
+    } finally {
+      await db
+        .collection('tenant_stripe_accounts')
+        .updateOne({ tenant_id: tenantId, active: true }, { $set: { last_synced_at: new Date() } });
+    }
+  });
+
+  it('expires a requested graph with the real migrated ledger validator and full amount snapshot', async () => {
+    const idempotencyKey = randomUUID();
+    const orchestrator = new PublicPaidBookingOrchestrator(environment, admin, payments, {
+      ensurePaymentIntent: () => Promise.reject(new Error('late_readiness_failure')),
+    } as never);
+    await expect(
+      orchestrator.create({
+        tenant,
+        body: bookingBody(),
+        idempotencyKey,
+        requestId: randomUUID(),
+        correlationId: randomUUID(),
+        ipAddress: '192.0.2.10',
+        initialService: service,
+        initialProvider: provider,
+        initialAssignment: assignment,
+        hostname: 'brazilian-wax.booknowtech.com',
+      }),
+    ).rejects.toMatchObject({ status: 503 });
+    const attempt = (await payments.getAttemptByIdempotency(
+      tenantId,
+      (await import('./domain.js')).hashPaymentIdempotencyKey(idempotencyKey),
+    ))!;
+    expect(attempt).toMatchObject({ state: 'requested', stripe_payment_intent_id: null });
+    const now = new Date();
+    await db
+      .collection('payment_attempts')
+      .updateMany({}, { $set: { next_attempt_at: new Date(now.valueOf() + 3_600_000) } });
+    await db
+      .collection('payment_attempts')
+      .updateOne(
+        { _id: attempt._id },
+        { $set: { expires_at: new Date(now.valueOf() - 1), next_attempt_at: now } },
+      );
+    const stripe = {
+      retrievePaymentIntent: vi.fn().mockRejectedValue(new Error('unexpected_stripe_call')),
+      cancelPaymentIntent: vi.fn().mockRejectedValue(new Error('unexpected_stripe_call')),
+    };
+    const options = {
+      publicAppointmentTokenSecret: 'a'.repeat(64),
+      paymentTermsVersion: 'payments-v1',
+      paymentTermsDocumentSha256: 'b'.repeat(64),
+    };
+    await Promise.all([
+      processPaymentReconciliation(db, stripe, options, now),
+      processPaymentReconciliation(db, stripe, options, now),
+    ]);
+    expect(await db.collection('payment_attempts').findOne({ _id: attempt._id })).toMatchObject({
+      state: 'expired',
+      slot_released: true,
+      stripe_payment_intent_id: null,
+    });
+    expect(
+      await db.collection('appointments').findOne({ _id: attempt.appointment_id }),
+    ).toMatchObject({ status: 'payment_expired' });
+    expect(
+      await db
+        .collection('payment_ledger_entries')
+        .countDocuments({ payment_attempt_id: attempt._id }),
+    ).toBe(2);
+    const expiry = await db
+      .collection('payment_ledger_entries')
+      .findOne({ payment_attempt_id: attempt._id, entry_kind: 'payment_expired' });
+    expect(expiry).not.toBeNull();
+    expect(expiry).not.toHaveProperty('payment_mode');
+    expect(expiry).not.toHaveProperty('fixed_deposit_minor');
+    expect(stripe.retrievePaymentIntent).not.toHaveBeenCalled();
+    expect(stripe.cancelPaymentIntent).not.toHaveBeenCalled();
   });
 
   function bookingBody() {

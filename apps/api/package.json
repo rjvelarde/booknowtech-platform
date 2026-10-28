@@ -27,7 +27,7 @@
     "pino": "10.3.1",
     "stripe": "18.5.0",
     "tldts": "7.4.9",
-    "zod": "4.4.3"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

@@ -72,8 +72,15 @@ confirm one stored event/projection and green monitoring, then confirm redeliver
 
 Account readiness older than 900 seconds is refreshed authoritatively before any new provisional or
 financial record is created. Monitor refresh failures, account identity/mode mismatch, expired refresh
-leases, and readiness-grant rejection. A refresh failure must produce no customer, provisional
-appointment, payment attempt, ledger entry, or PaymentIntent. Disable payment execution immediately
+leases, and readiness-grant rejection. An initial refresh failure must produce no customer,
+provisional appointment, payment attempt, ledger entry, or PaymentIntent. A grant that expires or
+changes after the provisional transaction commits blocks Stripe execution; it does not erase the
+committed idempotency evidence. Retry the same request/key while the hold remains valid. An expired
+`requested` attempt with no intent is transactionally expired and its slot released exactly once by
+the worker. `stripe_creation_processing` without a linked intent is ambiguous: retain the slot and
+use bounded reconciliation followed by an operations alert/manual review. Never infer Stripe absence
+from a null local intent ID once creation has begun. The final execution check repeats generation,
+account/tenant identity, and the moving 900-second cutoff after the local transition. Disable payment execution immediately
 if these invariants cannot be observed. Existing expiry, reconciliation, and finalization continue
 while new execution is disabled.
 

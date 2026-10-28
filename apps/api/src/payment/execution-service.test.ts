@@ -1,12 +1,108 @@
 import { randomUUID } from 'node:crypto';
 
 import { ObjectId } from 'mongodb';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PaymentExecutionService, stripePaymentIntentIdempotencyKey } from './execution-service.js';
 import type { PaymentAttemptDocument, PaymentFoundationStore } from './store.js';
 
 describe('PR 14B.2 PaymentIntent execution recovery', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it.each([899_999, 900_000, 900_001])(
+    'checks freshness after the local transition at %i ms',
+    async (age) => {
+      vi.useFakeTimers();
+      const now = new Date('2026-10-27T12:00:00Z');
+      vi.setSystemTime(now);
+      const attempt = attemptFixture();
+      const store = {
+        readinessGrantCurrent: vi.fn().mockResolvedValue({}),
+        transitionAttempt: vi.fn().mockImplementation(() => {
+          vi.setSystemTime(new Date(now.valueOf() + age));
+          return {
+            attempt: {
+              ...attempt,
+              state: 'stripe_creation_processing',
+              expires_at: new Date(now.valueOf() + 1_800_000),
+            },
+          };
+        }),
+        linkPaymentIntent: vi
+          .fn()
+          .mockResolvedValue({ ...attempt, state: 'requires_payment_method' }),
+      };
+      const stripe = {
+        createDirectChargePaymentIntent: vi.fn().mockResolvedValue({
+          id: 'pi_test',
+          status: 'requires_payment_method',
+          clientSecret: 'secret',
+          amount: 2625,
+          applicationFeeAmount: 125,
+          currency: 'usd',
+        }),
+        retrievePaymentIntent: vi.fn(),
+        cancelPaymentIntent: vi.fn(),
+      };
+      const service = new PaymentExecutionService(
+        store as unknown as PaymentFoundationStore,
+        stripe,
+        true,
+      );
+      const result = service.ensurePaymentIntent({
+        ...executionInput(attempt),
+        readinessGrant: {
+          tenantId: attempt.tenant_id,
+          accountPublicId: attempt.tenant_stripe_account_public_id,
+          connectedAccountId: 'acct_server_resolved',
+          readinessGeneration: 3,
+          refreshedAt: now,
+        },
+      });
+      if (age > 900_000) {
+        await expect(result).rejects.toThrow('payment_readiness_grant_invalid');
+        expect(stripe.createDirectChargePaymentIntent).not.toHaveBeenCalled();
+      } else {
+        await result;
+        expect(stripe.createDirectChargePaymentIntent).toHaveBeenCalledOnce();
+      }
+      expect(store.readinessGrantCurrent).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('refuses a grant invalidated during the local transition', async () => {
+    const attempt = attemptFixture();
+    const store = {
+      readinessGrantCurrent: vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce(null),
+      transitionAttempt: vi
+        .fn()
+        .mockResolvedValue({ attempt: { ...attempt, state: 'stripe_creation_processing' } }),
+    };
+    const stripe = {
+      createDirectChargePaymentIntent: vi.fn(),
+      retrievePaymentIntent: vi.fn(),
+      cancelPaymentIntent: vi.fn(),
+    };
+    const service = new PaymentExecutionService(
+      store as unknown as PaymentFoundationStore,
+      stripe,
+      true,
+    );
+    await expect(
+      service.ensurePaymentIntent({
+        ...executionInput(attempt),
+        readinessGrant: {
+          tenantId: attempt.tenant_id,
+          accountPublicId: attempt.tenant_stripe_account_public_id,
+          connectedAccountId: 'acct_server_resolved',
+          readinessGeneration: 3,
+          refreshedAt: new Date(),
+        },
+      }),
+    ).rejects.toThrow('payment_readiness_grant_invalid');
+    expect(stripe.createDirectChargePaymentIntent).not.toHaveBeenCalled();
+  });
+
   it('uses one deterministic Stripe key and returns but does not persist the client secret', async () => {
     const attempt = attemptFixture();
     const linked = {

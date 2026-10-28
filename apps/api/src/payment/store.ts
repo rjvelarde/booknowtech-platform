@@ -714,7 +714,9 @@ export class PaymentFoundationStore {
         stripe_account_id: grant.connectedAccountId,
         active: true,
         readiness_generation: grant.readinessGeneration,
-        last_synced_at: { $gte: grant.refreshedAt },
+        last_synced_at: {
+          $gte: new Date(Math.max(grant.refreshedAt.valueOf(), Date.now() - 900_000)),
+        },
       },
       session ? { session } : undefined,
     );
@@ -856,6 +858,8 @@ export class PaymentFoundationStore {
         public_id: input.attemptPublicId,
       });
       if (!attempt) throw new Error('payment_attempt_not_found');
+      if (input.event === 'begin_stripe_creation' && attempt.expires_at <= new Date())
+        throw new Error('payment_attempt_expired');
       const appointment = await this.appointments.findOne({
         _id: attempt.appointment_id,
         tenant_id: input.tenantId,
@@ -877,6 +881,9 @@ export class PaymentFoundationStore {
               tenant_id: input.tenantId,
               state: attempt.state,
               slot_released: attempt.slot_released,
+              ...(input.event === 'begin_stripe_creation'
+                ? { expires_at: { $gt: new Date() } }
+                : {}),
             },
             {
               $set: {
